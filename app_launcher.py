@@ -23,6 +23,9 @@ except ImportError as e:
     print("This requires tkinter, Pillow (PIL), and pystray")
     sys.exit(1)
 
+# Application Version
+__version__ = "1.0.0"
+
 # Detect if we're running as a frozen executable
 IS_FROZEN = getattr(sys, 'frozen', False)
 if IS_FROZEN:
@@ -53,7 +56,7 @@ class AppWindow:
         self.tray_icon = None
         
         # Set up window
-        self.root.title("LumaSuite")
+        self.root.title(f"LumaSuite v{__version__}")
         self.root.geometry("600x500")
         self.root.resizable(False, False)
         
@@ -131,6 +134,16 @@ class AppWindow:
             bg="#000000"
         )
         title.pack(pady=(5, 10))
+        
+        # Version label
+        version_label = tk.Label(
+            main_frame,
+            text=f"v{__version__}",
+            font=("Helvetica", 10),
+            fg="#888888",
+            bg="#000000"
+        )
+        version_label.pack(pady=(0, 10))
         
         # Status
         self.status_label = tk.Label(

@@ -10,7 +10,7 @@
     "type": "decoder",
     "role": "Decoder",
     "status": "idle",
-    "status_ts": 1772832031,
+    "status_ts": 1772832422,
     "dec": {
       "audio": {
         "followvideoenable": true,
@@ -64,16 +64,27 @@
   {
     "ip": "10.1.1.26",
     "model": "AT-OME-CS31-SA-HDBT",
-    "firmware": "V0.2.2.0",
-    "version": "V0.2.2.0",
+    "firmware": "1.0.1.14",
+    "version": "1.0.1.14",
     "serialnumber": "0950332623101100007",
-    "hostname": "CS31HDBT-0EF5C1-0EF5C1",
+    "hostname": "CS31HDBT-0EF5C1",
     "mac": "b8:98:b0:0e:f5:c1",
     "type": "switcher",
     "role": "Decoder/Switcher",
     "status": "idle",
-    "status_ts": 1772832032,
-    "dec": {}
+    "status_ts": 1772832422,
+    "dec": {
+      "video_stream_list": [
+        "Blu-ray1",
+        "MAC1"
+      ],
+      "video": {
+        "streamname": "none",
+        "ip": "",
+        "port": 0,
+        "selecttype": 0
+      }
+    }
   },
   {
     "ip": "10.1.1.11",
@@ -86,7 +97,7 @@
     "type": "decoder",
     "role": "Decoder",
     "status": "idle",
-    "status_ts": 1772832031,
+    "status_ts": 1772832422,
     "dec": {
       "audio": {
         "followvideoenable": true,
@@ -148,7 +159,7 @@
     "type": "decoder",
     "role": "Decoder",
     "status": "idle",
-    "status_ts": 1772832031,
+    "status_ts": 1772832421,
     "dec": {
       "audio": {
         "followvideoenable": true,
@@ -210,7 +221,7 @@
     "type": "decoder",
     "role": "Decoder",
     "status": "idle",
-    "status_ts": 1772832031,
+    "status_ts": 1772832422,
     "dec": {
       "audio": {
         "followvideoenable": true,
@@ -272,7 +283,7 @@
     "type": "encoder",
     "role": "Encoder",
     "status": "idle",
-    "status_ts": 1772832031,
+    "status_ts": 1772832422,
     "dante_name": "",
     "dante_ip": "",
     "dante_mac": "",
@@ -405,7 +416,7 @@
     "type": "encoder",
     "role": "Encoder",
     "status": "idle",
-    "status_ts": 1772832031,
+    "status_ts": 1772832422,
     "dante_name": "",
     "dante_ip": "",
     "dante_mac": "",

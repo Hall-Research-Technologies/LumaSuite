@@ -82,6 +82,9 @@ import requests
 from websocket import create_connection
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# --- Application Version ---
+__version__ = "1.0.0"
+
 # --- CSV Export Endpoint for Device Manager ---
 
 # --------- MATRIX ROUTING ENDPOINT ---------
@@ -2548,6 +2551,12 @@ def api_ping():
         return jsonify({"ok": True, "reachable": bool(reachable)})
     except Exception as e:
         return jsonify({"ok": True, "reachable": False, "error": str(e)})
+
+@APP.get("/api/version", endpoint="luma_api_version")
+def api_version():
+    """Return the application version"""
+    return jsonify({"ok": True, "version": __version__})
+
 # --- [producer integration] BEGIN ---
 
 import os, glob, json

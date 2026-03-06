@@ -913,5 +913,24 @@ window.onbeforeunload = () => {
 startConnectionMonitoring();
 </script>
 
+<!-- Footer with version -->
+<footer style="position:fixed; bottom:0; left:0; right:0; padding:8px 16px; border-top:1px solid var(--border); background:var(--card); font-size:11px; color:var(--muted); text-align:right; z-index:999;">
+  LumaSuite v<span id="app_version">loading...</span>
+</footer>
+
+<script>
+  // Fetch and display app version
+  (function(){
+    fetch('/api/version')
+      .then(r => r.json())
+      .then(d => {
+        if(d.ok && d.version){
+          document.getElementById('app_version').textContent = d.version;
+        }
+      })
+      .catch(e => console.log('Version fetch failed:', e));
+  })();
+</script>
+
 </body>
 </html>
