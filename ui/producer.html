@@ -914,21 +914,30 @@ startConnectionMonitoring();
 </script>
 
 <!-- Footer with version -->
-<footer style="position:fixed; bottom:0; left:0; right:0; padding:8px 16px; border-top:1px solid var(--border); background:var(--card); font-size:11px; color:var(--muted); text-align:right; z-index:999;">
-  LumaSuite v<span id="app_version">loading...</span>
+<footer style="position:fixed; bottom:0; left:0; right:0; padding:8px 16px; border-top:1px solid var(--border); background:var(--card); font-size:11px; color:var(--muted); text-align:right; z-index:999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+  LumaSuite <span id="app_version" style="font-weight:500;">v?.?.?</span>
 </footer>
 
 <script>
   // Fetch and display app version
   (function(){
+    const versionEl = document.getElementById('app_version');
     fetch('/api/version')
-      .then(r => r.json())
+      .then(r => {
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(d => {
-        if(d.ok && d.version){
-          document.getElementById('app_version').textContent = d.version;
+        if(d && d.ok && d.version){
+          versionEl.textContent = 'v' + d.version;
+        } else {
+          versionEl.textContent = 'v?.?.?';
         }
       })
-      .catch(e => console.log('Version fetch failed:', e));
+      .catch(e => {
+        console.warn('[Version] Fetch failed:', e);
+        versionEl.textContent = 'v?.?.?';
+      });
   })();
 </script>
 
