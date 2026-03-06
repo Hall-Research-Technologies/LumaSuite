@@ -66,6 +66,12 @@ __pycache__/
 # producer_cache.json
 # units_cache.json
 
+# Local runtime/system data (do not commit)
+producer_state.json
+producer_config.json
+units_cache.json
+ui/localdata/producer_cache.json
+
 # Archive files
 *.zip
 *.tar.gz
