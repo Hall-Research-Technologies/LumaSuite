@@ -42,6 +42,7 @@ def build_windows():
     ui_src = PROJECT_DIR / 'ui'
     ui_temp = PROJECT_DIR / 'ui_temp_build'
     hallway_logo = PROJECT_DIR / 'hallway.png'
+    footer_logo = PROJECT_DIR / 'All-Three-Logos-02-scaled.png'
     icon_arg = f"--icon={PROJECT_DIR / 'ui' / 'favicon.ico'}" if (PROJECT_DIR / 'ui' / 'favicon.ico').exists() else None
 
     if not ui_src.exists():
@@ -50,6 +51,8 @@ def build_windows():
     
     if not hallway_logo.exists():
         print(f"Warning: hallway.png not found at {hallway_logo}")
+    if not footer_logo.exists():
+        print(f"Warning: footer logo not found at {footer_logo}")
     
     # Create a clean temp ui folder without zip files
     print("Creating temporary UI folder (excluding .zip files)...")
@@ -64,6 +67,7 @@ def build_windows():
         '--name=LumaSuite',
         '--add-data', f"{ui_temp}{add_data_sep}ui",
         '--add-data', f"{hallway_logo}{add_data_sep}.",
+        '--add-data', f"{footer_logo}{add_data_sep}.",
         '--distpath=dist/Windows',
         '--workpath=build/Windows',
         '--specpath=build/Windows',

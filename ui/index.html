@@ -1370,6 +1370,48 @@ const rebootTracker = {};
 let rebootHeartbeatOwned = false;
 // Track consecutive failures per IP for offline detection
 const failureMap = new Map();
+// Track status while /api/upgrade call is in-flight (server is synchronous)
+const pendingUpgradeWatch = new Map();
+
+function stopPendingUpgradeWatch(ips){
+  for(const ip of ips || []){
+    const h = pendingUpgradeWatch.get(ip);
+    if(h){
+      clearInterval(h.timer);
+      pendingUpgradeWatch.delete(ip);
+    }
+  }
+}
+
+function startPendingUpgradeWatch(ips){
+  for(const ip of ips || []){
+    stopPendingUpgradeWatch([ip]);
+    const state = { sawOffline:false, inProbe:false };
+    const tick = async () => {
+      if(state.inProbe || Upgrade.isActive(ip)) return;
+      state.inProbe = true;
+      try{
+        const ok = await tcpProbe(ip);
+        if(!ok){
+          state.sawOffline = true;
+          setStatus(ip, "rebooting", "s-rebooting", true);
+        } else if(state.sawOffline){
+          setStatus(ip, "confirm version", "s-updating", true);
+        } else {
+          setStatus(ip, "updating", "s-updating", true);
+        }
+      }catch(_e){
+        // keep prior visible status on probe error
+      }finally{
+        state.inProbe = false;
+      }
+    };
+    const timer = setInterval(tick, 3000);
+    pendingUpgradeWatch.set(ip, { timer });
+    // First run immediately so UI leaves "sending" quickly
+    tick();
+  }
+}
 async function tcpProbe(ip){
   try{
     const r = await api("/api/tcp_probe",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({ip,timeout_ms:400})});
@@ -1697,13 +1739,29 @@ async function upgradeSelected(){
 
   $("#up_status").textContent="starting upgrades...";
   for(const ip of ips){ setStatus(ip,"sending","s-sending",true); }
+  // Move to active update tracking while synchronous backend call is running
+  setTimeout(() => {
+    for(const ip of ips){
+      if(!Upgrade.isActive(ip)) setStatus(ip,"updating","s-updating",true);
+    }
+    startPendingUpgradeWatch(ips);
+  }, 500);
 
   const body={ targets:ips, file, username:"admin", password:appConfig.password };
   console.log("[ui] CALLING BACKEND /api/upgrade at", new Date().toISOString());
   console.log("[ui] starting upgrade", body);
   let resp=null;
   try{ resp = await api("/api/upgrade",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
-  catch(e){ console.error("[ui] upgrade request error", e); $("#up_status").textContent = "upgrade call failed: "+String(e); return; }
+  catch(e){
+    stopPendingUpgradeWatch(ips);
+    console.error("[ui] upgrade request error", e);
+    for(const ip of ips){
+      if(!Upgrade.isActive(ip)) setStatus(ip,"upgrade failed","s-offline",false);
+    }
+    $("#up_status").textContent = "upgrade call failed: "+String(e);
+    return;
+  }
+  stopPendingUpgradeWatch(ips);
   console.log("[ui] upgrade response", resp);
   console.log("[ui] FILE SEND COMPLETE at", new Date().toISOString());
   try{
@@ -2385,7 +2443,7 @@ async function submitPasswordSync(){
     // Fetch and display app version
     (function(){
       const versionEl = document.getElementById('app_version');
-      fetch('/api/version')
+      fetch('/api/app_version')
         .then(r => {
           if(!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();

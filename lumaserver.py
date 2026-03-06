@@ -2606,8 +2606,8 @@ def api_ping():
     except Exception as e:
         return jsonify({"ok": True, "reachable": False, "error": str(e)})
 
-@APP.get("/api/version", endpoint="luma_api_version")
-def api_version():
+@APP.get("/api/app_version", endpoint="luma_api_app_version")
+def api_app_version():
     """Return the application version"""
     return jsonify({"ok": True, "version": __version__})
 

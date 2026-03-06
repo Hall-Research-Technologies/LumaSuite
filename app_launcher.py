@@ -53,11 +53,15 @@ class AppWindow:
         self.running = False
         self.logo_image = None
         self.logo_photo = None
+        self.footer_logo_image = None
+        self.footer_logo_photo = None
         self.tray_icon = None
+        self.window_width = 540
+        self.window_height = 420
         
         # Set up window
         self.root.title(f"LumaSuite v{__version__}")
-        self.root.geometry("600x500")
+        self.root.geometry(f"{self.window_width}x{self.window_height}")
         self.root.resizable(False, False)
         
         # Set window icon to favicon
@@ -70,8 +74,8 @@ class AppWindow:
         
         # Center window on screen
         self.root.update_idletasks()
-        x = (self.root.winfo_screenwidth() // 2) - (600 // 2)
-        y = (self.root.winfo_screenheight() // 2) - (500 // 2)
+        x = (self.root.winfo_screenwidth() // 2) - (self.window_width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (self.window_height // 2)
         self.root.geometry(f"+{x}+{y}")
         
         # Create UI
@@ -102,12 +106,12 @@ class AppWindow:
     
     def create_widgets(self):
         # Create canvas with black background
-        self.canvas = tk.Canvas(self.root, width=600, height=500, highlightthickness=0, bg="#000000")
+        self.canvas = tk.Canvas(self.root, width=self.window_width, height=self.window_height, highlightthickness=0, bg="#000000")
         self.canvas.pack(fill="both", expand=True)
         
         # Create main frame on black background
         main_frame = tk.Frame(self.canvas, bg="#000000", bd=0)
-        main_frame.place(relx=0.5, rely=0.5, anchor="center", width=520, height=450)
+        main_frame.place(relx=0.5, rely=0.5, anchor="center", width=480, height=390)
         
         # Load and display logo on top of black background
         logo_path = BASE_DIR / "hallway.png"
@@ -115,13 +119,13 @@ class AppWindow:
             try:
                 self.logo_image = Image.open(logo_path)
                 # Resize logo to fit nicely at top
-                logo_width = 400
+                logo_width = 300
                 logo_height = int(self.logo_image.height * (logo_width / self.logo_image.width))
                 self.logo_image = self.logo_image.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
                 self.logo_photo = ImageTk.PhotoImage(self.logo_image)
                 
                 logo_label = tk.Label(main_frame, image=self.logo_photo, bg="#000000", bd=0)
-                logo_label.pack(pady=(10, 10))
+                logo_label.pack(pady=(6, 6))
             except Exception as e:
                 print(f"Could not load logo image: {e}")
         
@@ -129,91 +133,110 @@ class AppWindow:
         title = tk.Label(
             main_frame,
             text="LumaSuite",
-            font=("Helvetica", 26, "bold"),
+            font=("Helvetica", 22, "bold"),
             fg="#ffffff",
             bg="#000000"
         )
-        title.pack(pady=(5, 10))
+        title.pack(pady=(2, 6))
         
         # Version label
         version_label = tk.Label(
             main_frame,
             text=f"v{__version__}",
-            font=("Helvetica", 10),
+            font=("Helvetica", 9),
             fg="#888888",
             bg="#000000"
         )
-        version_label.pack(pady=(0, 10))
+        version_label.pack(pady=(0, 4))
         
         # Status
         self.status_label = tk.Label(
             main_frame,
             text="Starting server...",
-            font=("Helvetica", 14),
+            font=("Helvetica", 12),
             fg="#4CAF50",
             bg="#000000"
         )
-        self.status_label.pack(pady=10)
+        self.status_label.pack(pady=6)
         
         # URL as clickable link
         self.url_text = tk.StringVar(value="")
         self.url_label = tk.Label(
             main_frame,
             textvariable=self.url_text,
-            font=("Helvetica", 12, "underline"),
+            font=("Helvetica", 11, "underline"),
             fg="#64B5F6",
             bg="#000000",
             cursor="hand2"
         )
-        self.url_label.pack(pady=5)
+        self.url_label.pack(pady=3)
         self.url_label.bind("<Button-1>", lambda e: self.open_browser())
         
         # Buttons frame
         btn_frame = tk.Frame(main_frame, bg="#000000")
-        btn_frame.pack(pady=25)
+        btn_frame.pack(pady=14)
         
         # Open Browser button with better styling
         self.open_btn = tk.Button(
             btn_frame,
             text="Open Browser",
             command=self.open_browser,
-            width=18,
+            width=14,
             bg="#2196F3",
             fg="white",
-            font=("Helvetica", 11, "bold"),
+            font=("Helvetica", 10, "bold"),
             relief="flat",
-            padx=15,
-            pady=10,
+            padx=10,
+            pady=6,
             cursor="hand2",
             state="disabled"
         )
-        self.open_btn.grid(row=0, column=0, padx=8)
+        self.open_btn.grid(row=0, column=0, padx=6)
         
         # Exit button with better styling
         exit_btn = tk.Button(
             btn_frame,
             text="Exit",
             command=self.on_close,
-            width=18,
+            width=14,
             bg="#f44336",
             fg="white",
-            font=("Helvetica", 11, "bold"),
+            font=("Helvetica", 10, "bold"),
             relief="flat",
-            padx=15,
-            pady=10,
+            padx=10,
+            pady=6,
             cursor="hand2"
         )
-        exit_btn.grid(row=0, column=1, padx=8)
+        exit_btn.grid(row=0, column=1, padx=6)
         
         # Info label at bottom
         info = tk.Label(
             main_frame,
             text="The server will run until you click Exit",
-            font=("Helvetica", 10),
+            font=("Helvetica", 9),
             fg="#999999",
             bg="#000000"
         )
-        info.pack(pady=(20, 10))
+        info.pack(pady=(10, 4))
+
+        footer_logo_candidates = [
+            BASE_DIR / "All-Three-Logos-02-scaled.png",
+            BASE_DIR / "ui" / "companylogo.png",
+        ]
+        footer_logo_path = next((p for p in footer_logo_candidates if p.exists()), None)
+        if footer_logo_path:
+            try:
+                self.footer_logo_image = Image.open(footer_logo_path)
+                footer_width = 190
+                footer_height = int(self.footer_logo_image.height * (footer_width / self.footer_logo_image.width))
+                self.footer_logo_image = self.footer_logo_image.resize((footer_width, footer_height), Image.Resampling.LANCZOS)
+                self.footer_logo_photo = ImageTk.PhotoImage(self.footer_logo_image)
+
+                footer_logo_label = tk.Label(main_frame, image=self.footer_logo_photo, bg="#000000", bd=0, cursor="hand2")
+                footer_logo_label.pack(pady=(0, 6))
+                footer_logo_label.bind("<Button-1>", lambda e: webbrowser.open("https://www.hallresearch.com"))
+            except Exception as e:
+                print(f"Could not load footer logo image: {e}")
     
     def setup_tray_icon(self):
         """Setup system tray icon with favicon"""
