@@ -1,5 +1,7 @@
 # LumaSuite - Device Management & Firmware Upgrade System
 
+**Current Version: 1.0.0**
+
 A comprehensive Flask-based backend system for managing AV equipment including encoder/decoder devices and CS31 switchers with reliable firmware upgrade capabilities.
 
 ## Features
@@ -66,6 +68,7 @@ Launches GUI with system tray integration
 - `GET /api/units` - List all discovered devices
 - `GET /api/unit/<ip>` - Get device details
 - `POST /api/ping` - Check device reachability
+- `GET /api/version` - Get application version
 
 ### Firmware Upgrade
 - `POST /api/upgrade` - Upload and monitor firmware upgrade
