@@ -2,6 +2,5 @@ flask==2.3.3
 flask-cors==4.0.0
 requests==2.31.0
 Werkzeug==2.3.7
-PyInstaller==5.13.2
 Pillow==10.0.0
 pystray==0.19.5
