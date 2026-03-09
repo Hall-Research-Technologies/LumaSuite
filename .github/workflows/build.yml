@@ -39,7 +39,7 @@ jobs:
           
       - name: Build executable
         run: |
-          pyinstaller --clean --noconfirm LumaSuite.spec
+          pyinstaller --clean --noconfirm server.py
 
       - name: Package artifact (Linux/macOS)
         if: runner.os != 'Windows'
