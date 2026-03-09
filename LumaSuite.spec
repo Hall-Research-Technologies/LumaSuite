@@ -2,7 +2,6 @@
 
 block_cipher = None
 
-
 a = Analysis(
     ['app_launcher.py'],
     pathex=['.'],
@@ -14,12 +13,16 @@ a = Analysis(
     ],
     hiddenimports=[
         'flask',
-        'werkzeug',
         'flask_cors',
+        'werkzeug',
         'requests',
+        'requests.adapters',
+        'urllib3',
+        'certifi',
         'PIL',
         'PIL.Image',
         'PIL.ImageTk',
+        'PIL._tkinter_finder',
         'pystray'
     ],
     hookspath=[],
@@ -49,14 +52,10 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
+    upx=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
     icon='ui/favicon.ico'
 )
