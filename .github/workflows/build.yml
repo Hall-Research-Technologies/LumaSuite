@@ -36,8 +36,7 @@ jobs:
           python -m pip install --upgrade setuptools wheel
           python -m pip install --upgrade pyinstaller
           python -m pip install -r requirements-build.txt
-          python -c "import pkg_resources; print('pkg_resources OK')"
-
+          
       - name: Build executable
         run: |
           pyinstaller --clean --noconfirm LumaSuite.spec
