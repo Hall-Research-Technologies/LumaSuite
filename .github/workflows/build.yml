@@ -9,19 +9,16 @@ on:
 jobs:
   build:
     strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux-x86_64
+  matrix:
+    include:
+      - os: ubuntu-latest
+        name: linux-x86_64
 
-          - os: windows-latest
-            name: windows-x86_64
+      - os: windows-latest
+        name: windows-x86_64
 
-          - os: macos-13
-            name: macos-intel
-
-          - os: macos-14
-            name: macos-apple-silicon
+      - os: macos-latest
+        name: macos
 
     runs-on: ${{ matrix.os }}
 
