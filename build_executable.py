@@ -120,6 +120,8 @@ def build_windows():
         '--hidden-import=PIL',
         '--hidden-import=PIL.Image',
         '--hidden-import=PIL.ImageTk',
+        '--collect-submodules=PIL',
+        '--collect-data=PIL',
         '--hidden-import=pystray',
         '--hidden-import=pystray._win32',
         str(LAUNCHER)
@@ -284,6 +286,8 @@ def build_linux():
         '--hidden-import=PIL',
         '--hidden-import=PIL.Image',
         '--hidden-import=PIL.ImageTk',
+        '--collect-submodules=PIL',
+        '--collect-data=PIL',
         '--hidden-import=pystray',
         '--hidden-import=pystray._xlib',
         str(LAUNCHER)

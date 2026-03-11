@@ -134,10 +134,13 @@ class AppWindow:
         png_icon = resolve_asset("ui", "companylogo.png")
         if png_icon and png_icon.exists():
             try:
-                self.window_icon_photo = tk.PhotoImage(file=str(png_icon))
+                icon_image = Image.open(png_icon)
+                self.window_icon_photo = ImageTk.PhotoImage(icon_image)
                 self.root.iconphoto(True, self.window_icon_photo)
             except Exception as e:
                 log_message(f"Could not set PNG window icon: {e}")
+        else:
+            log_message("Could not find ui/companylogo.png for window icon")
         
         # Center window on screen
         self.root.update_idletasks()
@@ -186,6 +189,7 @@ class AppWindow:
         
         # Load and display logo on top of black background
         logo_path = resolve_asset("hallway.png")
+        log_message(f"Launcher header logo path: {logo_path}")
         if logo_path and logo_path.exists():
             try:
                 self.logo_image = Image.open(logo_path)
@@ -297,6 +301,7 @@ class AppWindow:
             resolve_asset("ui", "companylogo.png"),
         ]
         footer_logo_path = next((p for p in footer_logo_candidates if p and p.exists()), None)
+        log_message(f"Launcher footer logo path: {footer_logo_path}")
         if footer_logo_path:
             try:
                 self.footer_logo_image = Image.open(footer_logo_path)
