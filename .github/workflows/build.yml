@@ -1,4 +1,4 @@
-name: Build LumaSuite1.0
+name: Build LumaSuite
 
 on:
   push:
@@ -9,19 +9,24 @@ on:
   workflow_dispatch:
 
 jobs:
-
   build:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
+        include:
+          - os: ubuntu-latest
+            artifact_name: LumaSuite-Linux
+            artifact_path: dist/Linux/*
+          - os: windows-latest
+            artifact_name: LumaSuite-Windows
+            artifact_path: dist/Windows/LumaSuite.exe
+          - os: macos-latest
+            artifact_name: LumaSuite-macOS-universal
+            artifact_path: dist/macOS/*
  
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -30,32 +35,41 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Linux GUI deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk libx11-dev libxkbcommon-x11-0
+
       - name: Install dependencies
         run: |
-              python -m pip install --upgrade pip
-              python -m pip install --upgrade setuptools wheel
-              python -m pip install --upgrade pyinstaller
-              python -m pip install pyinstaller-hooks-contrib
-              python -m pip install -r requirements-build.txt
-          
-      - name: Build executable
-        run: |
-          pyinstaller --clean --noconfirm LumaSuite.spec
+          python -m pip install --upgrade pip
+          pip install -r requirements-build-lock.txt
 
-      - name: Package artifact (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          mkdir release
-          cp -r dist/* release/
-
-      - name: Package artifact (Windows)
+      - name: Build Windows
         if: runner.os == 'Windows'
-        run: |
-          mkdir release
-          xcopy dist release /E /I
+        run: python build_executable.py windows
+
+      - name: Build macOS
+        if: runner.os == 'macOS'
+        run: python build_executable.py macos
+
+      - name: Build Linux
+        if: runner.os == 'Linux'
+        run: python build_executable.py linux
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LumaSuite-${{ runner.os }}
-          path: release
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+
+      - name: Upload PyInstaller warning log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warn-${{ runner.os }}
+          path: |
+            build/Windows/warn-LumaSuite.txt
+            build/macOS/warn-LumaSuite.txt
+            build/Linux/warn-LumaSuite.txt
