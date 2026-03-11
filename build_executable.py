@@ -137,12 +137,19 @@ def build_mac():
     hallway_logo = PROJECT_DIR / 'hallway.png'
     footer_logo = PROJECT_DIR / 'atlona.png'
     
-    # Look for macOS-specific icon (.icns), fallback to PNG
+    # Look for macOS-specific icon (.icns format required for proper bundling)
+    # PNG won't bundle correctly in .app; skip icon if .icns not found
     icon_arg = None
-    if (PROJECT_DIR / 'ui' / 'LumaSuite.icns').exists():
-        icon_arg = f"--icon={PROJECT_DIR / 'ui' / 'LumaSuite.icns'}"
-    elif (PROJECT_DIR / 'ui' / 'companylogo.png').exists():
-        icon_arg = f"--icon={PROJECT_DIR / 'ui' / 'companylogo.png'}"
+    icns_path = PROJECT_DIR / 'ui' / 'LumaSuite.icns'
+    if icns_path.exists():
+        icon_arg = f"--icon={icns_path}"
+        print(f"Using custom icon: {icns_path}")
+    else:
+        print("Note: No .icns icon found. To add a custom icon:")
+        print("  1. Convert ui/companylogo.png to ui/LumaSuite.icns")
+        print("  2. Use imagemagick: convert ui/companylogo.png -define icon:auto-resize=256,128,96,64,48,32,16 ui/LumaSuite.icns")
+        print("  3. Or use online converter: cloudconvert.com (PNG to ICNS)")
+        print("  App will use default macOS icon for now.")
 
     if not ui_src.exists():
         print(f"Error: UI folder not found at {ui_src}")

@@ -73,6 +73,13 @@ For reproducible builds (recommended for release artifacts), use:
    - The built `.app` runs on both Intel (x86_64) and Apple Silicon (ARM64) Macs
    - First run may trigger Gatekeeper check; use Cmd+Space → type app name → Cmd+Enter to open
 
+6. **Custom Icon (Optional):**
+   - By default, the app uses the macOS generic application icon
+   - To use a custom icon, create `ui/LumaSuite.icns` (ICNS format only, PNG won't work)
+   - Convert from PNG: `convert ui/companylogo.png -define icon:auto-resize=256,128,96,64,48,32,16 ui/LumaSuite.icns`
+   - Or use an online converter: [cloudconvert.com](https://cloudconvert.com) (PNG to ICNS)
+   - Rebuild after adding the .icns file
+
 ### Linux (binary)
 
 1. **Install dependencies:**
@@ -144,6 +151,10 @@ LumaSuite.app/Contents/MacOS/LumaSuite --host=0.0.0.0 --port=8080
 - **"Developer cannot be verified"** - System Preferences → Security & Privacy → Open Anyway
 - **"bad CPU type in executable"** - Ensure you're running the correct architecture build (universal binary works on both Intel and Apple Silicon)
 - **Terminal window appears** - This is the control window (intentional); the browser should auto-launch. If not, use "Open Browser" button
+- **Generic application icon** - Add a custom icon by creating `ui/LumaSuite.icns`:
+  - From command line: `convert ui/companylogo.png -define icon:auto-resize=256,128,96,64,48,32,16 ui/LumaSuite.icns`
+  - Or use online tool: [cloudconvert.com](https://cloudconvert.com) (PNG to ICNS)
+  - Rebuild after creating the .icns file
 
 ### Linux
 - **No window appears / "bad display"** - Ensure X11 or Wayland is running. Use `DISPLAY=:0 ./LumaSuite` if running from SSH
