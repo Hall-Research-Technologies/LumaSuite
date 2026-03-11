@@ -325,11 +325,17 @@
     <form autocomplete="off" id="pw_sync_form" style="display:flex;flex-direction:column;gap:12px;">
       <div style="display:flex;flex-direction:column;gap:6px;">
         <label for="pw_sync_current" style="font-size:12px;color:var(--muted);">Current Password</label>
-        <input id="pw_sync_current" type="password" placeholder="current password" autocomplete="off" />
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="pw_sync_current" type="password" placeholder="current password" autocomplete="off" style="flex:1;" />
+          <button id="pw_sync_current_toggle" class="btn small" type="button" title="Show/Hide">👁️</button>
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;">
         <label for="pw_sync_new" style="font-size:12px;color:var(--muted);">New Password</label>
-        <input id="pw_sync_new" type="password" placeholder="new password" autocomplete="off" />
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="pw_sync_new" type="password" placeholder="new password" autocomplete="off" style="flex:1;" />
+          <button id="pw_sync_new_toggle" class="btn small" type="button" title="Show/Hide">👁️</button>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" id="pw_sync_all" />
@@ -345,6 +351,26 @@
 </div>
 
 <script>
+function wirePasswordToggle(buttonId, inputId, revealCallback){
+  const btn = document.getElementById(buttonId);
+  const input = document.getElementById(inputId);
+  if(!btn || !input) return;
+  btn.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? '🙈' : '👁️';
+    if(show && typeof revealCallback === 'function'){
+      try{ await revealCallback(input); }catch(_e){}
+    }
+  });
+}
+
+function isAllowedPassword(value){
+  const str = String(value || '');
+  return str.length >= 6 && /^[A-Za-z0-9!@#$%^&*]+$/.test(str);
+}
+
 // Configuration modal logic (index page)
 (function initCfg(){
   function openCfg(){
@@ -356,20 +382,34 @@
     if(err){ err.style.display='none'; err.textContent=''; }
     const hint = document.getElementById('browse_hint');
     if(hint) hint.style.display = 'block';
+    const pwInput = document.getElementById('cfg_password');
+    const pwToggle = document.getElementById('cfg_pw_toggle');
+    if(pwInput) pwInput.type = 'password';
+    if(pwToggle) pwToggle.textContent = '👁️';
     const MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
     fetch('/api/config').then(r=>r.json()).then(cfg=>{
       if(cfg){
         const inp = document.getElementById('cfg_password'); if(inp) inp.value = MASK;
+        const hashEl = document.getElementById('cfg_password_hash');
+        if(hashEl) hashEl.textContent = (cfg.password_hash || '(unavailable)');
         if(cfg.ws_port) document.getElementById('cfg_ws_port').value = String(cfg.ws_port);
         if(cfg.concurrency) document.getElementById('cfg_concurrency').value = String(cfg.concurrency);
         if(cfg.logos_path) document.getElementById('cfg_logos_path').value = cfg.logos_path;
         if(cfg.firmware_path) document.getElementById('cfg_firmware_path').value = cfg.firmware_path;
         if(cfg.imagestream_path) document.getElementById('cfg_imagestream_path').value = cfg.imagestream_path;
       }
-    }).catch(()=>{});
-    const toggle = document.getElementById('cfg_pw_toggle'); const inp = document.getElementById('cfg_password');
-    if(toggle && inp){ toggle.onclick = async function(){ const show = inp.type === 'password'; inp.type = show ? 'text' : 'password'; if(show){ try{ const cfg2 = await (await fetch('/api/config?include_password=1',{cache:'no-store'})).json(); if(cfg2 && typeof cfg2.password === 'string') inp.value = cfg2.password; }catch(e){} } } }
+    }).catch(()=>{
+      const hashEl = document.getElementById('cfg_password_hash');
+      if(hashEl) hashEl.textContent = '(unavailable)';
+    });
   }
+
+  wirePasswordToggle('cfg_pw_toggle', 'cfg_password', async (inp)=>{
+    const cfg2 = await (await fetch('/api/config?include_password=1',{cache:'no-store'})).json();
+    if(cfg2 && typeof cfg2.password === 'string') inp.value = cfg2.password;
+  });
+  wirePasswordToggle('pw_sync_current_toggle', 'pw_sync_current');
+  wirePasswordToggle('pw_sync_new_toggle', 'pw_sync_new');
 
   const g = document.getElementById('header_gear');
   if(g) g.addEventListener('click', openCfg);
@@ -392,9 +432,19 @@
 
   const saveBtn = document.getElementById('cfg_save');
   if(saveBtn) saveBtn.addEventListener('click', function(){
+    const passwordValue = document.getElementById('cfg_password').value;
+    if(passwordValue && !isAllowedPassword(passwordValue)){
+      const errDiv = document.getElementById('cfg_error');
+      if(errDiv){
+        errDiv.textContent = 'Password must be at least 6 characters and may only include A-Z, a-z, 0-9, and !@#$%^&*';
+        errDiv.style.display = 'block';
+      }
+      return;
+    }
+
     const payload = {
       username:'admin',
-      password: document.getElementById('cfg_password').value,
+      password: passwordValue,
       ws_port: parseInt(document.getElementById('cfg_ws_port').value || '80', 10),
       concurrency: parseInt(document.getElementById('cfg_concurrency').value || '6', 10),
       logos_path: document.getElementById('cfg_logos_path').value,
@@ -564,15 +614,21 @@ let sortKey = "ip";
 let sortDir = "asc";
 
 // Global config loaded from backend
-let appConfig = { password: 'password', ws_port: 80, concurrency: 6 };
+let appConfig = { password: 'password', ws_port: 80, concurrency: 6, is_default_password: true };
+
+function isSwitcherUnit(u){
+  const typeHints = `${u?.type || ''} ${u?.role || ''}`.toLowerCase();
+  const model = (u?.model || '').toLowerCase();
+  return typeHints.includes('switcher') || model.includes('at-ome-cs31') || model.includes('cs31');
+}
 
 function classifyRole(u){
-  const t=(u.type||u.role||"").toLowerCase();
+  const t=`${u?.type || ''} ${u?.role || ''}`.toLowerCase();
+  if(t.includes("switcher")) return "Switcher";
   if(t.includes("encoder")) return "Encoder";
   if(t.includes("decoder")) return "Decoder";
-  if(t.includes("switcher")) return "Switcher";
   const m=(u.model||"").toLowerCase();
-  if(m.includes("at-ome-cs31")) return "Switcher";
+  if(isSwitcherUnit(u)) return "Switcher";
   if(m.startsWith("at-luma-e") || m.startsWith("at-omni-e")) return "Encoder";
   if(m.startsWith("at-luma-d") || m.startsWith("at-omni-d")) return "Decoder";
   return "";
@@ -589,6 +645,13 @@ function roleFromFirmwareName(name){
   return "";
 }
 
+function applyFirmwareRoleFilter(list){
+  const selected = $("#files")?.value || "Select Firmware";
+  const wantRole = roleFromFirmwareName(selected);
+  if(!wantRole) return list;
+  return (list || []).filter(u => (u.typeLabel || classifyRole(u)) === wantRole);
+}
+
 function ipToNum(ip){
   const parts=(ip||'').split('.').map(x=>parseInt(x,10));
   if(parts.length!==4 || parts.some(n=>isNaN(n))) return -1;
@@ -596,18 +659,8 @@ function ipToNum(ip){
 }
 
 function getDisplayList(){
-  const selected = $("#files").value || "Select Firmware";
-  const wantRole = roleFromFirmwareName(selected);
   let list = (units||[]).map(u => ({...u, typeLabel: classifyRole(u)}));
-  if(wantRole && wantRole !== '' && list.length) {
-    list = list.filter(u => {
-      if (u.typeLabel === wantRole) return true;
-      const model = (u.model || '').toLowerCase();
-      const typeRole = `${(u.type||'')} ${(u.role||'')}`.toLowerCase();
-      // Keep CS31/switchers visible in device list even when firmware role filter is active
-      return typeRole.includes('switcher') || model.includes('at-ome-cs31');
-    });
-  }
+  list = applyFirmwareRoleFilter(list);
 
   const dir = (sortDir === "asc") ? 1 : -1;
   list.sort((a,b)=>{
@@ -995,18 +1048,20 @@ function renderRows(list){
     tdBlink.appendChild(blinkBtn);
     // Preview column (no per-element handlers; we use delegated listeners)
     const tdPreview = document.createElement('td');
-    const previewLink = document.createElement('a');
     const enc = /^enc/i.test(roleLbl) || ((u.model||'').toLowerCase().startsWith('at-luma-e') || (u.model||'').toLowerCase().startsWith('at-omni-e'));
-    const isSwitcher = roleLbl === 'Switcher' || (u.model||'').toLowerCase().includes('at-ome-cs31');
-    const url = isSwitcher ? (`http://${u.ip}/stream?t=${Math.random()}`) : (enc ? (`http://${u.ip}/stream?resolution=320x180&fps=15&bitrate=128`) : (`http://${u.ip}/thumbnail/thumbnail1.jpg`));
-    previewLink.href = url;
-    previewLink.className = 'ip preview-link';
-    previewLink.textContent = 'Preview';
-    previewLink.dataset.ip = u.ip||'';
-    previewLink.dataset.role = roleLbl;
-    previewLink.dataset.model = u.model||'';
-    previewLink.dataset.typeLabel = roleLbl;
-    tdPreview.appendChild(previewLink);
+    const isSwitcher = isSwitcherUnit(u) || roleLbl === 'Switcher';
+    if (!isSwitcher) {
+      const previewLink = document.createElement('a');
+      const url = enc ? (`http://${u.ip}/stream?resolution=320x180&fps=15&bitrate=128`) : (`http://${u.ip}/thumbnail/thumbnail1.jpg`);
+      previewLink.href = url;
+      previewLink.className = 'ip preview-link';
+      previewLink.textContent = 'Preview';
+      previewLink.dataset.ip = u.ip||'';
+      previewLink.dataset.role = roleLbl;
+      previewLink.dataset.model = u.model||'';
+      previewLink.dataset.typeLabel = roleLbl;
+      tdPreview.appendChild(previewLink);
+    }
      tdStatus.innerHTML='<span class="status s-idle-unchanged">idle</span>';
 
     const row=[tdSel,tdIP,tdMAC,tdHost,tdStreamname,tdDanteCheck,tdDanteName,tdDanteIp,tdEdidResolution,tdType,tdModel,tdVer,tdHdcp,tdStatus,tdBlink,tdPreview];
@@ -1019,17 +1074,8 @@ function renderRows(list){
 }
 
 function updateTotals(){
-  const selected = $("#files").value || "Select Firmware";
-  const wantRole = roleFromFirmwareName(selected);
   let list = (units||[]).map(u=>({...u,typeLabel:classifyRole(u)})).filter(u=>u.typeLabel);
-  if(wantRole) {
-    list = list.filter(u => {
-      if (u.typeLabel === wantRole) return true;
-      const model = (u.model || '').toLowerCase();
-      const typeRole = `${(u.type||'')} ${(u.role||'')}`.toLowerCase();
-      return typeRole.includes('switcher') || model.includes('at-ome-cs31');
-    });
-  }
+  list = applyFirmwareRoleFilter(list);
   let enc=0, dec=0, swt=0;
   for(const u of list){ 
     if(u.typeLabel==="Encoder") enc++; 
@@ -1044,6 +1090,11 @@ function updateTotals(){
 let rtmpPollInterval = null;
 
 async function pollEncoderRtmpStatus() {
+  if (appConfig.is_default_password) {
+    stopRtmpPolling();
+    return;
+  }
+
   // Collect all encoders that need polling
   const encoderEntries = Array.from(unitMap.entries())
     .filter(([ip, unit]) => unit.streamLed);
@@ -1108,6 +1159,7 @@ function updateStreamLed(led, isLive) {
 
 function startRtmpPolling() {
   if (rtmpPollInterval) clearInterval(rtmpPollInterval);
+  if (appConfig.is_default_password) return;
   pollEncoderRtmpStatus(); // Poll immediately
   rtmpPollInterval = setInterval(pollEncoderRtmpStatus, 3000); // Then every 3 seconds
 }
@@ -1167,6 +1219,27 @@ async function rescanIPs(ips){
 // ------- scan & cache -------
 let scanAbortController = null;
 
+function beginScanQuietMode(){
+  const state = {
+    connectionMonitoringActive: !!heartbeatInterval || !!connectionCheckInterval,
+    pollHeartbeatActive: !!pollTimer,
+  };
+  stopConnectionMonitoring();
+  if(state.pollHeartbeatActive){
+    enableHeartbeat(false);
+  }
+  return state;
+}
+
+function endScanQuietMode(state){
+  if(state && state.connectionMonitoringActive){
+    startConnectionMonitoring();
+  }
+  if(state && state.pollHeartbeatActive && isSliderOn() && Object.keys(rebootTracker).length === 0){
+    enableHeartbeat(true);
+  }
+}
+
 async function scan(){
   const text=$("#targets").value||"".trim();
   const chosen=$("#adapters").value||"".trim();
@@ -1177,6 +1250,7 @@ async function scan(){
   
   // Create new AbortController for this scan
   scanAbortController = new AbortController();
+  const quietState = beginScanQuietMode();
   
   el.innerHTML=`scanning <span class="spinner"></span>`;
   $("#scan").disabled = true;
@@ -1252,6 +1326,7 @@ async function scan(){
     $("#stop_scan").style.display = "none";
     $("#stop_scan").style.background = "#2196F3"; // Reset to blue
     scanAbortController = null;
+    endScanQuietMode(quietState);
     console.log("[SCAN] Scan complete");
   }
 }
@@ -1727,7 +1802,25 @@ async function upgradeSelected(){
   const file=$("#files").value;
   if(!file || file==="Select Firmware"){ $("#up_status").textContent="select a .tar.gz"; return; }
   if(!file.toLowerCase().endsWith(".tar.gz")){ $("#up_status").textContent="firmware must be .tar.gz"; return; }
-  const ips=getSelectedIPs(); if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
+  let ips=getSelectedIPs(); if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
+
+  const wantRole = roleFromFirmwareName(file);
+  if(wantRole){
+    const selectedUnits = ips.map(ip => unitMap.get(ip)).filter(Boolean);
+    const eligible = selectedUnits
+      .filter(u => classifyRole(u) === wantRole)
+      .map(u => u.ip)
+      .filter(Boolean);
+    const skipped = ips.length - eligible.length;
+    if(!eligible.length){
+      $("#up_status").textContent = `No eligible ${wantRole.toLowerCase()} devices selected for this firmware`;
+      return;
+    }
+    ips = eligible;
+    if(skipped > 0){
+      $("#up_status").textContent = `Skipping ${skipped} non-${wantRole.toLowerCase()} device(s)`;
+    }
+  }
 
   const doReset = $("#reset_after").checked;
   if (doReset) {
@@ -1748,6 +1841,7 @@ async function upgradeSelected(){
   }, 500);
 
   const body={ targets:ips, file, username:"admin", password:appConfig.password };
+  const upgradeCallStartedAt = Date.now();
   console.log("[ui] CALLING BACKEND /api/upgrade at", new Date().toISOString());
   console.log("[ui] starting upgrade", body);
   let resp=null;
@@ -1762,17 +1856,71 @@ async function upgradeSelected(){
     return;
   }
   stopPendingUpgradeWatch(ips);
+  const upgradeCallDurationMs = Date.now() - upgradeCallStartedAt;
   console.log("[ui] upgrade response", resp);
+  console.log("[ui] /api/upgrade duration(ms)", upgradeCallDurationMs);
   console.log("[ui] FILE SEND COMPLETE at", new Date().toISOString());
+
+  if(resp && resp.error === "default_password_change_required"){
+    for(const ip of ips){
+      if(!Upgrade.isActive(ip)) setStatus(ip,"password change required","s-offline",false);
+    }
+    $("#up_status").textContent = "Change default password in Settings before upgrade.";
+    $("#up_status").style.color = "#f59e0b";
+    return;
+  }
+  
+  // Separate devices by whether backend already completed monitoring
+  const monitored_ips = []; // CS31: backend already monitored
+  const pending_ips = [];   // Standard devices: UI needs to monitor version change
+  
   try{
     if(resp && resp.results){
       const summary = Object.entries(resp.results).map(([ip,r])=>`${ip}:${r.ok?'ok':'fail'}`).join(" ");
       $("#up_status").textContent = `server accepted upgrade (${summary})`;
       // Set each device to 'updating' only if its upload succeeded
+      // BUT: if backend already completed monitoring (CS31), mark as monitored
       for(const [ip, result] of Object.entries(resp.results)){
         if(result.ok){
-          console.log(`[ui] ${ip} -> UPDATING at`, new Date().toISOString());
-          setStatus(ip,"updating","s-updating",true);
+          // Prefer explicit backend monitor step when present.
+          const hasExplicitMonitor = Array.isArray(result.steps) && result.steps.some(s => s.step === "monitor_upgrade");
+          // Fallback for older backend payloads: CS31 upgrades usually keep /api/upgrade open for minutes.
+          const likelyCs31Firmware = typeof file === "string" && file.toLowerCase().startsWith("at-ome-cs31");
+          const hasImplicitMonitor = likelyCs31Firmware && upgradeCallDurationMs >= 90_000;
+          const hasMonitor = hasExplicitMonitor || hasImplicitMonitor;
+          if(!hasMonitor){
+            // Non-CS31 device or upload-only path: set to updating and let Upgrade.start handle it
+            console.log(`[ui] ${ip} -> UPDATING at`, new Date().toISOString());
+            setStatus(ip,"updating","s-updating",true);
+            pending_ips.push(ip);
+          } else {
+            // CS31 with monitoring already complete: backend already confirmed upgrade
+            console.log(`[ui] ${ip} -> backend monitoring inferred=${hasImplicitMonitor} explicit=${hasExplicitMonitor}`);
+            const monStep = Array.isArray(result.steps) ? result.steps.find(s => s.step === "monitor_upgrade") : null;
+            if(!monStep || monStep.result === "ok"){
+              // Refresh UI fields from the live unit and persist cache before showing success.
+              try{
+                // If backend telemetry already has the final version, paint it immediately.
+                const telem = Array.isArray(monStep?.telemetry) ? monStep.telemetry : [];
+                const telemVer = [...telem].reverse().find(t => t && t.version)?.version || "";
+                const row = unitMap.get(ip);
+                if(telemVer && row && row.versionCell) row.versionCell.textContent = telemVer;
+
+                await pollVersion(ip);
+                await pollHostname(ip);
+                await rescanIPs([ip]);
+              }catch(e){
+                console.warn(`[ui] ${ip} refresh after backend-monitored upgrade failed`, e);
+              }
+              console.log(`[ui] ${ip} -> UPGRADE SUCCESSFUL (monitored by backend)`);
+              setStatus(ip,"upgrade successful","s-idle");
+              setTimeout(()=>{ setStatus(ip,"idle","s-idle-unchanged"); }, 30000);
+            } else {
+              console.log(`[ui] ${ip} -> UPGRADE FAILED (backend monitoring failed)`);
+              setStatus(ip,"upgrade failed","s-offline",false);
+            }
+            monitored_ips.push(ip);
+          }
         }
       }
       // Force browser to render the status change before continuing
@@ -1781,8 +1929,15 @@ async function upgradeSelected(){
       $("#up_status").textContent = "upgrade response missing results";
     }
   }catch(e){ console.warn("[ui] unable to summarize upgrade response", e); }
-  console.log("[ui] STARTING Upgrade.start at", new Date().toISOString());
-  Upgrade.start(ips, doReset).then(()=>{ $("#up_status").textContent="upgrade flow completed"; });
+  
+  // Only call Upgrade.start for devices that need version monitoring
+  if(pending_ips.length > 0){
+    console.log("[ui] STARTING Upgrade.start for pending devices:", pending_ips, "at", new Date().toISOString());
+    Upgrade.start(pending_ips, doReset).then(()=>{ $("#up_status").textContent="upgrade flow completed"; });
+  } else {
+    console.log("[ui] All devices already monitored by backend, upgrade complete");
+    $("#up_status").textContent="upgrade flow completed";
+  }
 }
 
 async function removeSelected(){
@@ -1876,6 +2031,19 @@ function toBase64(str) {
   return btoa(unescape(encodeURIComponent(str)));
 }
 
+function getPasswordSyncEligibleIPs(sourceIps){
+  const byIp = new Map((units || []).map(u => [u.ip, u]));
+  const eligible = [];
+  const skipped = [];
+  for(const ip of sourceIps || []){
+    const unit = byIp.get(ip) || {};
+    const role = (classifyRole(unit) || '').toLowerCase();
+    if(role === 'encoder' || role === 'decoder') eligible.push(ip);
+    else skipped.push(ip);
+  }
+  return { eligible, skipped };
+}
+
 // Password sync functionality
 async function passwordSyncSelected(){
   const backdrop = document.getElementById('pw_sync_backdrop');
@@ -1889,6 +2057,12 @@ async function passwordSyncSelected(){
   // Preset current password
   currentPwInput.value = 'password';
   newPwInput.value = '';
+  currentPwInput.type = 'password';
+  newPwInput.type = 'password';
+  const currentToggle = document.getElementById('pw_sync_current_toggle');
+  const newToggle = document.getElementById('pw_sync_new_toggle');
+  if(currentToggle) currentToggle.textContent = '👁️';
+  if(newToggle) newToggle.textContent = '👁️';
   allDevicesCheckbox.checked = false;
   statusDiv.textContent = '';
   
@@ -1898,6 +2072,14 @@ async function passwordSyncSelected(){
 function closePasswordSync(){
   const backdrop = document.getElementById('pw_sync_backdrop');
   if(backdrop) backdrop.style.display = 'none';
+}
+
+function sanitizePasswordsFromError(errorStr){
+  // Remove sensitive password fields from error messages
+  if(typeof errorStr !== 'string') return String(errorStr);
+  return errorStr
+    .replace(/[\w]*password[\w]*\s*[=:]\s*[^\s,;}\]"]*/gi, '[PASSWORD]')
+    .replace(/"[\w]*password[\w]*"\s*[=:]\s*"[^"]*"/gi, '"[PASSWORD]"');
 }
 
 async function submitPasswordSync(){
@@ -1917,6 +2099,12 @@ async function submitPasswordSync(){
     statusDiv.style.color = 'var(--danger)';
     return;
   }
+
+  if(!isAllowedPassword(newPw)){
+    statusDiv.textContent = 'New password must be at least 6 characters and may only include A-Z, a-z, 0-9, and !@#$%^&*';
+    statusDiv.style.color = 'var(--danger)';
+    return;
+  }
   
   // Get target IPs
   let ips;
@@ -1928,10 +2116,18 @@ async function submitPasswordSync(){
     ips = getSelectedIPs();
   }
   
+  const { eligible, skipped } = getPasswordSyncEligibleIPs(ips);
+  ips = eligible;
+
   if(!ips.length){
-    statusDiv.textContent = 'No devices selected';
+    statusDiv.textContent = skipped.length ? 'No eligible devices selected (encoders/decoders only)' : 'No devices selected';
     statusDiv.style.color = 'var(--danger)';
     return;
+  }
+
+  if(skipped.length){
+    statusDiv.textContent = `Skipping ${skipped.length} switcher/non-eligible device(s)`;
+    statusDiv.style.color = '#f59e0b';
   }
   
   submitBtn.disabled = true;
@@ -1942,30 +2138,35 @@ async function submitPasswordSync(){
   let failCount = 0;
   const errors = [];
   
-  // Send password change to each device
+  // Send password change to each device via legacy HTTP proxy
   for(const ip of ips){
     try{
-      // Encode passwords to base64
-      const oldPasswordB64 = toBase64(currentPw);
-      const newPasswordB64 = toBase64(newPw);
-      
-      const payload = {
-        username: 'admin',
-        oldpassword: oldPasswordB64,
-        newpassword: newPasswordB64
-      };
-      
-      const response = await fetch(`http://${ip}/change/password`, {
+      const response = await fetch('/api/producer/change_password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          ip,
+          username: 'admin',
+          oldpassword: currentPw,
+          newpassword: newPw,
+        })
       });
-      
-      if(response.ok){
+
+      const data = await response.json().catch(()=>null);
+      if(!response.ok){
+        failCount++;
+        const errDetail = data?.error || data?.result || `HTTP ${response.status}`;
+        errors.push(`${ip}: ${typeof errDetail === 'string' ? errDetail : JSON.stringify(errDetail)}`);
+        continue;
+      }
+
+      // Legacy device success contract: HTTP 200 + JSON { code: 0 }
+      if(data && data.ok === true && data.result && data.result.code === 0){
         successCount++;
       } else {
         failCount++;
-        errors.push(`${ip}: ${response.status} ${response.statusText}`);
+        const errDetail = data?.error || data?.result || 'No success code in response';
+        errors.push(`${ip}: ${typeof errDetail === 'string' ? errDetail : JSON.stringify(errDetail)}`);
       }
     }catch(e){
       failCount++;
@@ -1976,6 +2177,14 @@ async function submitPasswordSync(){
   submitBtn.disabled = false;
   
   if(failCount === 0){
+    appConfig.password = newPw;
+    try{
+      await api('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: newPw })
+      });
+    }catch(_e){}
     statusDiv.textContent = `✓ Password set on ${successCount} device(s)`;
     statusDiv.style.color = '#10b981';
     setTimeout(()=>{ closePasswordSync(); }, 2000);
@@ -1988,7 +2197,7 @@ async function submitPasswordSync(){
   }
   
   if(errors.length > 0 && errors.length <= 3){
-    const errorText = errors.join('; ');
+    const errorText = errors.map(e => sanitizePasswordsFromError(e)).join('; ');
     statusDiv.textContent += ` (${errorText})`;
   }
 }
@@ -2001,6 +2210,7 @@ async function submitPasswordSync(){
         if(cfg.password) appConfig.password = cfg.password;
         if(cfg.ws_port) appConfig.ws_port = cfg.ws_port;
         if(cfg.concurrency) appConfig.concurrency = cfg.concurrency;
+        appConfig.is_default_password = !!cfg.is_default_password;
       }
     }catch(e){}
     
@@ -2136,13 +2346,14 @@ async function submitPasswordSync(){
     const shouldPromptClearUnits = serverRows.length > 0 && !hasSeenClearPrompt;
 
     if (shouldPromptClearUnits) {
+      // Mark that we've shown the prompt (don't show again this session)
+      sessionStorage.setItem(CLEAR_UNITS_PROMPT_SESSION_KEY, "1");
+      
       const shouldClearUnits = window.confirm("Clear Units For Optimal Performance");
       if (shouldClearUnits) {
         try {
           const clearResp = await api("/api/clear_units", { method: "POST" });
           if (clearResp && clearResp.ok) {
-            // Set flag only after clear succeeds
-            sessionStorage.setItem(CLEAR_UNITS_PROMPT_SESSION_KEY, "1");
             units = [];
             unitMap.clear();
             saveLocal([]);
@@ -2150,21 +2361,21 @@ async function submitPasswordSync(){
             rerenderFiltered();
             updateTotals();
           } else {
-            // Clear failed; don't set flag so prompt can appear again
+            // Clear failed; still keep flag so prompt doesn't repeat
             units = mergeByIP(units, serverRows);
             saveLocal(units);
             rerenderFiltered();
             updateTotals();
           }
         } catch {
-          // Clear error; don't set flag so prompt can appear again
+          // Clear error; still keep flag so prompt doesn't repeat
           units = mergeByIP(units, serverRows);
           saveLocal(units);
           rerenderFiltered();
           updateTotals();
         }
       } else {
-        // User declined; don't set flag so prompt can appear again next session
+        // User declined; still keep flag so prompt only shows once per session
         units = mergeByIP(units, serverRows);
         saveLocal(units);
         rerenderFiltered();
@@ -2323,7 +2534,7 @@ async function submitPasswordSync(){
     const role = (el.dataset.role||''); if(/^enc/i.test(role)) return true;
     const mdl = (el.dataset.model||'').toLowerCase();
     if(mdl.startsWith('at-luma-e') || mdl.startsWith('at-omni-e')) return true;
-    if(mdl.includes('at-ome-cs31')) return true; // switcher stream endpoint
+    if(mdl.includes('at-ome-cs31') || mdl.includes('cs31')) return true; // switcher stream endpoint
     // treat plain /stream (without query) also as stream source
     const href = (el.href||'');
     return href.includes('/stream');
@@ -2352,7 +2563,9 @@ async function submitPasswordSync(){
     const enc = isEncFrom(link);
     if(enc){
       const typeLabel = (link.dataset.typeLabel||'').toLowerCase();
-      const isSwitcher = typeLabel === 'switcher' || (link.dataset.model||'').toLowerCase().includes('at-ome-cs31');
+      const model = (link.dataset.model||'').toLowerCase();
+      const role = (link.dataset.role||'').toLowerCase();
+      const isSwitcher = typeLabel === 'switcher' || role.includes('switcher') || model.includes('at-ome-cs31') || model.includes('cs31');
       img.src = encoderURL(ip, isSwitcher);
     }else{
       const bump=()=>{ img.src = decoderURL(ip) + '?t=' + Date.now(); };
@@ -2407,7 +2620,9 @@ async function submitPasswordSync(){
     const ip = a.dataset.ip;
     const enc = isEncFrom(a);
     const typeLabel = (a.dataset.typeLabel||'').toLowerCase();
-    const isSwitcher = typeLabel === 'switcher' || (a.dataset.model||'').toLowerCase().includes('at-ome-cs31');
+    const model = (a.dataset.model||'').toLowerCase();
+    const role = (a.dataset.role||'').toLowerCase();
+    const isSwitcher = typeLabel === 'switcher' || role.includes('switcher') || model.includes('at-ome-cs31') || model.includes('cs31');
     const base = enc ? encoderURL(ip, isSwitcher) : decoderURL(ip);
     const url  = enc ? base : (base + '?t=' + Date.now());
     const win = window.open('about:blank', 'preview_'+ip, 'popup=1,width=420,height=280,menubar=0,toolbar=0,location=0,status=0,resizable=1,scrollbars=0');
@@ -2432,7 +2647,6 @@ async function submitPasswordSync(){
   });
 })();
 </script>
-    <script src="/ui/preview_inject_popup_v7.js?v=7"></script>
 
   <!-- Footer with version -->
   <footer style="position:fixed; bottom:0; left:0; right:0; padding:8px 16px; border-top:1px solid var(--border); background:var(--card); font-size:11px; color:var(--muted); text-align:right; z-index:999; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">

@@ -109,6 +109,12 @@
     return m.startsWith("at-luma-e") || m.startsWith("at-omni-e") || /\b(111|112|512|e\d{4})\b/.test(m);
   }
 
+  function isSwitcherUnit(u) {
+    const t = (((u && (u.typeLabel || u.type || u.role)) || "") + "").toLowerCase();
+    const m = ((u && u.model) || "").toLowerCase();
+    return t.includes("switcher") || m.includes("at-ome-cs31") || m.includes("cs31");
+  }
+
   function addPreviewCells() {
     ensureHeader();
     const tb = document.getElementById("tbody");
@@ -118,6 +124,7 @@
       const ip = ipFromRow(tr);
       if (!ip) return;
       const u = unitForIP(ip);
+      if (isSwitcherUnit(u)) return;
       const enc = isEncoderUnit(u);
       const base = enc ? encURL(ip) : decURL(ip);
 

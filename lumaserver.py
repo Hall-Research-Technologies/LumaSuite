@@ -10,8 +10,10 @@ def _upload_fw_cs31_socket(ip: str, firmware_path: str, attempts: list, debug: b
     Observed banner 'Upload data:' indicates non-HTTP; we treat it as prompt then stream bytes.
     Returns (ok, detail, meta)."""
     total_bytes = 0
+    data_bytes = None
     try:
-        data_bytes = open(firmware_path, 'rb').read()
+        with open(firmware_path, 'rb') as f:
+            data_bytes = f.read()
         total_bytes = len(data_bytes)
     except FileNotFoundError:
         return False, 'file not found', {}
@@ -81,6 +83,13 @@ import hashlib
 import requests
 from websocket import create_connection
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Passwords are restricted to alphanumeric plus a fixed special-character set.
+ALLOWED_PASSWORD_RE = re.compile(r"^[A-Za-z0-9!@#$%^&*]+$")
+
+
+def _is_allowed_password(value: str) -> bool:
+    return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
 __version__ = "1.0.0"
@@ -188,11 +197,19 @@ def api_route_matrix():
     data = request.get_json(silent=True) or {}
     decoder_ip = data.get("decoder_ip")
     encoder_ip = data.get("encoder_ip")
+    
+    # Validate IP addresses
+    try:
+        ipaddress.ip_address(decoder_ip)
+        ipaddress.ip_address(encoder_ip)
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "error": "Invalid IP address format"}), 400
+    
     if not decoder_ip or not encoder_ip:
         return jsonify({"ok": False, "error": "Missing decoder_ip or encoder_ip"}), 400
     try:
-        # Use a short timeout for routing (1 second)
-        ROUTE_TIMEOUT = 1.0
+        # Use a longer timeout for routing; switchers may be slower than encoders
+        ROUTE_TIMEOUT = float(CONFIG.get("TIMEOUT", 3.0))
         # 1. Get encoder's current video stream info (fallback to cache if needed)
         streamname = None
         try:
@@ -443,6 +460,26 @@ import sys
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
 
+_NO_WINDOW_SUBPROCESS_KWARGS: Dict[str, Any] = {}
+if os.name == "nt":
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        _NO_WINDOW_SUBPROCESS_KWARGS = {
+            "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            "startupinfo": startupinfo,
+        }
+    except Exception:
+        _NO_WINDOW_SUBPROCESS_KWARGS = {}
+
+
+def _subprocess_run_no_window(cmd, **kwargs):
+    return subprocess.run(cmd, **kwargs, **_NO_WINDOW_SUBPROCESS_KWARGS)
+
+
+def _subprocess_check_output_no_window(cmd, **kwargs):
+    return subprocess.check_output(cmd, **kwargs, **_NO_WINDOW_SUBPROCESS_KWARGS)
+
 # File to persist producer-config (asset paths etc.)
 CONFIG_FILE = os.path.join(DATA_DIR, "producer_config.json")
 
@@ -487,6 +524,84 @@ _load_persisted_config()
 # Export CONFIG into Flask app config so blueprints can read it
 APP.config['LUMA_CONFIG'] = CONFIG
 
+
+SENSITIVE_API_PATHS_REQUIRING_NON_DEFAULT_PASSWORD = {
+    "/api/upgrade",
+    "/api/reset",
+    "/api/remove_units",
+}
+
+
+def _is_default_password_in_use() -> bool:
+    return str(CONFIG.get("password") or "") == "password"
+
+
+def _is_same_origin_request() -> bool:
+    """Allow requests without Origin (CLI/tools), but block browser cross-origin writes."""
+    origin = (request.headers.get("Origin") or "").strip()
+    if not origin:
+        return True
+    expected = f"{request.scheme}://{request.host}"
+    return origin.lower() == expected.lower()
+
+
+@APP.before_request
+def enforce_request_security_guards():
+    if request.method == "OPTIONS":
+        return None
+
+    if request.path.startswith("/api/") and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if not _is_same_origin_request():
+            return jsonify({"ok": False, "error": "cross_origin_blocked"}), 403
+
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if request.path in SENSITIVE_API_PATHS_REQUIRING_NON_DEFAULT_PASSWORD and _is_default_password_in_use():
+            return jsonify({
+                "ok": False,
+                "error": "default_password_change_required",
+                "message": "Change the default password in Settings before performing this action.",
+            }), 403
+
+    return None
+
+
+def _firmware_search_roots() -> List[str]:
+    roots: List[str] = []
+    cfg_root = CONFIG.get("firmware_path")
+    if isinstance(cfg_root, str) and cfg_root.strip():
+        roots.append(os.path.abspath(cfg_root.strip()))
+    roots.append(os.path.abspath(FIRMWARE_DIR))
+    roots.append(os.path.abspath(os.path.join(DATA_DIR, "firmware")))
+
+    deduped: List[str] = []
+    seen = set()
+    for r in roots:
+        key = r.lower() if os.name == "nt" else r
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+    return deduped
+
+
+def _resolve_firmware_path(firmware: str) -> Tuple[Optional[str], List[str]]:
+    checked: List[str] = []
+    if not firmware:
+        return None, checked
+
+    if os.path.isabs(firmware):
+        abs_path = os.path.abspath(firmware)
+        checked.append(abs_path)
+        return (abs_path if os.path.isfile(abs_path) else None), checked
+
+    for root in _firmware_search_roots():
+        candidate = os.path.abspath(os.path.join(root, firmware))
+        checked.append(candidate)
+        if os.path.isfile(candidate):
+            return candidate, checked
+
+    return None, checked
+
 # --- Tuning config endpoint for switcher uploads ---
 @APP.get("/api/switcher_tune", endpoint="switcher_tune_get")
 def api_switcher_tune_get():
@@ -523,13 +638,14 @@ def _tcp_probe(ip, port, timeout_ms=TCP_TIMEOUT_MS):
     s.settimeout(timeout_ms/1000.0)
     try:
         s.connect((ip, port))
-        s.close()
         return True
     except Exception:
         return False
     finally:
-        try: s.close()
-        except Exception: pass
+        try:
+            s.close()
+        except Exception:
+            pass
 
 def _ws_url(ip: str, path: str) -> str:
     port = int(CONFIG.get("ws_port") or 80)
@@ -546,6 +662,7 @@ def _ws_call(ip: str, payload: Dict[str, Any], timeout: float) -> Optional[Dict[
     """
     for p in CONFIG["ws_paths"]:
         url = _ws_url(ip, p)
+        ws = None
         try:
             ws = create_connection(url, timeout=timeout)
             ws.settimeout(timeout)
@@ -612,7 +729,6 @@ def _ws_call(ip: str, payload: Dict[str, Any], timeout: float) -> Optional[Dict[
             
             # Exhausted all read attempts on this path
             logging.warning(f"[ws_call] Exhausted {max_read_attempts} read attempts on {p}")
-            ws.close()
                 
         except socket.timeout:
             logging.debug(f"[ws_call] Connection timeout on {p}")
@@ -623,6 +739,12 @@ def _ws_call(ip: str, payload: Dict[str, Any], timeout: float) -> Optional[Dict[
         except Exception as e:
             logging.debug(f"[ws_call] Error on {p}: {type(e).__name__}: {e}")
             continue
+        finally:
+            if ws:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
     
     logging.warning(f"[ws_call] Failed on all paths for {ip}: {CONFIG['ws_paths']}")
     return None
@@ -759,6 +881,10 @@ def _ws_set_hostname(ip: str, hostname: str, timeout: float) -> Optional[str]:
     if not hostname:
         return None
     
+    # Validate hostname format
+    if not _validate_hostname(hostname):
+        return None
+    
     # Check if this is a Switcher device (OME CS31)
     is_switcher = _is_switcher_device(ip)
     
@@ -817,14 +943,24 @@ def _ws_set_selected_stream_switcher(ip: str, streamname: str, timeout: float) -
     streamname = str(streamname or "").strip()
     if not streamname:
         return None
+    
+    # Validate streamname before sending to device
+    is_valid, err_msg = _validate_streamname(streamname)
+    if not is_valid:
+        logging.warning(f"[_ws_set_selected_stream_switcher] {ip}: invalid streamname - {err_msg}")
+        return None
+    
     try:
         # Switcher format: standard JSON-RPC with params field, no password, selecttype=0
         params = {"selecttype": 0, "streamname": streamname}
         r = _ws_call_switcher_no_password(ip, "SelectVideoStream.Set", params, timeout)
-        if r and "result" in r and isinstance(r["result"], dict):
-            result_stream = r["result"].get("streamname")
-            if isinstance(result_stream, str) and result_stream.strip():
-                return result_stream.strip()
+        # Accept any valid JSON-RPC result (with or without streamname echo).
+        # Some CS31 firmware versions return {} or {"selecttype":0} without echoing streamname.
+        if r and "result" in r and "error" not in r:
+            # Prefer echoed streamname from device; fall back to the value we sent
+            result_stream = r["result"].get("streamname") if isinstance(r["result"], dict) else None
+            return (result_stream.strip() if isinstance(result_stream, str) and result_stream.strip()
+                    else streamname)
     except Exception as e:
         logging.debug(f"[_ws_set_selected_stream_switcher] error for {ip}: {e}")
     return None
@@ -909,11 +1045,11 @@ def _ws_get_mac(ip: str, timeout: float) -> str:
     # ARP fallback (best effort)
     try:
         if platform.system().lower().startswith("win"):
-            out = subprocess.check_output(["arp","-a", ip], text=True, encoding="utf-8", errors="ignore")
+            out = _subprocess_check_output_no_window(["arp","-a", ip], text=True, encoding="utf-8", errors="ignore")
             m = re.search(r"(?i)\b([0-9a-f]{2}(?:-[0-9a-f]{2}){5})\b", out)
             if m: return _normalize_mac(m.group(1))
         else:
-            out = subprocess.check_output(["arp","-n", ip], text=True, encoding="utf-8", errors="ignore")
+            out = _subprocess_check_output_no_window(["arp","-n", ip], text=True, encoding="utf-8", errors="ignore")
             m = re.search(r"(?i)\b([0-9a-f]{2}(?::[0-9a-f]{2}){5})\b", out)
             if m: return _normalize_mac(m.group(1))
     except Exception:
@@ -1089,15 +1225,37 @@ def _ws_get_minimal(ip: str) -> Optional[Dict[str, Any]]:
     out["hostname"] = _ws_get_hostname(ip, SCAN_TIMEOUT) or ""
     out["mac"] = _ws_get_mac(ip, SCAN_TIMEOUT) or ""
 
+    type_hint = _first_key(r, ["Role", "role", "Type", "type", "DeviceType", "deviceType", "devicetype", "DevType", "devtype"]).lower()
     m = (out.get("model","") or "").lower()
+
+    inferred_type = ""
+    inferred_role = ""
+
+    # Highest-priority: explicit switcher model
     if "at-ome-cs31" in m:
-        out["type"] = "switcher"; out["role"] = "Decoder/Switcher"  # Treat as decoder for matrix routing
-    elif m.startswith("hw-luma-e") or m.startswith("at-luma-e"):
-        out["type"] = "encoder"; out["role"] = "Encoder"
-    elif m.startswith("hw-luma-d") or m.startswith("at-luma-d"):
-        out["type"] = "decoder"; out["role"] = "Decoder"
+        inferred_type = "switcher"
+        inferred_role = "Decoder/Switcher"
+    # Next: explicit type/role hints returned by System.Get
+    elif any(tok in type_hint for tok in ["switcher", "cs31"]):
+        inferred_type = "switcher"
+        inferred_role = "Decoder/Switcher"
+    elif any(tok in type_hint for tok in ["encoder", "encode", "transmitter", "tx"]):
+        inferred_type = "encoder"
+        inferred_role = "Encoder"
+    elif any(tok in type_hint for tok in ["decoder", "decode", "receiver", "rx"]):
+        inferred_type = "decoder"
+        inferred_role = "Decoder"
     else:
-        out["type"] = ""; out["role"] = ""
+        # Fallback: model family heuristics
+        if m.startswith(("hw-luma-e", "at-luma-e", "at-omni-e", "at-ome-e")) or re.search(r"(?:^|[-_\s])e\d{3,4}\b", m):
+            inferred_type = "encoder"
+            inferred_role = "Encoder"
+        elif m.startswith(("hw-luma-d", "at-luma-d", "at-omni-d", "at-ome-d")) or re.search(r"(?:^|[-_\s])d\d{3,4}\b", m):
+            inferred_type = "decoder"
+            inferred_role = "Decoder"
+
+    out["type"] = inferred_type
+    out["role"] = inferred_role
     out["status"] = "idle"
     out["status_ts"] = int(time.time())
     if out.get("role") == "Encoder":
@@ -1491,7 +1649,7 @@ def api_adapters():
         # ipconfig fallback on Windows
         if platform.system().lower().startswith("win"):
             try:
-                out = subprocess.check_output(["ipconfig"], text=True, encoding="utf-8", errors="ignore")
+                out = _subprocess_check_output_no_window(["ipconfig"], text=True, encoding="utf-8", errors="ignore")
                 cur=None; ip=None; mask=None
                 for line in out.splitlines():
                     t=line.strip()
@@ -1517,21 +1675,21 @@ def api_adapters():
     return jsonify({"adapters": rows})
 
 def _collect_firmware_files() -> Tuple[List[Tuple[str,int]], List[str]]:
-    checked = []
+    checked: List[str] = []
     names: List[Tuple[str,int]] = []
-    folder = CONFIG.get("firmware_path") or FIRMWARE_DIR
-    checked.append(os.path.abspath(folder))
-    try:
-        if os.path.isdir(folder):
-            for fn in os.listdir(folder):
-                if fn.lower().endswith(".tar.gz"):
-                    p = os.path.join(folder, fn)
-                    try:
-                        names.append((fn, int(os.path.getmtime(p))))
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+    for folder in _firmware_search_roots():
+        checked.append(folder)
+        try:
+            if os.path.isdir(folder):
+                for fn in os.listdir(folder):
+                    if fn.lower().endswith(".tar.gz"):
+                        p = os.path.join(folder, fn)
+                        try:
+                            names.append((fn, int(os.path.getmtime(p))))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
     return names, checked
 
 @APP.get("/api/files")
@@ -1546,7 +1704,7 @@ def api_files():
     return jsonify({
         "files": rows,
         "searched": checked,
-        "base_dir": os.path.abspath(CONFIG.get("firmware_path") or FIRMWARE_DIR)
+        "base_dir": _firmware_search_roots()[0] if _firmware_search_roots() else os.path.abspath(FIRMWARE_DIR)
     })
 
 @APP.get("/api/cache")
@@ -1627,15 +1785,16 @@ def api_heartbeat():
 
 @APP.post("/api/clear_units")
 def api_clear_units():
+    # Atomic: clear memory and file together under single lock
     with cache_lock:
         cache_units.clear()
-    # Use consistent array format
-    try:
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump([], f, ensure_ascii=False, indent=2)
-        logging.info("[clear_units] reset units_cache.json to empty list")
-    except Exception as e:
-        logging.warning(f"[clear_units] failed to reset file: {e}")
+        try:
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            logging.info("[clear_units] reset units_cache.json to empty list")
+        except Exception as e:
+            logging.warning(f"[clear_units] failed to reset file: {e}")
+            return jsonify({"ok": False, "error": f"failed to persist: {e}"}), 500
     return jsonify({"ok": True})
 
 @APP.post("/api/remove_units")
@@ -1697,7 +1856,14 @@ def api_config():
             pass
     if "password" in data:
         try:
-            CONFIG["password"] = str(data["password"]).strip()
+            candidate_password = str(data["password"]).strip()
+            if candidate_password and not _is_allowed_password(candidate_password):
+                return jsonify({
+                    "ok": False,
+                    "error": "invalid_password",
+                    "details": "Password must be at least 6 characters and may only include A-Z, a-z, 0-9, and !@#$%^&*",
+                }), 400
+            CONFIG["password"] = candidate_password
         except Exception:
             pass
 
@@ -1815,6 +1981,32 @@ def _scan_one(ip: str) -> Optional[Dict[str, Any]]:
     is_encoder = "encoder" in role
     is_decoder_like = ("decoder" in role) or ("switcher" in role)
 
+    # Fallback role probe for devices with non-standard model strings or missing role hints.
+    # Prefer protocol capabilities over naming heuristics.
+    if not is_encoder and not is_decoder_like:
+        try:
+            enc_probe = _ws_call_auth(ip, "VideoMultiIpStream.Get", {}, timeout)
+            if isinstance(enc_probe, dict) and "result" in enc_probe and isinstance(enc_probe.get("result"), dict):
+                base["type"] = "encoder"
+                base["role"] = "Encoder"
+                role = "encoder"
+                is_encoder = True
+                logging.info(f"[scan_one] {ip} role inferred by encoder probe")
+        except Exception as e:
+            logging.debug(f"[scan_one] {ip} encoder probe failed: {e}")
+
+    if not is_encoder and not is_decoder_like:
+        try:
+            dec_probe = _ws_call_auth(ip, "SelectVideoStream.Get", {"password": CONFIG.get("password", "password")}, timeout)
+            if isinstance(dec_probe, dict) and "result" in dec_probe:
+                base["type"] = "decoder"
+                base["role"] = "Decoder"
+                role = "decoder"
+                is_decoder_like = True
+                logging.info(f"[scan_one] {ip} role inferred by decoder probe")
+        except Exception as e:
+            logging.debug(f"[scan_one] {ip} decoder probe failed: {e}")
+
     # Fetch encoder/decoder details with retry logic
     max_retries = 2  # Allow up to 2 additional attempts
     attempt = 0
@@ -1852,6 +2044,18 @@ def api_scan():
     logging.debug(f"[api_scan] received data: {data}")
     targets = data.get("targets") or ""
     ips = _expand_targets(targets)
+    
+    # Validate all IPs are properly formatted
+    invalid_ips = []
+    for ip in ips:
+        try:
+            ipaddress.ip_address(ip)
+        except (ValueError, TypeError):
+            invalid_ips.append(ip)
+    if invalid_ips:
+        logging.warning(f"[api_scan] Skipping {len(invalid_ips)} invalid IPs: {invalid_ips}")
+        ips = [ip for ip in ips if ip not in invalid_ips]
+    
     logging.info(f"[API_SCAN] Expanded to {len(ips)} IPs")
     logging.debug(f"[api_scan] expanded targets: {ips}")
     if not ips:
@@ -1900,6 +2104,20 @@ def api_scan():
             
             # Only add devices that are encoders, decoders, or switchers
             role = (info.get("role") or info.get("type") or "").strip().lower()
+            if not role:
+                model_l = (info.get("model") or "").strip().lower()
+                if "at-ome-cs31" in model_l:
+                    role = "switcher"
+                    info["type"] = info.get("type") or "switcher"
+                    info["role"] = info.get("role") or "Decoder/Switcher"
+                elif model_l.startswith(("hw-luma-e", "at-luma-e", "at-omni-e")):
+                    role = "encoder"
+                    info["type"] = info.get("type") or "encoder"
+                    info["role"] = info.get("role") or "Encoder"
+                elif model_l.startswith(("hw-luma-d", "at-luma-d", "at-omni-d")):
+                    role = "decoder"
+                    info["type"] = info.get("type") or "decoder"
+                    info["role"] = info.get("role") or "Decoder"
             if not any(r in role for r in ["encoder", "decoder", "switcher"]):
                 logging.info(f"[api_scan] Skipping {ip} - not an encoder/decoder/switcher (role: {role}, model: {info.get('model', 'unknown')})")
                 continue
@@ -2249,11 +2467,11 @@ def _upload_fw_cs31_multi(ip: str, firmware_path: str, session: requests.Session
         
         try:
             # Re-create file object for each attempt
-            file_obj = io.BytesIO(data_bytes)
-            files = {field: (fname, file_obj, ctype)}
-            
-            # Use longer timeout for firmware upload
-            resp = session.post(url, files=files, timeout=600)
+            with io.BytesIO(data_bytes) as file_obj:
+                files = {field: (fname, file_obj, ctype)}
+
+                # Use longer timeout for firmware upload
+                resp = session.post(url, files=files, timeout=600)
             
             status = resp.status_code
             snippet = (resp.text or "")[:200]
@@ -2315,7 +2533,14 @@ def _upload_fw_cs31_multi(ip: str, firmware_path: str, session: requests.Session
     logging.error(f"[CS31] All {len(primary_attempts)} upload attempts failed")
     return False, "all_attempts_failed", attempts
 
-def _monitor_cs31_upgrade(ip: str, firmware_path: str, session: requests.Session, timeout_sec: int = 600, debug: bool = False) -> Tuple[bool, str, List[Dict[str, Any]]]:
+def _monitor_cs31_upgrade(
+    ip: str,
+    firmware_path: str,
+    session: requests.Session,
+    timeout_sec: int = 600,
+    debug: bool = False,
+    baseline_version: Optional[str] = None,
+) -> Tuple[bool, str, List[Dict[str, Any]]]:
     """Monitor CS31 firmware upgrade progress after upload.
     
     Status progression: sending file -> updating -> rebooting -> confirm version -> success
@@ -2344,7 +2569,9 @@ def _monitor_cs31_upgrade(ip: str, firmware_path: str, session: requests.Session
     logging.info(f"[CS31-Monitor] Firmware: {fname}")
     logging.info(f"[CS31-Monitor] Expected version: {expected_version or 'unknown'}")
     
-    version_before_upgrade = None
+    version_before_upgrade = (baseline_version or "").strip() or None
+    consecutive_changed_while_reachable = 0
+    version_validated_after_reboot = False
     
     while time.time() - start_time < timeout_sec:
         elapsed = int(time.time() - start_time)
@@ -2357,7 +2584,7 @@ def _monitor_cs31_upgrade(ip: str, firmware_path: str, session: requests.Session
                 cmd = ["ping", "-n", "1", "-w", "1000", ip]
             else:
                 cmd = ["ping", "-c", "1", "-W", "1", ip]
-            rc = sp.run(cmd, capture_output=True, text=True, timeout=3)
+            rc = _subprocess_run_no_window(cmd, capture_output=True, text=True, timeout=3)
             is_reachable = rc.returncode == 0
         except Exception:
             is_reachable = False
@@ -2412,21 +2639,54 @@ def _monitor_cs31_upgrade(ip: str, firmware_path: str, session: requests.Session
         version_str = f" version={current_version}" if current_version else ""
         logging.info(f"[CS31-Monitor] {elapsed}s: ping={ping_status} status={status}{version_str}")
         
+        # If reboot is not observable via ping (or is too brief to catch),
+        # allow completion based on stable, changed version while reachable.
+        if is_reachable and first_unreachable_time is None and version_before_upgrade and current_version:
+            if current_version != version_before_upgrade:
+                consecutive_changed_while_reachable += 1
+            else:
+                consecutive_changed_while_reachable = 0
+
+            if consecutive_changed_while_reachable >= 2:
+                logging.info(
+                    f"[CS31-Monitor] Upgrade complete without observed reboot: {version_before_upgrade} -> {current_version}"
+                )
+                telemetry.append({
+                    "elapsed_sec": elapsed,
+                    "ping": ping_status,
+                    "status": "confirm_version",
+                    "version": current_version,
+                    "version_before": version_before_upgrade,
+                    "version_changed": True,
+                    "version_match_expected": (expected_version in current_version) if expected_version else True,
+                    "reboot_observed": False,
+                })
+
+                if expected_version and (expected_version not in current_version and current_version not in expected_version):
+                    return False, f"upgrade_failed: version_mismatch (expected: {expected_version}, got: {current_version})", telemetry
+
+                return True, f"success (version changed without observed reboot: {version_before_upgrade} -> {current_version})", telemetry
+
         # Check for upgrade completion
-        if is_reachable and first_unreachable_time is not None:
+        if is_reachable and first_unreachable_time is not None and not version_validated_after_reboot:
             # Device came back online after rebooting
+            version_validated_after_reboot = True
             reboot_duration = int(time.time() - first_unreachable_time)
             logging.info(f"[CS31-Monitor] Device rebooted in {reboot_duration}s, now confirming version")
             status = "confirm_version"
             
+            # Wait longer for device to fully stabilize after reboot before checking version
+            logging.info(f"[CS31-Monitor] Waiting 3s for device to stabilize post-reboot...")
+            time.sleep(3)
+            
             # Check version several times to ensure stability
             version_checks = 0
             version_stable = True
-            last_observed_version = current_version
-            all_versions = [current_version] if current_version else []
+            last_observed_version = None
+            all_versions = []
             
-            for check in range(3):
-                time.sleep(1)
+            for check in range(4):
+                time.sleep(2)  # Increased sleep between checks to avoid hammering device
                 try:
                     sysinfo = _ws_call_auth(ip, "System.Get", {}, timeout=2.0)
                     if sysinfo and "result" in sysinfo:
@@ -2440,13 +2700,13 @@ def _monitor_cs31_upgrade(ip: str, firmware_path: str, session: requests.Session
                             sysinfo["result"].get("version")
                         )
                         all_versions.append(observed)
-                        if observed != last_observed_version:
+                        if last_observed_version is not None and observed != last_observed_version:
                             version_stable = False
                         last_observed_version = observed
                         version_checks += 1
-                        logging.info(f"[CS31-Monitor] Version check {check+1}/3: {observed}")
-                except Exception:
-                    pass
+                        logging.info(f"[CS31-Monitor] Version check {check+1}/4: {observed}")
+                except Exception as e:
+                    logging.debug(f"[CS31-Monitor] Version check {check+1}/4 failed: {e}")
             
             final_version = last_observed_version
             
@@ -2525,11 +2785,10 @@ def api_upgrade():
         logging.error(f"[api_upgrade] missing targets or firmware: targets={targets}, firmware={firmware}")
         return jsonify({"ok": False, "error":"missing targets or firmware"}), 400
 
-    # firmware is filename; look ONLY in ./firmware
-    if os.path.isabs(firmware):
-        firmware_path = firmware
-    else:
-        firmware_path = os.path.join(FIRMWARE_DIR, firmware)
+    firmware_path, checked_paths = _resolve_firmware_path(firmware)
+    if not firmware_path:
+        logging.error(f"[api_upgrade] firmware not found: firmware={firmware} checked={checked_paths}")
+        return jsonify({"ok": False, "error": "firmware_not_found", "firmware": firmware, "checked": checked_paths}), 400
 
     results = {}
     for ip in targets:
@@ -2548,6 +2807,13 @@ def api_upgrade():
             steps.append({"step":"login","result":"fail"})
         # Detect switcher (CS31) device by cached model or firmware filename prefix
         cached = cache_units.get(ip, {}) if isinstance(cache_units, dict) else {}
+        baseline_version = (
+            cached.get("version")
+            or cached.get("firmware")
+            or cached.get("fwver")
+            or cached.get("FWVersion")
+            or ""
+        )
         model_l = (cached.get("model") or "").lower()
         is_switcher = ("at-ome-cs31" in model_l) or os.path.basename(firmware_path).lower().startswith("at-ome-cs31")
         try:
@@ -2569,7 +2835,14 @@ def api_upgrade():
             # After successful upload, monitor the upgrade progress
             if ok_up:
                 logging.info(f"[api_upgrade] Upload successful for {ip}, starting upgrade monitor...")
-                mon_ok, mon_detail, mon_telem = _monitor_cs31_upgrade(ip, firmware_path, sess, timeout_sec=600, debug=bool(data.get("debug")))
+                mon_ok, mon_detail, mon_telem = _monitor_cs31_upgrade(
+                    ip,
+                    firmware_path,
+                    sess,
+                    timeout_sec=600,
+                    debug=bool(data.get("debug")),
+                    baseline_version=baseline_version,
+                )
                 steps.append({"step":"monitor_upgrade","result":"ok" if mon_ok else "fail","detail":mon_detail, "telemetry": mon_telem})
                 ok_up = mon_ok
             
@@ -2599,7 +2872,7 @@ def api_ping():
         else:
             secs = max(1, int(round(timeout_ms/1000.0)))
             cmd = ["ping", "-c", "1", "-W", str(secs), ip]
-        rc = sp.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=max(1, int(round(timeout_ms/1000.0))+2))
+        rc = _subprocess_run_no_window(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=max(1, int(round(timeout_ms/1000.0))+2))
         out = rc.stdout + rc.stderr
         reachable = rc.returncode == 0 or ("bytes=32" in out and "TTL=" in out)
         return jsonify({"ok": True, "reachable": bool(reachable)})
@@ -2645,6 +2918,7 @@ PRODUCER_ALLOWED_METHODS = {
     "System.Get", "SystemBlinkLed.Set",
     "HdcpAnnouncement.Get", "HdcpAnnouncement.Set",
     "Platform.Reboot",
+    "LoginPassword.Set",
 }
 
 def _producer_merge_password(params: dict) -> dict:
@@ -2652,6 +2926,13 @@ def _producer_merge_password(params: dict) -> dict:
     # Use configured server password unless caller overrides
     p.setdefault("password", CONFIG.get("password", "password"))
     return p
+
+def _producer_mint_http_bearer(username: str = "admin", password: str = "password", role: int = 2) -> str:
+    payload_meta = json.dumps({"create_time": str(int(time.time())), "role": role}).encode("utf-8")
+    payload_auth = json.dumps({"password": password, "username": username}).encode("utf-8")
+    part1 = base64.b64encode(payload_meta).decode("utf-8").rstrip("=")
+    part2 = base64.b64encode(payload_auth).decode("utf-8").rstrip("=")
+    return f"{part1}.{part2}"
 
 @app.post("/api/producer/jsonrpc")
 def api_producer_jsonrpc():
@@ -2722,6 +3003,76 @@ def api_producer_jsonrpc():
     except Exception as e:
         logging.error(f"[producer-proxy] Exception: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.post("/api/producer/change_password")
+def api_producer_change_password():
+    """Proxy legacy HTTP password change to a unit.
+
+    Body: { "ip": "10.1.1.13", "username": "admin", "oldpassword": "password", "newpassword": "newpass", "timeout": 8.0 }
+    Device success contract: HTTP 200 + JSON {"code": 0}
+    """
+    try:
+        body = request.get_json(force=True, silent=False) or {}
+        ip = str(body.get("ip") or "").strip()
+        username = str(body.get("username") or CONFIG.get("username", "admin") or "admin").strip() or "admin"
+        oldpassword = str(body.get("oldpassword") or "")
+        newpassword = str(body.get("newpassword") or "")
+        timeout = float(body.get("timeout") or 8.0)
+
+        if not ip or not oldpassword or not newpassword:
+            return jsonify({"ok": False, "error": "ip, oldpassword and newpassword are required"}), 400
+
+        if not _is_allowed_password(newpassword):
+            return jsonify({
+                "ok": False,
+                "error": "invalid_password",
+                "details": "newpassword must be at least 6 characters and may only include A-Z, a-z, 0-9, and !@#$%^&*",
+            }), 400
+
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return jsonify({"ok": False, "error": "invalid ip"}), 400
+
+        encoded_old = base64.b64encode(oldpassword.encode("utf-8")).decode("ascii")
+        encoded_new = base64.b64encode(newpassword.encode("utf-8")).decode("ascii")
+        bearer = _producer_mint_http_bearer(username=username, password=oldpassword, role=2)
+        url = f"{CONFIG.get('http_scheme', 'http')}://{ip}/change/password"
+
+        headers = {
+            "Authorization": f"Bearer {bearer}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
+        }
+        payload = {
+            "username": username,
+            "newpassword": encoded_new,
+            "oldpassword": encoded_old,
+        }
+
+        logging.info(f"[producer-password] POST legacy password change to {ip}")
+        resp = requests.post(url, json=payload, headers=headers, timeout=timeout, verify=bool(CONFIG.get("http_verify_tls", False)))
+
+        response_json = None
+        response_text = ""
+        try:
+            response_json = resp.json()
+        except Exception:
+            response_text = resp.text[:200]
+
+        ok = resp.ok and isinstance(response_json, dict) and response_json.get("code") == 0
+        if ok:
+            return jsonify({"ok": True, "result": response_json})
+
+        return jsonify({
+            "ok": False,
+            "status": resp.status_code,
+            "result": response_json,
+            "error": response_text or "password_change_failed",
+        }), 502
+    except Exception as e:
+        logging.error(f"[producer-password] Exception: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @APP.post("/api/producer/test_device")
 def test_device():
