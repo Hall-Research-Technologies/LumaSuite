@@ -22,7 +22,7 @@ jobs:
           - os: windows-latest
             mac_arch: ""
             artifact_name: LumaSuite-Windows
-          - os: macos-13
+          - os: macos-15-intel
             mac_arch: x86_64
             artifact_name: LumaSuite-macOS-intel
           - os: macos-latest
