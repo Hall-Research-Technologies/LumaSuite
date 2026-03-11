@@ -117,6 +117,15 @@ For reproducible builds (recommended for release artifacts), use:
    - Python Tkinter (usually included in Linux distributions)
    - For headless systems, redirect output and use SSH X11 forwarding if needed
 
+7. **Desktop launcher with icon (recommended on Ubuntu):**
+   ```bash
+   cd dist/Linux
+   chmod +x install-lumasuite-desktop.sh run-lumasuite.sh LumaSuite
+   ./install-lumasuite-desktop.sh
+   ```
+   This installs a trusted launcher in `~/.local/share/applications/lumasuite.desktop`
+   and registers the icon so you do not get the generic gear icon.
+
 ## Features
 
 - **Standalone:** No Python installation required on end-user machines

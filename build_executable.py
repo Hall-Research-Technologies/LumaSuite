@@ -311,12 +311,60 @@ Type=Application
 Name=LumaSuite
 Comment=LumaSuite control launcher
 Exec=./LumaSuite
-Icon=./LumaSuite.png
+Icon=LumaSuite
 Terminal=false
 Categories=Network;Utility;
 """
     desktop_file.write_text(desktop_content, encoding='utf-8')
     os.chmod(desktop_file, 0o755)
+
+    run_script = linux_dist / 'run-lumasuite.sh'
+    run_script.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+chmod +x "$SCRIPT_DIR/LumaSuite"
+exec "$SCRIPT_DIR/LumaSuite"
+""", encoding='utf-8')
+    os.chmod(run_script, 0o755)
+
+    install_script = linux_dist / 'install-lumasuite-desktop.sh'
+    install_script.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP="$SCRIPT_DIR/LumaSuite"
+ICON="$SCRIPT_DIR/LumaSuite.png"
+DESKTOP_FILE="$HOME/.local/share/applications/lumasuite.desktop"
+
+mkdir -p "$HOME/.local/share/applications"
+mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
+
+chmod +x "$APP"
+if [[ -f "$ICON" ]]; then
+  cp "$ICON" "$HOME/.local/share/icons/hicolor/256x256/apps/lumasuite.png"
+fi
+
+cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=LumaSuite
+Comment=LumaSuite control launcher
+Exec=$APP
+Icon=lumasuite
+Terminal=false
+Categories=Network;Utility;
+EOF
+
+chmod +x "$DESKTOP_FILE"
+if command -v gio >/dev/null 2>&1; then
+  gio set "$DESKTOP_FILE" metadata::trusted true || true
+fi
+update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+
+echo "Installed launcher: $DESKTOP_FILE"
+echo "You can now open LumaSuite from Show Applications."
+""", encoding='utf-8')
+    os.chmod(install_script, 0o755)
 
     print("[OK] Linux binary built successfully")
     print(f"  Location: {PROJECT_DIR / 'dist' / 'Linux' / 'LumaSuite'}")
