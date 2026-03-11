@@ -10,7 +10,41 @@ import threading
 import time
 import webbrowser
 import socket
+import traceback
 from pathlib import Path
+
+
+def _get_log_path() -> Path:
+    if sys.platform == 'darwin':
+        base = Path.home() / 'Library' / 'Logs' / 'LumaSuite'
+    elif sys.platform == 'win32':
+        base = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'LumaSuite' / 'logs'
+    else:
+        base = Path.home() / '.lumasuite' / 'logs'
+    base.mkdir(parents=True, exist_ok=True)
+    return base / 'launcher.log'
+
+
+LOG_PATH = _get_log_path()
+
+
+def log_message(message: str):
+    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    line = f"[{timestamp}] {message}"
+    print(line)
+    try:
+        with LOG_PATH.open('a', encoding='utf-8') as log_file:
+            log_file.write(line + '\n')
+    except Exception:
+        pass
+
+
+def _log_unhandled_exception(exc_type, exc_value, exc_traceback):
+    details = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    log_message(f"Unhandled exception:\n{details}")
+
+
+sys.excepthook = _log_unhandled_exception
 
 # Try to import GUI libraries
 try:
@@ -19,8 +53,8 @@ try:
     from PIL import Image, ImageTk
     import pystray
 except ImportError as e:
-    print(f"Error: Required GUI library not available: {e}")
-    print("This requires tkinter, Pillow (PIL), and pystray")
+    log_message(f"Error: Required GUI library not available: {e}")
+    log_message("This requires tkinter, Pillow (PIL), and pystray")
     sys.exit(1)
 
 # Application Version
@@ -40,7 +74,7 @@ sys.path.insert(0, str(BASE_DIR))
 try:
     from lumaserver import APP as app
 except ImportError as e:
-    print(f"Error importing lumaserver: {e}")
+    log_message(f"Error importing lumaserver: {e}")
     sys.exit(1)
 
 
@@ -70,7 +104,7 @@ class AppWindow:
             try:
                 self.root.iconbitmap(favicon_path)
             except Exception as e:
-                print(f"Could not set window icon: {e}")
+                log_message(f"Could not set window icon: {e}")
         
         # Center window on screen
         self.root.update_idletasks()
@@ -81,8 +115,12 @@ class AppWindow:
         # Create UI
         self.create_widgets()
         
-        # Setup system tray icon
-        self.setup_tray_icon()
+        # pystray is fragile on macOS app bundles, especially on Apple Silicon.
+        # Skip it there and rely on the main window instead.
+        if sys.platform != 'darwin':
+            self.setup_tray_icon()
+        else:
+            log_message("Skipping tray icon setup on macOS")
         
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -127,7 +165,7 @@ class AppWindow:
                 logo_label = tk.Label(main_frame, image=self.logo_photo, bg="#000000", bd=0)
                 logo_label.pack(pady=(6, 6))
             except Exception as e:
-                print(f"Could not load logo image: {e}")
+                log_message(f"Could not load logo image: {e}")
         
         # Title with better styling
         title = tk.Label(
@@ -236,7 +274,7 @@ class AppWindow:
                 footer_logo_label.pack(pady=(0, 6))
                 footer_logo_label.bind("<Button-1>", lambda e: webbrowser.open("https://www.hallresearch.com"))
             except Exception as e:
-                print(f"Could not load footer logo image: {e}")
+                log_message(f"Could not load footer logo image: {e}")
     
     def setup_tray_icon(self):
         """Setup system tray icon with favicon"""
@@ -257,10 +295,10 @@ class AppWindow:
                 
                 self.tray_icon = pystray.Icon("LumaSuite", icon_image, "LumaSuite", menu)
                 
-                # Start tray icon in background thread
+                # On non-macOS platforms, running the tray loop in a daemon thread is sufficient.
                 threading.Thread(target=self.tray_icon.run, daemon=True).start()
             except Exception as e:
-                print(f"Could not create system tray icon: {e}")
+                log_message(f"Could not create system tray icon: {e}")
     
     def show_window(self):
         """Show the main window"""
@@ -280,6 +318,7 @@ class AppWindow:
         """Run the Flask app"""
         try:
             self.running = True
+            log_message(f"Starting server on {self.host}:{self.port}")
             # Suppress Flask logging for cleaner output
             import logging
             log = logging.getLogger('werkzeug')
@@ -293,7 +332,8 @@ class AppWindow:
                 threaded=True
             )
         except Exception as e:
-            print(f"Server error: {e}")
+            log_message(f"Server error: {e}")
+            log_message(traceback.format_exc())
             self.running = False
     
     def is_server_ready(self):
@@ -329,6 +369,7 @@ class AppWindow:
     
     def on_server_ready(self, url):
         """Called when server is ready"""
+        log_message(f"Server ready at {url}")
         self.status_label.config(text="✓ Server Running", fg="#4CAF50")
         self.url_text.set(url)
         self.open_btn.config(state="normal")
@@ -338,6 +379,7 @@ class AppWindow:
     
     def on_server_failed(self):
         """Called if server fails to start"""
+        log_message("Server failed to start before timeout")
         self.status_label.config(text="✗ Server Failed to Start", fg="#f44336")
         self.open_btn.config(state="disabled")
         messagebox.showerror("Server Error", "Failed to start the server. Please check the logs.")
@@ -346,8 +388,10 @@ class AppWindow:
         """Open the web UI in the default browser"""
         url = f"http://{self.host}:{self.port}"
         try:
+            log_message(f"Opening browser at {url}")
             webbrowser.open(url)
         except Exception as e:
+            log_message(f"Browser error: {e}")
             messagebox.showerror("Browser Error", f"Failed to open browser: {e}")
     
     def on_close(self):
@@ -372,10 +416,16 @@ def main():
         elif arg.startswith('--port='):
             port = int(arg.split('=')[1])
     
-    # Create and run GUI
-    root = tk.Tk()
-    app_window = AppWindow(root, host, port)
-    root.mainloop()
+    log_message(f"Launcher starting. Frozen={IS_FROZEN} BaseDir={BASE_DIR}")
+    log_message(f"Log file: {LOG_PATH}")
+    try:
+        root = tk.Tk()
+        app_window = AppWindow(root, host, port)
+        root.mainloop()
+    except Exception as e:
+        log_message(f"Fatal launcher error: {e}")
+        log_message(traceback.format_exc())
+        raise
 
 
 if __name__ == '__main__':
