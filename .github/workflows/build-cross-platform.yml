@@ -84,3 +84,27 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/Linux/*
+
+      - name: Upload Windows warning log
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: warn-${{ matrix.artifact_name }}
+          path: build/Windows/LumaSuite/warn-LumaSuite.txt
+          if-no-files-found: ignore
+
+      - name: Upload macOS warning log
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: warn-${{ matrix.artifact_name }}
+          path: build/macOS/LumaSuite/warn-LumaSuite.txt
+          if-no-files-found: ignore
+
+      - name: Upload Linux warning log
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: warn-${{ matrix.artifact_name }}
+          path: build/Linux/LumaSuite/warn-LumaSuite.txt
+          if-no-files-found: ignore
