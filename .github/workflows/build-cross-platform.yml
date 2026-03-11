@@ -1,5 +1,8 @@
 name: Build Cross Platform
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -108,3 +111,48 @@ jobs:
           name: warn-${{ matrix.artifact_name }}
           path: build/Linux/LumaSuite/warn-LumaSuite.txt
           if-no-files-found: ignore
+
+      - name: Package Windows release asset
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Compress-Archive -Path dist/Windows/LumaSuite.exe -DestinationPath "release/LumaSuite-${{ github.ref_name }}-windows.zip" -Force
+
+      - name: Package macOS release asset
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p release
+          zip_name="release/LumaSuite-${{ github.ref_name }}-${{ matrix.mac_arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent dist/macOS/LumaSuite.app "$zip_name"
+
+      - name: Package Linux release asset
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release
+          tar -C dist/Linux -czf "release/LumaSuite-${{ github.ref_name }}-linux.tar.gz" LumaSuite LumaSuite.desktop LumaSuite.png run-lumasuite.sh install-lumasuite-desktop.sh
+
+      - name: Upload packaged release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact_name }}
+          path: release/*
+          if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*
