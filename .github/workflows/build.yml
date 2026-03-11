@@ -17,8 +17,17 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            mac_arch: ""
+            artifact_name: LumaSuite-Linux
           - os: windows-latest
+            mac_arch: ""
+            artifact_name: LumaSuite-Windows
+          - os: macos-13
+            mac_arch: x86_64
+            artifact_name: LumaSuite-macOS-intel
           - os: macos-latest
+            mac_arch: arm64
+            artifact_name: LumaSuite-macOS-arm64
  
     steps:
       - name: Checkout repository
@@ -46,6 +55,8 @@ jobs:
 
       - name: Build macOS
         if: runner.os == 'macOS'
+        env:
+          PYI_MACOS_ARCH: ${{ matrix.mac_arch }}
         run: python build_executable.py macos
 
       - name: Build Linux
@@ -60,7 +71,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: LumaSuite-Windows
+          name: ${{ matrix.artifact_name }}
           path: dist/Windows/*.exe
           if-no-files-found: error
 
@@ -68,7 +79,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: LumaSuite-macOS-universal
+          name: ${{ matrix.artifact_name }}
           path: dist/macOS/*.app
           if-no-files-found: error
 
@@ -76,7 +87,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: LumaSuite-Linux
+          name: ${{ matrix.artifact_name }}
           path: dist/Linux/*
           if-no-files-found: error
 
@@ -86,6 +97,6 @@ jobs:
         with:
           name: warn-${{ runner.os }}
           path: |
-            build/Windows/warn-LumaSuite.txt
-            build/macOS/warn-LumaSuite.txt
-            build/Linux/warn-LumaSuite.txt
+            build/Windows/LumaSuite/warn-LumaSuite.txt
+            build/macOS/LumaSuite/warn-LumaSuite.txt
+            build/Linux/LumaSuite/warn-LumaSuite.txt

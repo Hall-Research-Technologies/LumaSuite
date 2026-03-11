@@ -15,10 +15,20 @@ jobs:
         include:
           - os: windows-latest
             platform: Windows
+            mac_arch: ""
+            artifact_name: LumaSuite-Windows
+          - os: macos-13
+            platform: macOS
+            mac_arch: x86_64
+            artifact_name: LumaSuite-macOS-intel
           - os: macos-latest
             platform: macOS
+            mac_arch: arm64
+            artifact_name: LumaSuite-macOS-arm64
           - os: ubuntu-latest
             platform: Linux
+            mac_arch: ""
+            artifact_name: LumaSuite-Linux
 
     steps:
       - name: Checkout
@@ -46,6 +56,8 @@ jobs:
 
       - name: Build macOS
         if: runner.os == 'macOS'
+        env:
+          PYI_MACOS_ARCH: ${{ matrix.mac_arch }}
         run: python build_executable.py macos
 
       - name: Build Linux
@@ -56,19 +68,19 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: LumaSuite-Windows
+          name: ${{ matrix.artifact_name }}
           path: dist/Windows/LumaSuite.exe
 
       - name: Upload macOS artifact
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: LumaSuite-macOS-universal
+          name: ${{ matrix.artifact_name }}
           path: dist/macOS/*.app
 
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: LumaSuite-Linux
+          name: ${{ matrix.artifact_name }}
           path: dist/Linux/*

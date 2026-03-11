@@ -140,12 +140,16 @@ def build_windows():
     print(f"  Location: {PROJECT_DIR / 'dist' / 'Windows' / 'LumaSuite.exe'}")
 
 def build_mac():
-    """Build macOS .app (universal binary for both Intel and Apple Silicon)"""
+    """Build macOS .app for a specific architecture (arm64 or x86_64)."""
     if platform.system() != 'Darwin':
         print("macOS build must be run on macOS. Skipping.")
         return
     print("\n" + "="*60)
-    print("Building macOS .app (universal binary)")
+    target_arch = os.environ.get('PYI_MACOS_ARCH')
+    if not target_arch:
+        machine = platform.machine().lower()
+        target_arch = 'arm64' if 'arm' in machine else 'x86_64'
+    print(f"Building macOS .app ({target_arch})")
     print("="*60)
     
     add_data_sep = ':'
@@ -201,7 +205,7 @@ def build_mac():
         '--windowed',
         '--name=LumaSuite',
         '--osx-bundle-identifier=com.lumasuite.app',
-        '--target-architecture=universal2',
+        f'--target-architecture={target_arch}',
         '--add-data', f"{ui_src}{add_data_sep}ui",
         '--add-data', f"{hallway_logo}{add_data_sep}.",
         '--add-data', f"{footer_logo}{add_data_sep}.",
@@ -217,7 +221,6 @@ def build_mac():
         '--hidden-import=PIL.ImageTk',
         '--collect-submodules=PIL',
         '--collect-data=PIL',
-        '--collect-binaries=PIL',
         '--hidden-import=pystray',
         '--hidden-import=pystray._darwin',
         str(LAUNCHER)
@@ -226,7 +229,7 @@ def build_mac():
         pyinstaller_cmd.insert(6, icon_arg)
     
     run_command(pyinstaller_cmd)
-    print("[OK] macOS .app built successfully (universal binary)")
+    print(f"[OK] macOS .app built successfully ({target_arch})")
     print(f"  Location: {PROJECT_DIR / 'dist' / 'macOS' / 'LumaSuite.app'}")
 
 def build_linux():
