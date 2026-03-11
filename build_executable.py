@@ -94,12 +94,12 @@ def build_windows():
     if not footer_logo.exists():
         print(f"Warning: footer logo not found at {footer_logo}")
     
-    # Create a clean temp ui folder without zip files
-    print("Creating temporary UI folder (excluding .zip files)...")
+    # Create a clean temp ui folder without archives or unneeded logos.
+    print("Creating temporary UI folder (excluding .zip files and logos/)...")
     _remove_path(ui_temp)
     _remove_path(dist_target / 'LumaSuite.exe')
     _remove_path(build_target)
-    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip'))
+    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*'))
 
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
@@ -156,6 +156,7 @@ def build_mac():
     
     add_data_sep = ':'
     ui_src = PROJECT_DIR / 'ui'
+    ui_temp = PROJECT_DIR / 'ui_temp_build_macos'
     dist_target = PROJECT_DIR / 'dist' / 'macOS'
     build_target = PROJECT_DIR / 'build' / 'macOS'
     hallway_logo = PROJECT_DIR / 'hallway.png'
@@ -199,6 +200,8 @@ def build_mac():
 
     _remove_path(build_target)
     _remove_path(dist_target / 'LumaSuite.app')
+    _remove_path(ui_temp)
+    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*'))
 
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
@@ -208,7 +211,7 @@ def build_mac():
         '--name=LumaSuite',
         '--osx-bundle-identifier=com.lumasuite.app',
         f'--target-architecture={target_arch}',
-        '--add-data', f"{ui_src}{add_data_sep}ui",
+        '--add-data', f"{ui_temp}{add_data_sep}ui",
         '--add-data', f"{hallway_logo}{add_data_sep}.",
         '--add-data', f"{footer_logo}{add_data_sep}.",
         '--distpath=dist/macOS',
@@ -231,6 +234,7 @@ def build_mac():
         pyinstaller_cmd.insert(6, icon_arg)
     
     run_command(pyinstaller_cmd)
+    _remove_path(ui_temp)
     print(f"[OK] macOS .app built successfully ({target_arch})")
     print(f"  Location: {PROJECT_DIR / 'dist' / 'macOS' / 'LumaSuite.app'}")
 
@@ -245,6 +249,7 @@ def build_linux():
 
     add_data_sep = ':'
     ui_src = PROJECT_DIR / 'ui'
+    ui_temp = PROJECT_DIR / 'ui_temp_build_linux'
     dist_target = PROJECT_DIR / 'dist' / 'Linux'
     build_target = PROJECT_DIR / 'build' / 'Linux'
     hallway_logo = PROJECT_DIR / 'hallway.png'
@@ -266,6 +271,8 @@ def build_linux():
 
     _remove_path(build_target)
     _remove_path(dist_target / 'LumaSuite')
+    _remove_path(ui_temp)
+    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*'))
 
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
@@ -273,7 +280,7 @@ def build_linux():
         '--onefile',
         '--windowed',
         '--name=LumaSuite',
-        '--add-data', f"{ui_src}{add_data_sep}ui",
+        '--add-data', f"{ui_temp}{add_data_sep}ui",
         '--add-data', f"{hallway_logo}{add_data_sep}.",
         '--add-data', f"{footer_logo}{add_data_sep}.",
         '--distpath=dist/Linux',
@@ -296,6 +303,7 @@ def build_linux():
         pyinstaller_cmd.insert(6, icon_arg)
 
     run_command(pyinstaller_cmd)
+    _remove_path(ui_temp)
 
     # Add a desktop launcher and icon for Linux desktops.
     linux_dist = PROJECT_DIR / 'dist' / 'Linux'
