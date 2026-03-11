@@ -49,11 +49,20 @@ python lumaserver.py
 ```
 Server runs on `http://localhost:5000`
 
-### Build Standalone Executable
+### Build Standalone Executables
 ```bash
-python build_executable.py
+python build_executable.py windows   # Windows
+python build_executable.py macos     # macOS
+python build_executable.py linux     # Linux
 ```
-Creates `dist/Windows/LumaSuite.exe`
+
+Outputs:
+
+- `dist/Windows/LumaSuite.exe`
+- `dist/macOS/LumaSuite.app`
+- `dist/Linux/LumaSuite`
+
+Note: Build each target on its matching OS, or use GitHub Actions workflow `.github/workflows/build-cross-platform.yml`.
 
 ### Using the Launcher
 ```bash

@@ -1,6 +1,6 @@
-# Building Standalone Executables for LumaServer
+# Building Standalone Executables for LumaSuite
 
-This guide explains how to build portable .exe (Windows) and .app (macOS) executables for LumaServer.
+This guide explains how to build portable executables for LumaSuite on Windows, macOS, and Linux.
 
 ## Requirements
 
@@ -29,15 +29,15 @@ This guide explains how to build portable .exe (Windows) and .app (macOS) execut
 
 3. **Output:**
    ```
-   dist/Windows/LumaServer.exe
+   dist/Windows/LumaSuite.exe
    ```
 
 4. **Run the executable:**
-   - Double-click `LumaServer.exe`
+   - Double-click `LumaSuite.exe`
    - A window will open
-   - The default browser will auto-launch with `http://127.0.0.1:5000`
+   - The default browser will auto-launch with `http://127.0.0.1:8090` (or next available port)
    - Click "Open Browser" to manually open the UI
-   - Click "Quit" to close the server and exit
+   - Click "Exit" to close the server and app
 
 ### macOS (.app)
 
@@ -53,15 +53,37 @@ This guide explains how to build portable .exe (Windows) and .app (macOS) execut
 
 3. **Output:**
    ```
-   dist/macOS/LumaServer.app
+   dist/macOS/LumaSuite.app
    ```
 
 4. **Run the app:**
-   - Double-click `LumaServer.app` or drag to Applications folder
+   - Double-click `LumaSuite.app` or drag to Applications folder
    - A window will open
-   - The default browser will auto-launch with `http://127.0.0.1:5000`
+   - The default browser will auto-launch with `http://127.0.0.1:8090` (or next available port)
    - Click "Open Browser" to manually open the UI
-   - Click "Quit" to close the server and exit
+   - Click "Exit" to close the server and app
+
+### Linux (binary)
+
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements-build.txt
+   ```
+
+2. **Build the Linux binary:**
+   ```bash
+   python build_executable.py linux
+   ```
+
+3. **Output:**
+   ```
+   dist/Linux/LumaSuite
+   ```
+
+4. **Run the binary:**
+   ```bash
+   ./dist/Linux/LumaSuite
+   ```
 
 ## Features
 
@@ -77,10 +99,13 @@ You can pass arguments to control host/port:
 
 ```bash
 # Windows
-LumaServer.exe --host=0.0.0.0 --port=8080
+LumaSuite.exe --host=0.0.0.0 --port=8080
 
 # macOS
-LumaServer.app/Contents/MacOS/LumaServer --host=0.0.0.0 --port=8080
+LumaSuite.app/Contents/MacOS/LumaSuite --host=0.0.0.0 --port=8080
+
+# Linux
+./LumaSuite --host=0.0.0.0 --port=8080
 ```
 
 ## Troubleshooting
@@ -97,8 +122,9 @@ LumaServer.app/Contents/MacOS/LumaServer --host=0.0.0.0 --port=8080
 
 To distribute:
 
-1. **Windows:** Zip and distribute the `dist/Windows/LumaServer.exe` file
-2. **macOS:** Create a DMG installer or distribute the `dist/macOS/LumaServer.app` bundle
+1. **Windows:** Zip and distribute `dist/Windows/LumaSuite.exe`
+2. **macOS:** Create a DMG installer or distribute `dist/macOS/LumaSuite.app`
+3. **Linux:** Tar/zip and distribute `dist/Linux/LumaSuite`
 
 ## Building from Cross-Platform
 
@@ -107,3 +133,16 @@ To build for a different platform, you need to run the build script on that plat
 - To build macOS .app: Run the script on a Mac
 
 Alternatively, you can use CI/CD (GitHub Actions, etc.) to automate cross-platform builds.
+
+## GitHub Actions Cross-Platform Build
+
+This repository includes `.github/workflows/build-cross-platform.yml`.
+
+- Trigger manually from the Actions tab (`workflow_dispatch`), or
+- Push a tag like `v1.0.0` to trigger a release-style build.
+
+Artifacts produced:
+
+- `LumaSuite-Windows` -> `dist/Windows/LumaSuite.exe`
+- `LumaSuite-macOS` -> `dist/macOS/*`
+- `LumaSuite-Linux` -> `dist/Linux/*`
