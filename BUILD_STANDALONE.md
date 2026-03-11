@@ -8,13 +8,17 @@ This guide explains how to build portable executables for LumaSuite on Windows, 
 - pip (Python package manager)
 - Git (optional, for cloning the repository)
 
+For reproducible builds (recommended for release artifacts), use:
+
+- `requirements-build-lock.txt` (fully pinned build dependencies)
+
 ## Installation & Build
 
 ### Windows (.exe)
 
 1. **Install dependencies:**
    ```bash
-   pip install -r requirements-build.txt
+   pip install -r requirements-build-lock.txt
    ```
 
 2. **Build the Windows executable:**
@@ -43,7 +47,7 @@ This guide explains how to build portable executables for LumaSuite on Windows, 
 
 1. **Install dependencies:**
    ```bash
-   pip install -r requirements-build.txt
+   pip install -r requirements-build-lock.txt
    ```
 
 2. **Build the macOS app:**
@@ -67,7 +71,7 @@ This guide explains how to build portable executables for LumaSuite on Windows, 
 
 1. **Install dependencies:**
    ```bash
-   pip install -r requirements-build.txt
+   pip install -r requirements-build-lock.txt
    ```
 
 2. **Build the Linux binary:**

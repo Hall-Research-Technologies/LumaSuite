@@ -61,6 +61,8 @@ def build_windows():
     add_data_sep = ';' if os.name == 'nt' else ':'
     ui_src = PROJECT_DIR / 'ui'
     ui_temp = PROJECT_DIR / 'ui_temp_build'
+    dist_target = PROJECT_DIR / 'dist' / 'Windows'
+    build_target = PROJECT_DIR / 'build' / 'Windows'
     hallway_logo = PROJECT_DIR / 'hallway.png'
     footer_logo = PROJECT_DIR / 'atlona.png'
     icon_arg = f"--icon={PROJECT_DIR / 'ui' / 'favicon.ico'}" if (PROJECT_DIR / 'ui' / 'favicon.ico').exists() else None
@@ -77,10 +79,13 @@ def build_windows():
     # Create a clean temp ui folder without zip files
     print("Creating temporary UI folder (excluding .zip files)...")
     _remove_path(ui_temp)
+    _remove_path(dist_target / 'LumaSuite.exe')
+    _remove_path(build_target)
     shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip'))
 
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
+        '--clean',
         '--onefile',
         '--windowed',
         '--name=LumaSuite',
@@ -127,6 +132,8 @@ def build_mac():
     
     add_data_sep = ':'
     ui_src = PROJECT_DIR / 'ui'
+    dist_target = PROJECT_DIR / 'dist' / 'macOS'
+    build_target = PROJECT_DIR / 'build' / 'macOS'
     hallway_logo = PROJECT_DIR / 'hallway.png'
     footer_logo = PROJECT_DIR / 'atlona.png'
     icon_arg = f"--icon={PROJECT_DIR / 'ui' / 'favicon.ico'}" if (PROJECT_DIR / 'ui' / 'favicon.ico').exists() else None
@@ -140,8 +147,12 @@ def build_mac():
     if not footer_logo.exists():
         print(f"Warning: footer logo not found at {footer_logo}")
 
+    _remove_path(build_target)
+    _remove_path(dist_target / 'LumaSuite.app')
+
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
+        '--clean',
         '--onefile',
         '--windowed',
         '--name=LumaSuite',
@@ -179,6 +190,8 @@ def build_linux():
 
     add_data_sep = ':'
     ui_src = PROJECT_DIR / 'ui'
+    dist_target = PROJECT_DIR / 'dist' / 'Linux'
+    build_target = PROJECT_DIR / 'build' / 'Linux'
     hallway_logo = PROJECT_DIR / 'hallway.png'
     footer_logo = PROJECT_DIR / 'atlona.png'
 
@@ -191,8 +204,12 @@ def build_linux():
     if not footer_logo.exists():
         print(f"Warning: footer logo not found at {footer_logo}")
 
+    _remove_path(build_target)
+    _remove_path(dist_target / 'LumaSuite')
+
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
+        '--clean',
         '--onefile',
         '--name=LumaSuite',
         '--add-data', f"{ui_src}{add_data_sep}ui",

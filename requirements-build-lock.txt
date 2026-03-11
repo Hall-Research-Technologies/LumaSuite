@@ -1,0 +1,1 @@
+# Reproducible build lockfile for standalone artifacts\n# Use this in CI/release builds to reduce size/content drift between runs.\n\nflask==2.3.3\nflask-cors==4.0.0\nrequests==2.31.0\nwebsocket-client==1.8.0\nWerkzeug==2.3.7\nPyInstaller==6.19.0\nPillow==10.0.0\npystray==0.19.5\n

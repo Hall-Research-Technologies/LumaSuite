@@ -41,6 +41,11 @@ Install dependencies:
 pip install -r requirements-build.txt
 ```
 
+For reproducible release builds, use pinned dependencies:
+```bash
+pip install -r requirements-build-lock.txt
+```
+
 ## Quick Start
 
 ### Development Server
@@ -63,6 +68,8 @@ Outputs:
 - `dist/Linux/LumaSuite`
 
 Note: Build each target on its matching OS, or use GitHub Actions workflow `.github/workflows/build-cross-platform.yml`.
+
+Reproducibility tip: use `requirements-build-lock.txt` locally and in CI to reduce artifact size/content drift between builds.
 
 ### Using the Launcher
 ```bash
