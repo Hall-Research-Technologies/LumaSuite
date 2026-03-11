@@ -29,10 +29,10 @@ jobs:
  
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload Windows artifact
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/Windows/*.exe
@@ -75,7 +75,7 @@ jobs:
 
       - name: Upload macOS artifact
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/macOS/*.app
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/Linux/*
@@ -91,7 +91,7 @@ jobs:
 
       - name: Upload Windows warning log
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: warn-${{ matrix.artifact_name }}
           path: build/Windows/LumaSuite/warn-LumaSuite.txt
@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload macOS warning log
         if: always() && runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: warn-${{ matrix.artifact_name }}
           path: build/macOS/LumaSuite/warn-LumaSuite.txt
@@ -107,7 +107,7 @@ jobs:
 
       - name: Upload Linux warning log
         if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: warn-${{ matrix.artifact_name }}
           path: build/Linux/LumaSuite/warn-LumaSuite.txt
