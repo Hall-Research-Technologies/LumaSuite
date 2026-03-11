@@ -17,14 +17,8 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: LumaSuite-Linux
-            artifact_path: dist/Linux/*
           - os: windows-latest
-            artifact_name: LumaSuite-Windows
-            artifact_path: dist/Windows/LumaSuite.exe
           - os: macos-latest
-            artifact_name: LumaSuite-macOS-universal
-            artifact_path: dist/macOS/*
  
     steps:
       - name: Checkout repository
@@ -58,11 +52,33 @@ jobs:
         if: runner.os == 'Linux'
         run: python build_executable.py linux
 
-      - name: Upload artifact
+      - name: List dist output (debug)
+        run: |
+          python -c "import os; print('DIST TREE:'); [print(os.path.join(r, n)) for r, ds, fs in os.walk('dist') for n in (ds + fs)]"
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_path }}
+          name: LumaSuite-Windows
+          path: dist/Windows/*.exe
+          if-no-files-found: error
+
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaSuite-macOS-universal
+          path: dist/macOS/*
+          if-no-files-found: error
+
+      - name: Upload Linux artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaSuite-Linux
+          path: dist/Linux/*
+          if-no-files-found: error
 
       - name: Upload PyInstaller warning log
         if: always()
