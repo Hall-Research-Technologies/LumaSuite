@@ -214,14 +214,18 @@
       <div class="right">
         <div class="nav-tabs" style="margin-bottom:0;">
           <a class="nav-tab" href="/ui/index.html">
-            <span>📊</span>
-            <span>Device Manager</span>
-          </a>
-          <a class="nav-tab" href="/ui/matrix.html">
-            <span>🔀</span>
-            <span>Matrix Routing</span>
-          </a>
-          <span class="nav-tab active">
+          <div class="ticker-header" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
+            <span style="flex:1 1 30%;text-align:center;">Ticker Text</span>
+            <span style="flex:0 0 80px;text-align:center;">Location</span>
+            <span style="flex:0 0 50px;text-align:center;">Speed</span>
+            <span style="flex:0 0 50px;text-align:center;">Cycles</span>
+            <span style="flex:0 0 50px;text-align:center;">Size</span>
+            <span style="flex:0 0 80px;text-align:center;">Direction</span>
+            <span style="flex:0 0 60px;text-align:center;">Color</span>
+            <span style="flex:0 0 40px;"></span>
+          </div>
+          <div id="tickerRows" class="stack"></div>
+          <div style="margin-top:8px;"><span class="icon add" id="addTicker">➕ Add Ticker</span></div>
             <span>🎬</span>
             <span>Production Studio</span>
           </span>
@@ -650,7 +654,10 @@
 					  <svg class="chev" viewBox="0 0 24 24">
 						<path fill="currentColor" d="M8 5v14l11-7z" />
 					  </svg>
-					  <div class="panel-title" style="margin:0">Ticker</div>
+                <div id="tgTicker" class="toggle right-label" style="margin-left:8px;">
+                  <span class="label">Enable</span><div class="pill"></div>
+                </div>
+                <div class="panel-title" style="margin:0 0 0 12px;">Ticker</div>
 					  <span id="tickerLoadedText" style="margin-left:12px;font-size:0.9em;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:400px;flex:0 1 auto;"></span>
 					</div>
 				  </div>

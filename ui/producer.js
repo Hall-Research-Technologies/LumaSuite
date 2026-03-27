@@ -1157,16 +1157,7 @@ function paintTickerRows(){
 
     const box = $("#tickerRows");
     box.innerHTML = `
-      <div class="ticker-header" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
-        <span style="flex:1 1 30%;text-align:center;">Ticker Text</span>
-        <span style="flex:0 0 80px;text-align:center;">Location</span>
-        <span style="flex:0 0 50px;text-align:center;">Speed</span>
-        <span style="flex:0 0 50px;text-align:center;">Cycles</span>
-        <span style="flex:0 0 50px;text-align:center;">Size</span>
-        <span style="flex:0 0 80px;text-align:center;">Direction</span>
-        <span style="flex:0 0 60px;text-align:center;">Color</span>
-        <span style="flex:0 0 40px;"></span>
-      </div>
+      // Column headers are now in HTML, not generated here
     `;
 
 
