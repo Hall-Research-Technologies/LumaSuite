@@ -7,6 +7,13 @@
   <title>LumaSuite</title>
   <link rel="icon" href="/ui/favicon.ico">
   <style>
+            /* Ticker grid layout for perfect alignment */
+            .ticker-grid {
+              display: grid;
+              grid-template-columns: 28px 260px 80px 5ch 5ch 5ch 80px 28px 28px;
+              align-items: center;
+              gap: 4px;
+            }
     .nav-tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); }
     .nav-tab { padding:6px 14px; text-decoration:none; color:var(--fg); border-radius:6px 6px 0 0; transition:all 0.2s; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; }
     .nav-tab:hover { background:rgba(30,144,255,0.1); color:#fff; }
@@ -135,7 +142,7 @@
     .badge{display:inline-block;background:var(--danger);color:#fff;padding:2px 6px;border-radius:999px;font-size:11px}
     .small{font-size:12px;color:var(--muted)}
     .w-port{width:6.2ch}
-    .w-2dig{width:3.2ch}
+    .w-2dig{width:5ch;margin-right:2px;}
     .w-wide{min-width:180px}
     .w-med{min-width:120px}
     .code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono";font-size:12px;opacity:.9}
@@ -150,7 +157,8 @@
     .icon{cursor:pointer;user-select:none}
     .icon.add{font-size:18px;padding:0 6px}
     .icon.trash{font-size:16px;padding:0 6px}
-    .rtmp-row,.ticker-row{display:flex;gap:8px;align-items:center;margin-top:3px;flex-wrap:wrap}
+    .rtmp-row{display:flex;gap:4px;align-items:center;margin-top:3px;flex-wrap:wrap}
+    .ticker-row{margin-top:3px;}
 	.btnTicker {
     width: 80px;
     padding: 4px 10px;
@@ -205,6 +213,7 @@
   <div id="connection_banner" style="display:none; position:fixed; top:0; left:0; right:0; background:#d32f2f; color:white; padding:12px 20px; font-weight:bold; text-align:center; z-index:10000; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
     ⚠️ Connection lost, check application.
   </div>
+
   <div class="wrap">
     <div class="row header">
       <div style="display:flex;align-items:center;gap:12px;">
@@ -214,23 +223,18 @@
       <div class="right">
         <div class="nav-tabs" style="margin-bottom:0;">
           <a class="nav-tab" href="/ui/index.html">
-          <div class="ticker-header" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
-            <span style="flex:1 1 30%;text-align:center;">Ticker Text</span>
-            <span style="flex:0 0 80px;text-align:center;">Location</span>
-            <span style="flex:0 0 50px;text-align:center;">Speed</span>
-            <span style="flex:0 0 50px;text-align:center;">Cycles</span>
-            <span style="flex:0 0 50px;text-align:center;">Size</span>
-            <span style="flex:0 0 80px;text-align:center;">Direction</span>
-            <span style="flex:0 0 60px;text-align:center;">Color</span>
-            <span style="flex:0 0 40px;"></span>
-          </div>
-          <div id="tickerRows" class="stack"></div>
-          <div style="margin-top:8px;"><span class="icon add" id="addTicker">➕ Add Ticker</span></div>
+            <span>📊</span>
+            <span>Device Manager</span>
+          </a>
+          <a class="nav-tab" href="/ui/matrix.html">
+            <span>🔀</span>
+            <span>Matrix Routing</span>
+          </a>
+          <span class="nav-tab active">
             <span>🎬</span>
             <span>Production Studio</span>
           </span>
         </div>
-
       </div>
     </div>
 
@@ -662,18 +666,38 @@
 					</div>
 				  </div>
 				  <div class="body">
-					<div class="row" style="gap:12px;align-items:center;">
-
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div id="tgTicker" class="toggle right-label">
-              <span class="label">Enable</span><div class="pill"></div>
-            </div>
-          </div>
-
-					<hr class="sep">
-					<div id="tickerRows" class="stack"></div>
-					<div style="margin-top:8px;"><span class="icon add" id="addTicker">➕ Add Ticker</span></div>
-				  </div>
+          <table id="tickerTable" style="width:auto;min-width:100%;border-collapse:separate;border-spacing:0 4px;">
+            <thead style="background:var(--panel-2);">
+              <tr>
+                <th style="width:28px;"></th>
+                <th style="width:260px;text-align:left;">Ticker Text</th>
+                <th style="width:80px;text-align:center;">Location</th>
+                <th style="width:5ch;text-align:center;">Speed</th>
+                <th style="width:5ch;text-align:center;">Cycles</th>
+                <th style="width:5ch;text-align:center;">Size</th>
+                <th style="width:80px;text-align:center;">Direction</th>
+                <th style="width:28px;text-align:center;">Color</th>
+                <th style="width:28px;"></th>
+              </tr>
+            </thead>
+            <tbody id="tickerRows"></tbody>
+          </table>
+          <div style="margin-top:8px; text-align:left; width:100%;"><span class="icon add" id="addTicker">➕ Add Ticker</span></div>
+        </div>
+        <style>
+        #panel-ticker .body {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        #panel-ticker .stack {
+          align-items: flex-start;
+        }
+        /* Hide body of any collapsed collapsible panel */
+        .panel.collapsible.collapsed > .body {
+          display: none !important;
+        }
+        </style>
 				</div>  <!-- end ticker -->
 <!-- NEW LOGO PANEL (LEFT COLUMN) -->
 <div class="panel">

@@ -1156,30 +1156,35 @@ function paintTickerRows(){
     }
 
     const box = $("#tickerRows");
-    box.innerHTML = `
-      // Column headers are now in HTML, not generated here
-    `;
+    box.innerHTML = "";
 
+    state.ticker.rows.forEach((t, idx) => {
+      const tr = document.createElement("tr");
+      tr.className = "ticker-row";
+      tr.dataset.index = idx;
 
-    state.ticker.rows.forEach((t,idx)=>{
+      // Radio
+      const tdRadio = document.createElement("td");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "tickerApply";
+      radio.style.width = "28px";
+      tdRadio.appendChild(radio);
+      tr.appendChild(tdRadio);
 
-      const row=document.createElement("div");
-      row.className="ticker-row";
-      row.dataset.index=idx;
-
-      // SECURITY FIX (P3 #3): Use createElement to avoid XSS from user ticker text
-      row.innerHTML=`
-        <input type="radio" name="tickerApply">
-      `;
-      
+      // Text
+      const tdText = document.createElement("td");
       const textInput = document.createElement("input");
       textInput.type = "text";
       textInput.setAttribute("data-text", "");
       textInput.placeholder = "Text";
-      textInput.value = t.text || "";  // Safe: .value auto-escapes
-      textInput.style.flex = "1";
-      row.appendChild(textInput);
-      
+      textInput.value = t.text || "";
+      textInput.style.width = "260px";
+      tdText.appendChild(textInput);
+      tr.appendChild(tdText);
+
+      // Location
+      const tdPos = document.createElement("td");
       const selectPos = document.createElement("select");
       selectPos.setAttribute("data-pos", "");
       selectPos.innerHTML = `
@@ -1188,8 +1193,12 @@ function paintTickerRows(){
         <option value="bottom">bottom</option>
       `;
       selectPos.value = t.pos || "bottom";
-      row.appendChild(selectPos);
-      
+      selectPos.style.width = "80px";
+      tdPos.appendChild(selectPos);
+      tr.appendChild(tdPos);
+
+      // Speed
+      const tdSpeed = document.createElement("td");
       const speedInput = document.createElement("input");
       speedInput.type = "number";
       speedInput.setAttribute("data-speed", "");
@@ -1197,9 +1206,12 @@ function paintTickerRows(){
       speedInput.max = "40";
       speedInput.value = t.speed || 8;
       speedInput.className = "w-2dig";
-      speedInput.style.width = "2ch";
-      row.appendChild(speedInput);
-      
+      speedInput.style.width = "5ch";
+      tdSpeed.appendChild(speedInput);
+      tr.appendChild(tdSpeed);
+
+      // Cycles
+      const tdCycles = document.createElement("td");
       const cyclesInput = document.createElement("input");
       cyclesInput.type = "number";
       cyclesInput.setAttribute("data-cycles", "");
@@ -1207,9 +1219,12 @@ function paintTickerRows(){
       cyclesInput.max = "99";
       cyclesInput.value = t.cycles || 0;
       cyclesInput.className = "w-2dig";
-      cyclesInput.style.width = "2ch";
-      row.appendChild(cyclesInput);
-      
+      cyclesInput.style.width = "5ch";
+      tdCycles.appendChild(cyclesInput);
+      tr.appendChild(tdCycles);
+
+      // Size
+      const tdFonth = document.createElement("td");
       const fonthInput = document.createElement("input");
       fonthInput.type = "number";
       fonthInput.setAttribute("data-fonth", "");
@@ -1217,60 +1232,68 @@ function paintTickerRows(){
       fonthInput.max = "100";
       fonthInput.value = t.fonth || 10;
       fonthInput.className = "w-2dig";
-      fonthInput.style.width = "2ch";
+      fonthInput.style.width = "5ch";
       fonthInput.title = "Font Height";
-      row.appendChild(fonthInput);
-        // Direction dropdown per row
-        const dirSelect = document.createElement("select");
-        dirSelect.setAttribute("data-dir", "");
-        dirSelect.innerHTML = `<option value="0">→</option><option value="1">←</option>`;
-        dirSelect.value = typeof t.direction !== 'undefined' ? String(t.direction) : "0";
-        row.appendChild(dirSelect);
+      tdFonth.appendChild(fonthInput);
+      tr.appendChild(tdFonth);
 
-        // Color picker per row
-        const colorInput = document.createElement("input");
-        colorInput.type = "color";
-        colorInput.setAttribute("data-color", "");
-        colorInput.value = t.color || "#ff7000";
-        colorInput.style.width = "28px";
-        colorInput.style.height = "28px";
-        colorInput.style.border = "none";
-        colorInput.style.cursor = "pointer";
-        colorInput.style.borderRadius = "4px";
-        colorInput.style.background = "transparent";
-        colorInput.style.padding = "0";
-        row.appendChild(colorInput);
-      
-      const deleteSpan = document.createElement("span");
+      // Direction
+      const tdDir = document.createElement("td");
+      const dirSelect = document.createElement("select");
+      dirSelect.setAttribute("data-dir", "");
+      dirSelect.innerHTML = `<option value="0">→</option><option value="1">←</option>`;
+      dirSelect.value = typeof t.direction !== 'undefined' ? String(t.direction) : "0";
+      dirSelect.style.width = "80px";
+      tdDir.appendChild(dirSelect);
+      tr.appendChild(tdDir);
+
+      // Color
+      const tdColor = document.createElement("td");
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.setAttribute("data-color", "");
+      colorInput.value = t.color || "#ff7000";
+      colorInput.style.width = "28px";
+      colorInput.style.height = "28px";
+      colorInput.style.border = "none";
+      colorInput.style.cursor = "pointer";
+      colorInput.style.borderRadius = "4px";
+      colorInput.style.background = "transparent";
+      colorInput.style.padding = "0";
+      tdColor.appendChild(colorInput);
+      tr.appendChild(tdColor);
+
+      // Trash
+      const tdDelete = document.createElement("td");
       if (idx > 0) {
+        const deleteSpan = document.createElement("span");
         deleteSpan.className = "icon trash";
         deleteSpan.setAttribute("data-del", "");
         deleteSpan.textContent = "🗑️";
-      } else {
-        deleteSpan.style.width = "2.5em";
-        deleteSpan.style.display = "inline-block";
+        deleteSpan.style.width = "28px";
+        tdDelete.appendChild(deleteSpan);
       }
-      row.appendChild(deleteSpan);
-      
-      box.append(row);
+      tr.appendChild(tdDelete);
 
-      row.oninput = () => {
-        const i=idx;
-        const text=row.querySelector("[data-text]").value;
-        const pos=row.querySelector("[data-pos]").value;
-        const speed=Math.min(40,Math.max(0,Number(row.querySelector("[data-speed]").value)));
-        const cycles=Math.min(99,Math.max(0,Number(row.querySelector("[data-cycles]").value)));
-        const fonth=Math.min(100,Math.max(1,Number(row.querySelector("[data-fonth]").value)));
-        const direction=Number(row.querySelector('[data-dir]').value);
-        const color=row.querySelector('[data-color]').value;
+      box.appendChild(tr);
 
-        state.ticker.rows[i]={text,pos,speed,cycles,fonth,direction,color};
+      tr.oninput = () => {
+        const i = idx;
+        const text = tr.querySelector("[data-text]").value;
+        const pos = tr.querySelector("[data-pos]").value;
+        const speed = Math.min(40, Math.max(0, Number(tr.querySelector("[data-speed]").value)));
+        const cycles = Math.min(99, Math.max(0, Number(tr.querySelector("[data-cycles]").value)));
+        const fonth = Math.min(100, Math.max(1, Number(tr.querySelector("[data-fonth]").value)));
+        const direction = Number(tr.querySelector('[data-dir]').value);
+        const color = tr.querySelector('[data-color]').value;
+
+        state.ticker.rows[i] = { text, pos, speed, cycles, fonth, direction, color };
         saveGlobalState();
 
         // Debounce device updates when ticker is active
-        if (state.ticker.enabled && state.ticker.pending && row.querySelector('input[type="radio"]').checked) {
-          clearTimeout(row.deviceUpdateTimeout);
-          row.deviceUpdateTimeout = setTimeout(async () => {
+        if (state.ticker.enabled && state.ticker.pending && tr.querySelector('input[type="radio"]').checked) {
+          clearTimeout(tr.deviceUpdateTimeout);
+          tr.deviceUpdateTimeout = setTimeout(async () => {
             try {
               let starty = 0;
               if (pos === "top") starty = 0;
@@ -1290,21 +1313,21 @@ function paintTickerRows(){
               };
 
               // Send to device after user stops editing
-              await rpc("OsdText.Set",{
-                osdindex:0,
-                osdtextenabled:true,
-                displaytext:{
-                  content:text,
-                  fontcolor:color,
-                  backcolor:"0.0.0",
-                  fonttransparency:255,
-                  backtransparency:0,
-                  startpostion:{startx:0,starty:starty},
-                  fontsize:{fonth:fonth,fontw:80},
-                  displayscrolleffects:{enable:true,iterations:cycles,speed:speed,direction:direction}
+              await rpc("OsdText.Set", {
+                osdindex: 0,
+                osdtextenabled: true,
+                displaytext: {
+                  content: text,
+                  fontcolor: color,
+                  backcolor: "0.0.0",
+                  fonttransparency: 255,
+                  backtransparency: 0,
+                  startpostion: { startx: 0, starty: starty },
+                  fontsize: { fonth: fonth, fontw: 80 },
+                  displayscrolleffects: { enable: true, iterations: cycles, speed: speed, direction: direction }
                 }
               });
-            } catch(e) {
+            } catch (e) {
               console.error("Failed to update ticker on device:", e);
             }
           }, 300); // Wait 300ms after edits stop before sending
@@ -1321,7 +1344,7 @@ function paintTickerRows(){
         const pos = rowElement.querySelector("[data-pos]").value;
         const speed = Number(rowElement.querySelector("[data-speed]").value);
         const cycles = Number(rowElement.querySelector("[data-cycles]").value);
-        const fonth = Math.min(100,Math.max(1,Number(rowElement.querySelector("[data-fonth]").value)));
+        const fonth = Math.min(100, Math.max(1, Number(rowElement.querySelector("[data-fonth]").value)));
 
         let starty = 0;
         if (pos === "top") starty = 0;
@@ -1364,20 +1387,19 @@ function paintTickerRows(){
       };
 
       // Store reference to apply function for use by toggle
-      row.applyTickerFromRow = applyTickerFromRow;
+      tr.applyTickerFromRow = applyTickerFromRow;
 
-      row.querySelector('input[type="radio"]').onchange = async () => {
+      tr.querySelector('input[type="radio"]').onchange = async () => {
         if (!state.unit) return;
-        
         try {
-          await applyTickerFromRow(row);
+          await applyTickerFromRow(tr);
         } catch(e) {
           console.error("Failed to load ticker:", e);
         }
       };
 
       // DELETE
-      const del = row.querySelector("[data-del]");
+      const del = tr.querySelector("[data-del]");
       if (del) {
         del.onclick = () => {
           state.ticker.rows.splice(idx,1);
@@ -2296,20 +2318,23 @@ async function pollUnit(ip){
       if (streamsPanel) streamsPanel.classList.add('collapsed');
     }
     
-    // Limit collapse interaction to chevron icon only
-    document.querySelectorAll('.collapsible .header .chev').forEach(icon=>{
-      icon.onclick = (e)=>{
-        e.stopPropagation();
-        const panel = icon.closest('.collapsible');
-        if (!panel) return;
-        panel.classList.toggle('collapsed');
-        if (panel.id === 'panel-ticker') {
-          localStorage.setItem('panel-ticker-collapsed', panel.classList.contains('collapsed'));
-        } else if (panel.id === 'panel-streams') {
-          localStorage.setItem('panel-streams-collapsed', panel.classList.contains('collapsed'));
-        }
-      };
-    });
+    // Collapse chevron handler (robust, can be called after DOM changes)
+    function wirePanelCollapseHandlers() {
+      document.querySelectorAll('.collapsible .header .chev').forEach(icon => {
+        icon.onclick = (e) => {
+          e.stopPropagation();
+          const panel = icon.closest('.collapsible');
+          if (!panel) return;
+          panel.classList.toggle('collapsed');
+          if (panel.id === 'panel-ticker') {
+            localStorage.setItem('panel-ticker-collapsed', panel.classList.contains('collapsed'));
+          } else if (panel.id === 'panel-streams') {
+            localStorage.setItem('panel-streams-collapsed', panel.classList.contains('collapsed'));
+          }
+        };
+      });
+    }
+    wirePanelCollapseHandlers();
 
 
     await loadCache();
@@ -2320,6 +2345,7 @@ async function pollUnit(ip){
     paintLogoSlots();
     paintRtmpRows();
     paintTickerRows();
+    wirePanelCollapseHandlers();
     initTickerColor();
 
     wireMuteHandlers();
