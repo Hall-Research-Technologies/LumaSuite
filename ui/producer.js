@@ -1402,10 +1402,6 @@ function paintTickerRows(){
       paintTickerRows();
     };
 
-    $("#selTickerDir").onchange = ()=>{
-      state.ticker.dir = Number($("#selTickerDir").value);
-      saveGlobalState();
-    };
   }
 
   /* ============================================================
