@@ -1158,11 +1158,13 @@ function paintTickerRows(){
     const box = $("#tickerRows");
     box.innerHTML = `
       <div class="ticker-header" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
-        <span style="flex:1 1 40%;text-align:center;">Ticker Text</span>
-        <span style="flex:0 0 100px;text-align:center;">Location</span>
-        <span style="flex:0 0 60px;text-align:center;">Speed</span>
-        <span style="flex:0 0 60px;text-align:center;">Cycles</span>
-        <span style="flex:0 0 60px;text-align:center;">Size</span>
+        <span style="flex:1 1 30%;text-align:center;">Ticker Text</span>
+        <span style="flex:0 0 80px;text-align:center;">Location</span>
+        <span style="flex:0 0 50px;text-align:center;">Speed</span>
+        <span style="flex:0 0 50px;text-align:center;">Cycles</span>
+        <span style="flex:0 0 50px;text-align:center;">Size</span>
+        <span style="flex:0 0 80px;text-align:center;">Direction</span>
+        <span style="flex:0 0 60px;text-align:center;">Color</span>
         <span style="flex:0 0 40px;"></span>
       </div>
     `;
@@ -1205,6 +1207,7 @@ function paintTickerRows(){
       speedInput.max = "40";
       speedInput.value = t.speed || 8;
       speedInput.className = "w-2dig";
+      speedInput.style.width = "2ch";
       row.appendChild(speedInput);
       
       const cyclesInput = document.createElement("input");
@@ -1214,6 +1217,7 @@ function paintTickerRows(){
       cyclesInput.max = "99";
       cyclesInput.value = t.cycles || 0;
       cyclesInput.className = "w-2dig";
+      cyclesInput.style.width = "2ch";
       row.appendChild(cyclesInput);
       
       const fonthInput = document.createElement("input");
@@ -1223,9 +1227,29 @@ function paintTickerRows(){
       fonthInput.max = "100";
       fonthInput.value = t.fonth || 10;
       fonthInput.className = "w-2dig";
-      fonthInput.style.width = "3em";
+      fonthInput.style.width = "2ch";
       fonthInput.title = "Font Height";
       row.appendChild(fonthInput);
+        // Direction dropdown per row
+        const dirSelect = document.createElement("select");
+        dirSelect.setAttribute("data-dir", "");
+        dirSelect.innerHTML = `<option value="0">→</option><option value="1">←</option>`;
+        dirSelect.value = typeof t.direction !== 'undefined' ? String(t.direction) : "0";
+        row.appendChild(dirSelect);
+
+        // Color picker per row
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.setAttribute("data-color", "");
+        colorInput.value = t.color || "#ff7000";
+        colorInput.style.width = "28px";
+        colorInput.style.height = "28px";
+        colorInput.style.border = "none";
+        colorInput.style.cursor = "pointer";
+        colorInput.style.borderRadius = "4px";
+        colorInput.style.background = "transparent";
+        colorInput.style.padding = "0";
+        row.appendChild(colorInput);
       
       const deleteSpan = document.createElement("span");
       if (idx > 0) {
@@ -1247,8 +1271,10 @@ function paintTickerRows(){
         const speed=Math.min(40,Math.max(0,Number(row.querySelector("[data-speed]").value)));
         const cycles=Math.min(99,Math.max(0,Number(row.querySelector("[data-cycles]").value)));
         const fonth=Math.min(100,Math.max(1,Number(row.querySelector("[data-fonth]").value)));
+        const direction=Number(row.querySelector('[data-dir]').value);
+        const color=row.querySelector('[data-color]').value;
 
-        state.ticker.rows[i]={text,pos,speed,cycles,fonth};
+        state.ticker.rows[i]={text,pos,speed,cycles,fonth,direction,color};
         saveGlobalState();
 
         // Debounce device updates when ticker is active
@@ -1261,8 +1287,6 @@ function paintTickerRows(){
               else if (pos === "middle") starty = 45;
               else if (pos === "bottom") starty = 100 - fonth;
 
-              const direction = Number($("#selTickerDir").value);
-              
               // Update pending config with new values
               state.ticker.pending = {
                 direction,
@@ -1271,7 +1295,8 @@ function paintTickerRows(){
                 speed,
                 cycles,
                 fonth,
-                starty
+                starty,
+                color
               };
 
               // Send to device after user stops editing
@@ -1280,7 +1305,7 @@ function paintTickerRows(){
                 osdtextenabled:true,
                 displaytext:{
                   content:text,
-                  fontcolor:state.tickerColor,
+                  fontcolor:color,
                   backcolor:"0.0.0",
                   fonttransparency:255,
                   backtransparency:0,
@@ -1300,7 +1325,8 @@ function paintTickerRows(){
       const applyTickerFromRow = async (rowElement) => {
         if (!state.unit) return;
 
-        const direction = Number($("#selTickerDir").value);
+        const direction = Number(rowElement.querySelector('[data-dir]').value);
+        const color = rowElement.querySelector('[data-color]').value;
         const text = rowElement.querySelector("[data-text]").value;
         const pos = rowElement.querySelector("[data-pos]").value;
         const speed = Number(rowElement.querySelector("[data-speed]").value);
@@ -1320,7 +1346,8 @@ function paintTickerRows(){
           speed,
           cycles,
           fonth,
-          starty
+          starty,
+          color
         };
 
         // Send to device immediately (keep current enabled/disabled state)
@@ -1330,7 +1357,7 @@ function paintTickerRows(){
             osdtextenabled:state.ticker.enabled || false,
             displaytext:{
               content:text,
-              fontcolor:state.tickerColor,
+              fontcolor:color,
               backcolor:"0.0.0",
               fonttransparency:255,
               backtransparency:0,
