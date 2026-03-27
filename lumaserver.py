@@ -525,11 +525,7 @@ _load_persisted_config()
 APP.config['LUMA_CONFIG'] = CONFIG
 
 
-SENSITIVE_API_PATHS_REQUIRING_NON_DEFAULT_PASSWORD = {
-    "/api/upgrade",
-    "/api/reset",
-    "/api/remove_units",
-}
+
 
 
 def _is_default_password_in_use() -> bool:
@@ -545,6 +541,8 @@ def _is_same_origin_request() -> bool:
     return origin.lower() == expected.lower()
 
 
+
+# Only enforce password rules when setting/syncing passwords, not for upgrades or other actions
 @APP.before_request
 def enforce_request_security_guards():
     if request.method == "OPTIONS":
@@ -554,14 +552,7 @@ def enforce_request_security_guards():
         if not _is_same_origin_request():
             return jsonify({"ok": False, "error": "cross_origin_blocked"}), 403
 
-    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        if request.path in SENSITIVE_API_PATHS_REQUIRING_NON_DEFAULT_PASSWORD and _is_default_password_in_use():
-            return jsonify({
-                "ok": False,
-                "error": "default_password_change_required",
-                "message": "Change the default password in Settings before performing this action.",
-            }), 403
-
+    # No default password enforcement for any endpoint except password sync/set
     return None
 
 
