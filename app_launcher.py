@@ -58,7 +58,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Application Version
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # Detect if we're running as a frozen executable
 IS_FROZEN = getattr(sys, 'frozen', False)

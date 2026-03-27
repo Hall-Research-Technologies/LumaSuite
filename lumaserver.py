@@ -92,7 +92,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # --- CSV Export Endpoint for Device Manager ---
 
