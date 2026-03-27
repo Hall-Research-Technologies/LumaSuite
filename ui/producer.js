@@ -1169,7 +1169,6 @@ function paintTickerRows(){
       </div>
     `;
 
-    $("#selTickerDir").value = typeof state.ticker.dir !== 'undefined' ? String(state.ticker.dir) : "0";
 
     state.ticker.rows.forEach((t,idx)=>{
 
