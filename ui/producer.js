@@ -1167,7 +1167,7 @@ function paintTickerRows(){
       </div>
     `;
 
-    $("#selTickerDir").value = state.ticker.dir || "rtl";
+    $("#selTickerDir").value = typeof state.ticker.dir !== 'undefined' ? String(state.ticker.dir) : "0";
 
     state.ticker.rows.forEach((t,idx)=>{
 
@@ -1261,7 +1261,7 @@ function paintTickerRows(){
               else if (pos === "middle") starty = 45;
               else if (pos === "bottom") starty = 100 - fonth;
 
-              const direction = ($("#selTickerDir").value==="ltr") ? 1 : 0;
+              const direction = Number($("#selTickerDir").value);
               
               // Update pending config with new values
               state.ticker.pending = {
@@ -1300,7 +1300,7 @@ function paintTickerRows(){
       const applyTickerFromRow = async (rowElement) => {
         if (!state.unit) return;
 
-        const direction = ($("#selTickerDir").value==="ltr") ? 1 : 0;
+        const direction = Number($("#selTickerDir").value);
         const text = rowElement.querySelector("[data-text]").value;
         const pos = rowElement.querySelector("[data-pos]").value;
         const speed = Number(rowElement.querySelector("[data-speed]").value);
@@ -1377,7 +1377,7 @@ function paintTickerRows(){
     };
 
     $("#selTickerDir").onchange = ()=>{
-      state.ticker.dir = $("#selTickerDir").value;
+      state.ticker.dir = Number($("#selTickerDir").value);
       saveGlobalState();
     };
   }
