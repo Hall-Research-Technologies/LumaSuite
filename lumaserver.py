@@ -92,7 +92,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 # --- CSV Export Endpoint for Device Manager ---
 
@@ -1609,6 +1609,13 @@ def root():
         logging.info("[root] serving /ui/index.html")
         return send_from_directory(UI_DIR, "index.html")
     return "UI not found. Put index.html in ./ui/"
+
+@APP.get("/favicon.ico")
+def favicon():
+    icon_path = os.path.join(UI_DIR, "favicon.ico")
+    if os.path.isfile(icon_path):
+        return send_from_directory(UI_DIR, "favicon.ico")
+    abort(404)
 
 @APP.get("/ui/<path:filename>")
 def ui_files(filename):
@@ -3355,7 +3362,19 @@ def api_producer2_state():
 # --- [producer persistent state] END ---
 
 if __name__ == "__main__":
-    logging.info(f"=== Luma API on http://127.0.0.1:{PORT}/ ===")
+    selected_port = PORT
+    while selected_port < PORT + 100:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("0.0.0.0", selected_port))
+            break
+        except OSError:
+            selected_port += 1
+
+    if selected_port != PORT:
+        logging.warning(f"[startup] port {PORT} busy; using {selected_port}")
+
+    logging.info(f"=== Luma API on http://127.0.0.1:{selected_port}/ ===")
     logging.info(f"[startup] UI_DIR={UI_DIR}")
     logging.info(f"[startup] FIRMWARE_DIR={FIRMWARE_DIR}")
-    APP.run(host="0.0.0.0", port=PORT)
+    APP.run(host="0.0.0.0", port=selected_port)

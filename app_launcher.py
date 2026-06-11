@@ -58,7 +58,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Application Version
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 # Detect if we're running as a frozen executable
 IS_FROZEN = getattr(sys, 'frozen', False)
@@ -169,9 +169,8 @@ class AppWindow:
         port = start_port
         while port < start_port + 100:  # Try up to 100 ports
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.bind(('', port))
-                sock.close()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.bind((self.host, port))
                 return port
             except OSError:
                 port += 1
@@ -358,19 +357,31 @@ class AppWindow:
         """Run the Flask app"""
         try:
             self.running = True
-            log_message(f"Starting server on {self.host}:{self.port}")
             # Suppress Flask logging for cleaner output
             import logging
             log = logging.getLogger('werkzeug')
             log.setLevel(logging.ERROR)
-            
-            app.run(
-                host=self.host,
-                port=self.port,
-                debug=False,
-                use_reloader=False,
-                threaded=True
-            )
+
+            max_attempts = 100
+            attempts = 0
+            while attempts < max_attempts:
+                try:
+                    log_message(f"Starting server on {self.host}:{self.port}")
+                    app.run(
+                        host=self.host,
+                        port=self.port,
+                        debug=False,
+                        use_reloader=False,
+                        threaded=True
+                    )
+                    return
+                except OSError as e:
+                    if "address already in use" in str(e).lower():
+                        self.port += 1
+                        attempts += 1
+                        log_message(f"Port busy, retrying on {self.host}:{self.port}")
+                        continue
+                    raise
         except Exception as e:
             log_message(f"Server error: {e}")
             log_message(traceback.format_exc())
