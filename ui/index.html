@@ -2854,6 +2854,11 @@ async function submitPasswordSync(){
   try{
     const payload = await api("/api/cache");
     const serverRows = tolerantRows(payload);
+    units = mergeByIP(units, serverRows);
+    saveLocal(units);
+    rerenderFiltered();
+    updateTotals();
+
     const CLEAR_UNITS_PROMPT_SESSION_KEY = "clear_units_prompt_seen_v1";
     const hasSeenClearPrompt = sessionStorage.getItem(CLEAR_UNITS_PROMPT_SESSION_KEY) === "1";
     const shouldPromptClearUnits = serverRows.length > 0 && !hasSeenClearPrompt;
@@ -2879,28 +2884,20 @@ async function submitPasswordSync(){
             updateTotals();
           } else {
             // Clear failed; still keep flag so prompt doesn't repeat
-            units = mergeByIP(units, serverRows);
-            saveLocal(units);
             rerenderFiltered();
             updateTotals();
           }
         } catch {
           // Clear error; still keep flag so prompt doesn't repeat
-          units = mergeByIP(units, serverRows);
-          saveLocal(units);
           rerenderFiltered();
           updateTotals();
         }
       } else {
         // User declined; still keep flag so prompt only shows once per session
-        units = mergeByIP(units, serverRows);
-        saveLocal(units);
         rerenderFiltered();
         updateTotals();
       }
     } else {
-      units = mergeByIP(units, serverRows);
-      saveLocal(units);
       rerenderFiltered();
       updateTotals();
     }

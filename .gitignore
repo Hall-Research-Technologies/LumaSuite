@@ -68,6 +68,7 @@ __pycache__/
 
 # Local runtime/system data (do not commit)
 producer_state.json
+producer2_state.json
 producer_config.json
 units_cache.json
 video_walls.json

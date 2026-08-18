@@ -17,6 +17,7 @@
   let selectedPos = "1:1";
   let reports = {};
   let liveRouteSeq = 0;
+  let autoRefreshTimer = null;
 
   function clampInt(value, min, max, fallback) {
     const n = Number.parseInt(value, 10);
@@ -569,6 +570,7 @@
     rememberSelectedWall(currentWall.id);
     render();
     toast("Video wall saved", true);
+    scheduleAutoSaveRefresh(100);
   }
 
   async function saveWallQuiet() {
@@ -669,6 +671,23 @@
     render();
     setStatus(data.status || statusFromReports(currentWall, reports));
     if (!options.silent) toast("Device state refreshed", true);
+  }
+
+  function scheduleAutoSaveRefresh(delay = 500) {
+    if (autoRefreshTimer) window.clearTimeout(autoRefreshTimer);
+    const wallId = currentWall?.id || "";
+    autoRefreshTimer = window.setTimeout(async () => {
+      autoRefreshTimer = null;
+      if (!wallId || currentWall?.id !== wallId) return;
+      try {
+        await saveWallQuiet();
+        if (currentWall?.id !== wallId) return;
+        await refreshWall({ silent: true });
+      } catch (e) {
+        setStatus("Auto refresh failed", "error");
+        toast(e.message, false);
+      }
+    }, delay);
   }
 
   async function applyWall() {
@@ -818,6 +837,7 @@
       reports = {};
       selectedPos = "1:1";
       render();
+      refreshWall({ silent: true }).catch(() => {});
     });
     document.getElementById("newWallBtn").addEventListener("click", () => {
       currentWall = createWall(`Video Wall ${state.walls.length + 1}`, 2, 2);
@@ -846,6 +866,7 @@
         replaceCurrentInState();
         reports = {};
         render();
+        scheduleAutoSaveRefresh();
       });
     }
     for (const id of ["totalWidth", "totalHeight", "topBorder", "bottomBorder", "leftBorder", "rightBorder"]) {
@@ -892,6 +913,7 @@
       replaceCurrentInState();
       renderGrid();
       setStatus("Unsaved changes", "modified");
+      scheduleAutoSaveRefresh();
     });
 
     document.getElementById("details").addEventListener("change", event => {
@@ -903,6 +925,7 @@
       replaceCurrentInState();
       reports = {};
       setStatus("Unsaved changes", "modified");
+      scheduleAutoSaveRefresh();
     });
 
     document.getElementById("applyBezelAll").addEventListener("change", () => {

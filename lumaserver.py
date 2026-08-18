@@ -1047,9 +1047,34 @@ UI_DIR = os.path.join(BASE_DIR, "ui")
 FIRMWARE_DIR = os.path.join(BASE_DIR, "firmware")
 CACHE_FILE = os.path.join(DATA_DIR, "units_cache.json")
 VIDEO_WALL_STATE_FILE = os.path.join(DATA_DIR, "video_walls.json")
+CONFIG_FILE = os.path.join(DATA_DIR, "producer_config.json")
+PRODUCER_STATE_FILE = os.path.join(DATA_DIR, "producer_state.json")
+PRODUCER2_STATE_FILE = os.path.join(DATA_DIR, "producer2_state.json")
 # in-memory cache structures (needed before autoload)
 cache_units: Dict[str, Dict[str, Any]] = {}
 cache_lock = threading.Lock()
+
+def _ensure_json_file(path: str, default: Any):
+    """Create a state file if it is missing; leave existing files untouched."""
+    if os.path.exists(path):
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(default, f, indent=2)
+        logging.info(f"[startup] created missing state file -> {path}")
+    except Exception as e:
+        logging.warning(f"[startup] failed to create {path}: {e}")
+
+_ensure_json_file(CACHE_FILE, [])
+_ensure_json_file(VIDEO_WALL_STATE_FILE, {
+    "kind": "lumasuite.video_walls",
+    "version": 1,
+    "walls": []
+})
+_ensure_json_file(PRODUCER_STATE_FILE, {"ticker": {"dir": "rtl", "rows": []}, "streams": []})
+_ensure_json_file(PRODUCER2_STATE_FILE, {"streams": [], "ticker": {}})
+
 # --- baseline cache autoload (dual JSON support) ---
 if os.path.exists(CACHE_FILE):
     try:
@@ -1123,9 +1148,6 @@ def _subprocess_run_no_window(cmd, **kwargs):
 def _subprocess_check_output_no_window(cmd, **kwargs):
     return subprocess.check_output(cmd, **kwargs, **_NO_WINDOW_SUBPROCESS_KWARGS)
 
-# File to persist producer-config (asset paths etc.)
-CONFIG_FILE = os.path.join(DATA_DIR, "producer_config.json")
-
 def _load_persisted_config():
     try:
         if os.path.exists(CONFIG_FILE):
@@ -1163,6 +1185,7 @@ def _save_persisted_config():
         logging.warning(f"[config] failed to persist config: {e}")
 
 # Attempt to load any persisted config on startup
+_ensure_json_file(CONFIG_FILE, {k: CONFIG.get(k) for k in ("logos_path","imagestream_path","firmware_path")})
 _load_persisted_config()
 # Export CONFIG into Flask app config so blueprints can read it
 APP.config['LUMA_CONFIG'] = CONFIG
@@ -4420,9 +4443,6 @@ def api_list_dir():
 
 # ====== END PRODUCER BLOCK ======
 # --- [producer persistent state] BEGIN ---
-# Persistent ticker + stream data across all units
-PRODUCER_STATE_FILE = os.path.join(DATA_DIR, "producer_state.json")
-
 def _load_producer_state():
     try:
         if os.path.exists(PRODUCER_STATE_FILE):
@@ -4458,14 +4478,13 @@ def post_producer_state():
     
 @app.route("/api/producer2/state", methods=["GET","POST"])
 def api_producer2_state():
-    state_file = os.path.join(DATA_DIR, "producer2_state.json")
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
-        with open(state_file, "w", encoding="utf-8") as f:
+        with open(PRODUCER2_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         return jsonify({"ok": True})
-    if os.path.exists(state_file):
-        with open(state_file, "r", encoding="utf-8") as f:
+    if os.path.exists(PRODUCER2_STATE_FILE):
+        with open(PRODUCER2_STATE_FILE, "r", encoding="utf-8") as f:
             return jsonify(json.load(f))
     return jsonify({"streams": [], "ticker": {}})
 
