@@ -124,6 +124,7 @@ def build_windows():
         '--collect-data=PIL',
         '--hidden-import=pystray',
         '--hidden-import=pystray._win32',
+        '--hidden-import=psutil',
         str(LAUNCHER)
     ]
     if icon_arg:
@@ -228,6 +229,7 @@ def build_mac():
         '--collect-data=PIL',
         '--hidden-import=pystray',
         '--hidden-import=pystray._darwin',
+        '--hidden-import=psutil',
         str(LAUNCHER)
     ]
     if icon_arg:
@@ -297,6 +299,7 @@ def build_linux():
         '--collect-data=PIL',
         '--hidden-import=pystray',
         '--hidden-import=pystray._xlib',
+        '--hidden-import=psutil',
         str(LAUNCHER)
     ]
     if icon_arg:

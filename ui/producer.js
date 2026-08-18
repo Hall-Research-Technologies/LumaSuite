@@ -1,5 +1,5 @@
 (() => {
-  const BUILD = "R14_FIXED_FULL";
+  const BUILD = "R19_LOGO_AS_SUBMIT";
   // console.log("[producer] build", BUILD, "loaded");
 
   /* ============================================================
@@ -54,12 +54,145 @@
   const DOWN_LOGO = ip => `http://${ip}/downOverlayImage`;
 
   function hexToRgbTriplet(hex) {
-    const clean = hex.replace("#","");
+    const clean = String(hex || "#ffffff").replace("#","");
     const num = parseInt(clean,16);
     return { r:(num>>16)&255, g:(num>>8)&255, b:num&255 };
   }
   const rgbToHex = (r,g,b) =>
     "#" + [r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
+
+  function clampNumber(value, min, max, fallback){
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
+  }
+
+  function parseResolution(value){
+    const match = String(value || "").match(/(\d{3,5})\s*x\s*(\d{3,5})/i);
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    return { width, height };
+  }
+
+  function roundLogoPercent(value){
+    return Math.ceil(Number(value) || 0);
+  }
+
+  function calculateLogoPresetPosition(preset, logoHeightPercent, outputResolution, logoDimensions, fallbackRightH = null){
+    const height = clampNumber(logoHeightPercent, 1, 100, 10);
+    const isRight = preset === "upper-right" || preset === "lower-right";
+    const isBottom = preset === "lower-left" || preset === "lower-right";
+
+    let startx = 0;
+    if (isRight) {
+      if (!outputResolution || !logoDimensions) {
+        startx = fallbackRightH == null ? 98 - height : fallbackRightH;
+        return {
+          startx: roundLogoPercent(startx),
+          starty: isBottom ? roundLogoPercent(100 - height) : roundLogoPercent(height)
+        };
+      } else {
+        const aspect = logoDimensions.width / logoDimensions.height;
+        const logoWidthPercent = height * (outputResolution.height / outputResolution.width) * aspect;
+        startx = 100 - logoWidthPercent;
+      }
+    }
+
+    return {
+      startx: roundLogoPercent(startx),
+      starty: isBottom ? 100 : roundLogoPercent(height)
+    };
+  }
+
+  function safeLogoFallbackPosition(preset, logoHeightPercent){
+    const height = clampNumber(logoHeightPercent, 1, 98, 10);
+    const isRight = preset === "upper-right" || preset === "lower-right";
+    const isBottom = preset === "lower-left" || preset === "lower-right";
+    return {
+      startx: isRight ? 98 - height : 0,
+      starty: isBottom ? 100 - height : height
+    };
+  }
+
+  function colorToTriplet(value){
+    const str = String(value || "").trim();
+    if (/^#[0-9a-f]{6}$/i.test(str)) {
+      const rgb = hexToRgbTriplet(str);
+      return `${rgb.r}.${rgb.g}.${rgb.b}`;
+    }
+    const parts = str.split(".").map(n => clampNumber(n, 0, 255, 0));
+    if (parts.length === 3) return parts.map(n => Math.round(n)).join(".");
+    return "255.255.255";
+  }
+
+  function colorToHex(value){
+    const str = String(value || "").trim();
+    if (/^#[0-9a-f]{6}$/i.test(str)) return str.toLowerCase();
+    const parts = str.split(".").map(n => clampNumber(n, 0, 255, 255));
+    if (parts.length === 3) return rgbToHex(parts[0], parts[1], parts[2]);
+    return "#ffffff";
+  }
+
+  function tickerCfgFromRow(rowElement){
+    const fonth = clampNumber(rowElement.querySelector("[data-fonth]")?.value, 1, 100, 10);
+    const pos = rowElement.querySelector("[data-pos]")?.value || "bottom";
+    let starty = clampNumber(rowElement.querySelector("[data-starty]")?.value, 0, 100, 100 - fonth);
+    if (pos === "top") starty = 0;
+    else if (pos === "middle") starty = 45;
+    else if (pos === "bottom") starty = 100 - fonth;
+    return {
+      text: rowElement.querySelector("[data-text]")?.value || "",
+      pos,
+      speed: clampNumber(rowElement.querySelector("[data-speed]")?.value, 0, 40, 8),
+      cycles: clampNumber(rowElement.querySelector("[data-cycles]")?.value, 0, 99, 0),
+      fonth,
+      direction: clampNumber(rowElement.querySelector("[data-dir]")?.value, 0, 1, 0),
+      color: colorToHex(rowElement.querySelector("[data-color]")?.value || state.tickerColor),
+      fonttransparency: clampNumber(rowElement.querySelector("[data-transparency]")?.value, 1, 255, 255),
+      startx: clampNumber(rowElement.querySelector("[data-startx]")?.value, 0, 100, 0),
+      starty,
+      scroll: rowElement.querySelector("[data-scroll]")?.checked !== false
+    };
+  }
+
+  function tickerPayload(cfg, enabled){
+    return {
+      osdindex: 0,
+      osdtextenabled: !!enabled,
+      displaytext: {
+        content: cfg.text || "",
+        fontcolor: colorToTriplet(cfg.color || state.tickerColor),
+        backcolor: "0.0.0",
+        fonttransparency: clampNumber(cfg.fonttransparency, 1, 255, 255),
+        backtransparency: 0,
+        startpostion: { startx: clampNumber(cfg.startx, 0, 100, 0), starty: clampNumber(cfg.starty, 0, 100, 0) },
+        fontsize: { fonth: clampNumber(cfg.fonth, 1, 100, 10), fontw: 80 },
+        displayscrolleffects: {
+          enable: cfg.scroll !== false,
+          iterations: clampNumber(cfg.cycles, 0, 99, 0),
+          speed: clampNumber(cfg.speed, 0, 40, 8),
+          direction: clampNumber(cfg.direction, 0, 1, 0)
+        }
+      }
+    };
+  }
+
+  function setTickerPositionInputs(rowElement){
+    const pos = rowElement.querySelector("[data-pos]")?.value || "bottom";
+    const fonth = clampNumber(rowElement.querySelector("[data-fonth]")?.value, 1, 100, 10);
+    const startX = rowElement.querySelector("[data-startx]");
+    const startY = rowElement.querySelector("[data-starty]");
+    const isCustom = pos === "custom";
+    if (startX) startX.disabled = !isCustom;
+    if (startY) startY.disabled = !isCustom;
+    if (isCustom) return;
+
+    const presetY = pos === "top" ? 0 : pos === "middle" ? 45 : 100 - fonth;
+    if (startX) startX.value = 0;
+    if (startY) startY.value = presetY;
+  }
 // === FIX: provide validateBitrate() for HTML onblur ===
 window.validateBitrate = function(inp){
   if (!inp) return;
@@ -83,7 +216,8 @@ let pollNow = false;
     assets: { images:{}, logos:{} },
     presets: [],
     ticker: { dir:"rtl", rows:[], enabled:false, pending:null },
-    tickerColor: localStorage.getItem("tickerFontColor") || "255.255.255"
+    tickerColor: localStorage.getItem("tickerFontColor") || "255.255.255",
+    logoImageDimensions: null
   };
   const pendingMute = {
 	  audio: false,
@@ -92,6 +226,7 @@ let pollNow = false;
   let pendingLogo = false;
   let pendingTicker = false;
   let pendingRtmp = false;
+  let lastLogoResolutionRecalc = "";
   let savedProfileBeforeRtmp = null;  // Track profile before RTMP is enabled
 
 
@@ -316,7 +451,8 @@ fetch = async function(url, opts){
     state.encs.forEach(u => {
       const o = document.createElement("option");
       o.value = u.ip;
-      o.textContent = `${u.ip} — ${u.hostname || u.model || ""}`;
+      const streamname = u?.enc?.video?.streamname || u.streamname || u.hostname || u.model || "";
+      o.textContent = `${u.ip} - ${streamname}`;
       sel.append(o);
     });
 
@@ -452,9 +588,15 @@ fetch = async function(url, opts){
     img.className = "thumb";
     img.src = ent.jpg || ent.png;
     img.style.cursor = "pointer";
+    img.onload = () => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        ent.width = img.naturalWidth;
+        ent.height = img.naturalHeight;
+      }
+    };
     // Clicking image pushes jpg if available, otherwise png
     const format = ent.jpg ? "jpg" : "png";
-    img.addEventListener('click', () => pushLogo(slot, format));
+    img.addEventListener('click', () => pushLogo(slot, format, img, ent));
 
     const lbl = document.createElement("div");
     lbl.className = "small";
@@ -468,8 +610,19 @@ fetch = async function(url, opts){
 }
 
 
-  async function pushLogo(slot,ext){
+  async function pushLogo(slot,ext, sourceImg=null, sourceEntry=null){
     if (!state.unit) return;
+    if (sourceImg?.naturalWidth > 0 && sourceImg?.naturalHeight > 0) {
+      state.logoImageDimensions = {
+        width: sourceImg.naturalWidth,
+        height: sourceImg.naturalHeight
+      };
+    } else if (sourceEntry?.width > 0 && sourceEntry?.height > 0) {
+      state.logoImageDimensions = {
+        width: sourceEntry.width,
+        height: sourceEntry.height
+      };
+    }
     
     // Check if logo is currently enabled
     const pill = $("#tgLogo .pill");
@@ -504,16 +657,14 @@ fetch = async function(url, opts){
     img.onerror = () => {
       setTimeout(() => { img.src = DOWN_LOGO(state.unit.ip)+`?t=${Date.now()}`; }, 500);
     };
+    img.onload = () => {
+      img.closest('.slot')?.classList.remove('placeholder');
+      if (!state.logoImageDimensions && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        state.logoImageDimensions = { width: img.naturalWidth, height: img.naturalHeight };
+      }
+    };
     img.src = url;
-    
-    // Re-enable logo if it was enabled before
-    if (wasEnabled) {
-      await new Promise(r=>setTimeout(r, 200));
-      await rpc("OsdLogo.Set", {
-        osdlogoenabled: true,
-        displaylogo: {}
-      });
-    }
+    await wireLogoHandlers.applyLogoSettings?.({ requireLogoDimensions: true });
     
     // Clear pending flag after entire sequence completes
     setTimeout(()=> pendingLogo = false, 1500);
@@ -870,66 +1021,146 @@ fetch = async function(url, opts){
       }
     };
 
-    // Function to calculate position based on preset and height
+    function currentOutputResolution(){
+      return parseResolution($("#selResolution")?.value)
+        || parseResolution(state.lastPollState?.encode?.resolution)
+        || currentPreviewResolution();
+    }
+
+    function currentPreviewResolution(){
+      const img = $("#livePreview");
+      if (img?.naturalWidth > 0 && img?.naturalHeight > 0) {
+        return { width: img.naturalWidth, height: img.naturalHeight };
+      }
+      return null;
+    }
+
+    function currentLogoDimensions(){
+      if (state.logoImageDimensions?.width > 0 && state.logoImageDimensions?.height > 0) {
+        return state.logoImageDimensions;
+      }
+      const img = $("#logoPreview");
+      if (img?.naturalWidth > 0 && img?.naturalHeight > 0) {
+        return { width: img.naturalWidth, height: img.naturalHeight };
+      }
+      return null;
+    }
+
+    function fallbackLogoRightH(height){
+      return 98 - height;
+    }
+
+    function currentLogoControlValues(){
+      return {
+        transparency: clampNumber($("#logoTransparency")?.value, 1, 255, 255),
+        height: clampNumber($("#logoHeight")?.value, 1, 98, 10),
+        position: $("#logoPosition")?.value || 'upper-right'
+      };
+    }
+
+    function updateLogoCoordinateInputs(pos){
+      const horiz = $("#logoHorizontal");
+      const vert = $("#logoVertical");
+      if (horiz && document.activeElement !== horiz) horiz.value = pos.startx;
+      if (vert && document.activeElement !== vert) vert.value = pos.starty;
+    }
+
+    // Function to calculate position based on preset, output resolution, logo dimensions, and height.
     function calculatePosition(preset, height) {
       switch(preset) {
         case 'upper-right':
-          return { startx: 98 - height, starty: height };
         case 'lower-right':
-          return { startx: 98 - height, starty: 100 };
         case 'upper-left':
-          return { startx: 0, starty: height };
         case 'lower-left':
-          return { startx: 0, starty: 100 };
+          return calculateLogoPresetPosition(
+            preset,
+            height,
+            currentOutputResolution(),
+            currentLogoDimensions(),
+            fallbackLogoRightH(height)
+          );
         case 'custom':
           // Use manual input values
           const startx = parseInt($("#logoHorizontal")?.value || 88);
           const starty = parseInt($("#logoVertical")?.value || 10);
           return { startx, starty };
         default:
-          return { startx: 98 - height, starty: height }; // default upper-right
+          return calculateLogoPresetPosition(
+            'upper-right',
+            height,
+            currentOutputResolution(),
+            currentLogoDimensions(),
+            fallbackLogoRightH(height)
+          );
       }
     }
 
-    // Function to send logo settings
-    async function applyLogoSettings() {
-      if (!state.unit) return;
-      
-      pendingLogo = true;
-      
-      const transparency = parseInt($("#logoTransparency")?.value || 255);
-      const height = parseInt($("#logoHeight")?.value || 10);
-      const position = $("#logoPosition")?.value || 'upper-right';
-      
-      // Preserve current enabled state
+    function refreshLogoPresetCoordinates(){
+      const { height, position } = currentLogoControlValues();
+      if (position === "custom") return;
+      updateLogoCoordinateInputs(calculatePosition(position, height));
+    }
+
+    function buildLogoSettingsPayload({ requireLogoDimensions = false } = {}){
+      const { transparency, height, position } = currentLogoControlValues();
       const pill = $("#tgLogo .pill");
       const currentEnabled = pill ? pill.classList.contains("on") : true;
-      
-      const pos = calculatePosition(position, height);
-      
-      await rpc("OsdLogo.Set", {
+      const logoDimensions = currentLogoDimensions();
+
+      if (position !== "custom" && requireLogoDimensions && !logoDimensions) {
+        return null;
+      }
+
+      const pos = position === "custom"
+        ? calculatePosition(position, height)
+        : calculateLogoPresetPosition(
+            position,
+            height,
+            currentOutputResolution(),
+            logoDimensions,
+            fallbackLogoRightH(height)
+          );
+
+      if (position !== "custom") updateLogoCoordinateInputs(pos);
+
+      return {
         osdlogoenabled: currentEnabled,
         displaylogo: {
           backtransparency: transparency,
           startpostion: pos,
           logohight: height
         }
-      });
+      };
+    }
+
+    // Function to send logo settings
+    async function applyLogoSettings(options = {}) {
+      if (!state.unit) return;
       
-      // Allow encoder to settle before poll overwrites UI
-      setTimeout(()=> pendingLogo = false, 1500);
+      pendingLogo = true;
+
+      try {
+        const payload = buildLogoSettingsPayload(options);
+        if (!payload) return;
+        await rpc("OsdLogo.Set", payload);
+      } catch (e) {
+        console.error("Failed to apply logo settings:", e);
+      } finally {
+        // Allow encoder to settle before poll overwrites UI
+        setTimeout(()=> pendingLogo = false, 1500);
+      }
     }
 
     // Wire up transparency input
     const transInput = $("#logoTransparency");
     if (transInput) {
-      transInput.onchange = applyLogoSettings;
+      transInput.onchange = refreshLogoPresetCoordinates;
     }
 
     // Wire up height input
     const heightInput = $("#logoHeight");
     if (heightInput) {
-      heightInput.onchange = applyLogoSettings;
+      heightInput.onchange = refreshLogoPresetCoordinates;
     }
 
     // Wire up position dropdown
@@ -942,33 +1173,42 @@ fetch = async function(url, opts){
           coordRow.style.display = posSelect.value === 'custom' ? 'flex' : 'none';
         }
         
-        // Only apply settings if not switching to custom mode
-        // (let user enter values when in custom mode)
-        if (posSelect.value !== 'custom') {
-          await applyLogoSettings();
-        }
+        refreshLogoPresetCoordinates();
       };
     }
 
     // Wire up horizontal/vertical coordinate inputs
     const horizInput = $("#logoHorizontal");
     if (horizInput) {
-      horizInput.onchange = applyLogoSettings;
+      horizInput.onchange = () => {};
     }
     
     const vertInput = $("#logoVertical");
     if (vertInput) {
-      vertInput.onchange = applyLogoSettings;
+      vertInput.onchange = () => {};
     }
 
     // Store function to detect position preset from coordinates
     wireLogoHandlers.detectPreset = (startx, starty, height) => {
-      if (startx === 0 && starty === height) return 'upper-left';
-      if (startx === 0 && starty === 100) return 'lower-left';
-      if (startx === 98 - height && starty === 100) return 'lower-right';
-      if (startx === 98 - height && starty === height) return 'upper-right';
+      const resolution = currentOutputResolution();
+      const logoDimensions = currentLogoDimensions();
+      const matches = (actual, expected) => Math.abs(Number(actual) - Number(expected)) <= 1;
+      const presets = ['upper-left', 'upper-right', 'lower-left', 'lower-right'];
+      for (const preset of presets) {
+        const expected = calculateLogoPresetPosition(
+          preset,
+          height,
+          resolution,
+          logoDimensions,
+          fallbackLogoRightH(height)
+        );
+        if (matches(startx, expected.startx) && matches(starty, expected.starty)) return preset;
+      }
       return 'custom'; // Custom coordinates
     };
+
+    wireLogoHandlers.applyLogoSettings = applyLogoSettings;
+    wireLogoHandlers.refreshLogoPresetCoordinates = refreshLogoPresetCoordinates;
   }
 
   /* ============================================================
@@ -1062,6 +1302,9 @@ fetch = async function(url, opts){
           bitrate: b,
           resolution: res.value
         });
+        if ($("#logoPosition")?.value !== "custom") {
+          wireLogoHandlers.refreshLogoPresetCoordinates?.();
+        }
         // Wait a bit for device to apply and polling to catch up
         await new Promise(r=>setTimeout(r,500));
       } finally {
@@ -1121,20 +1364,8 @@ fetch = async function(url, opts){
         if (state.ticker.enabled && state.ticker.pending && state.unit) {
           try {
             const cfg = state.ticker.pending;
-            await rpc("OsdText.Set",{
-              osdindex:0,
-              osdtextenabled:true,
-              displaytext:{
-                content:cfg.text,
-                fontcolor:trip,
-                backcolor:"0.0.0",
-                fonttransparency:255,
-                backtransparency:0,
-                startpostion:{startx:0,starty:cfg.starty},
-                fontsize:{fonth:cfg.fonth,fontw:80},
-                displayscrolleffects:{enable:true,iterations:cfg.cycles,speed:cfg.speed,direction:cfg.direction}
-              }
-            });
+            cfg.color = colorToHex(trip);
+            await rpc("OsdText.Set", tickerPayload(cfg, true));
           } catch(e) {
             console.error("Failed to update ticker color on device:", e);
           }
@@ -1191,11 +1422,38 @@ function paintTickerRows(){
         <option value="top">top</option>
         <option value="middle">middle</option>
         <option value="bottom">bottom</option>
+        <option value="custom">custom</option>
       `;
       selectPos.value = t.pos || "bottom";
       selectPos.style.width = "80px";
       tdPos.appendChild(selectPos);
       tr.appendChild(tdPos);
+
+      const tdStartX = document.createElement("td");
+      const startXInput = document.createElement("input");
+      startXInput.type = "number";
+      startXInput.setAttribute("data-startx", "");
+      startXInput.min = "0";
+      startXInput.max = "100";
+      startXInput.value = typeof t.startx !== "undefined" ? t.startx : 0;
+      startXInput.className = "w-2dig";
+      startXInput.style.width = "5ch";
+      startXInput.title = "Horizontal start position";
+      tdStartX.appendChild(startXInput);
+      tr.appendChild(tdStartX);
+
+      const tdStartY = document.createElement("td");
+      const startYInput = document.createElement("input");
+      startYInput.type = "number";
+      startYInput.setAttribute("data-starty", "");
+      startYInput.min = "0";
+      startYInput.max = "100";
+      startYInput.value = typeof t.starty !== "undefined" ? t.starty : (t.pos === "top" ? 0 : t.pos === "middle" ? 45 : 90);
+      startYInput.className = "w-2dig";
+      startYInput.style.width = "5ch";
+      startYInput.title = "Vertical start position";
+      tdStartY.appendChild(startYInput);
+      tr.appendChild(tdStartY);
 
       // Speed
       const tdSpeed = document.createElement("td");
@@ -1237,15 +1495,38 @@ function paintTickerRows(){
       tdFonth.appendChild(fonthInput);
       tr.appendChild(tdFonth);
 
+      const tdTransparency = document.createElement("td");
+      const transparencyInput = document.createElement("input");
+      transparencyInput.type = "number";
+      transparencyInput.setAttribute("data-transparency", "");
+      transparencyInput.min = "1";
+      transparencyInput.max = "255";
+      transparencyInput.value = typeof t.fonttransparency !== "undefined" ? t.fonttransparency : 255;
+      transparencyInput.className = "w-2dig";
+      transparencyInput.style.width = "5ch";
+      transparencyInput.title = "Font transparency";
+      tdTransparency.appendChild(transparencyInput);
+      tr.appendChild(tdTransparency);
+
       // Direction
       const tdDir = document.createElement("td");
       const dirSelect = document.createElement("select");
       dirSelect.setAttribute("data-dir", "");
-      dirSelect.innerHTML = `<option value="0">→</option><option value="1">←</option>`;
+      dirSelect.innerHTML = `<option value="0">&#8592;</option><option value="1">&#8594;</option>`;
       dirSelect.value = typeof t.direction !== 'undefined' ? String(t.direction) : "0";
+      dirSelect.title = "";
       dirSelect.style.width = "80px";
       tdDir.appendChild(dirSelect);
       tr.appendChild(tdDir);
+
+      const tdScroll = document.createElement("td");
+      const scrollInput = document.createElement("input");
+      scrollInput.type = "checkbox";
+      scrollInput.setAttribute("data-scroll", "");
+      scrollInput.checked = t.scroll !== false;
+      tdScroll.style.textAlign = "center";
+      tdScroll.appendChild(scrollInput);
+      tr.appendChild(tdScroll);
 
       // Color
       const tdColor = document.createElement("td");
@@ -1263,6 +1544,16 @@ function paintTickerRows(){
       tdColor.appendChild(colorInput);
       tr.appendChild(tdColor);
 
+      const tdSave = document.createElement("td");
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "btn";
+      saveBtn.textContent = "Save";
+      saveBtn.style.padding = "4px 8px";
+      saveBtn.setAttribute("data-save-ticker", "");
+      tdSave.appendChild(saveBtn);
+      tr.appendChild(tdSave);
+
       // Trash
       const tdDelete = document.createElement("td");
       if (idx > 0) {
@@ -1276,18 +1567,19 @@ function paintTickerRows(){
       tr.appendChild(tdDelete);
 
       box.appendChild(tr);
+      setTickerPositionInputs(tr);
 
       tr.oninput = () => {
         const i = idx;
-        const text = tr.querySelector("[data-text]").value;
-        const pos = tr.querySelector("[data-pos]").value;
-        const speed = Math.min(40, Math.max(0, Number(tr.querySelector("[data-speed]").value)));
-        const cycles = Math.min(99, Math.max(0, Number(tr.querySelector("[data-cycles]").value)));
-        const fonth = Math.min(100, Math.max(1, Number(tr.querySelector("[data-fonth]").value)));
-        const direction = Number(tr.querySelector('[data-dir]').value);
-        const color = tr.querySelector('[data-color]').value;
-
-        state.ticker.rows[i] = { text, pos, speed, cycles, fonth, direction, color };
+        setTickerPositionInputs(tr);
+        const cfg = tickerCfgFromRow(tr);
+        const sx = tr.querySelector("[data-startx]");
+        const sy = tr.querySelector("[data-starty]");
+        const st = tr.querySelector("[data-transparency]");
+        if (sx && sx.value !== String(cfg.startx)) sx.value = cfg.startx;
+        if (sy && sy.value !== String(cfg.starty)) sy.value = cfg.starty;
+        if (st && st.value !== String(cfg.fonttransparency)) st.value = cfg.fonttransparency;
+        state.ticker.rows[i] = cfg;
         saveGlobalState();
 
         // Debounce device updates when ticker is active
@@ -1295,38 +1587,8 @@ function paintTickerRows(){
           clearTimeout(tr.deviceUpdateTimeout);
           tr.deviceUpdateTimeout = setTimeout(async () => {
             try {
-              let starty = 0;
-              if (pos === "top") starty = 0;
-              else if (pos === "middle") starty = 45;
-              else if (pos === "bottom") starty = 100 - fonth;
-
-              // Update pending config with new values
-              state.ticker.pending = {
-                direction,
-                text,
-                pos,
-                speed,
-                cycles,
-                fonth,
-                starty,
-                color
-              };
-
-              // Send to device after user stops editing
-              await rpc("OsdText.Set", {
-                osdindex: 0,
-                osdtextenabled: true,
-                displaytext: {
-                  content: text,
-                  fontcolor: color,
-                  backcolor: "0.0.0",
-                  fonttransparency: 255,
-                  backtransparency: 0,
-                  startpostion: { startx: 0, starty: starty },
-                  fontsize: { fonth: fonth, fontw: 80 },
-                  displayscrolleffects: { enable: true, iterations: cycles, speed: speed, direction: direction }
-                }
-              });
+              state.ticker.pending = tickerCfgFromRow(tr);
+              await rpc("OsdText.Set", tickerPayload(state.ticker.pending, true));
             } catch (e) {
               console.error("Failed to update ticker on device:", e);
             }
@@ -1338,47 +1600,11 @@ function paintTickerRows(){
       const applyTickerFromRow = async (rowElement) => {
         if (!state.unit) return;
 
-        const direction = Number(rowElement.querySelector('[data-dir]').value);
-        const color = rowElement.querySelector('[data-color]').value;
-        const text = rowElement.querySelector("[data-text]").value;
-        const pos = rowElement.querySelector("[data-pos]").value;
-        const speed = Number(rowElement.querySelector("[data-speed]").value);
-        const cycles = Number(rowElement.querySelector("[data-cycles]").value);
-        const fonth = Math.min(100, Math.max(1, Number(rowElement.querySelector("[data-fonth]").value)));
-
-        let starty = 0;
-        if (pos === "top") starty = 0;
-        else if (pos === "middle") starty = 45;
-        else if (pos === "bottom") starty = 100 - fonth;
-
-        // Store the pending ticker config
-        state.ticker.pending = {
-          direction,
-          text,
-          pos,
-          speed,
-          cycles,
-          fonth,
-          starty,
-          color
-        };
+        state.ticker.pending = tickerCfgFromRow(rowElement);
 
         // Send to device immediately (keep current enabled/disabled state)
         try {
-          await rpc("OsdText.Set",{
-            osdindex:0,
-            osdtextenabled:state.ticker.enabled || false,
-            displaytext:{
-              content:text,
-              fontcolor:color,
-              backcolor:"0.0.0",
-              fonttransparency:255,
-              backtransparency:0,
-              startpostion:{startx:0,starty:starty},
-              fontsize:{fonth:fonth,fontw:80},
-              displayscrolleffects:{enable:true,iterations:cycles,speed:speed,direction:direction}
-            }
-          });
+          await rpc("OsdText.Set", tickerPayload(state.ticker.pending, state.ticker.enabled || false));
         } catch(e) {
           console.error("Failed to send ticker to device:", e);
         }
@@ -1386,17 +1612,23 @@ function paintTickerRows(){
         saveGlobalState();
       };
 
+      tr.onchange = tr.oninput;
+
       // Store reference to apply function for use by toggle
       tr.applyTickerFromRow = applyTickerFromRow;
 
-      tr.querySelector('input[type="radio"]').onchange = async () => {
+      async function applyThisTickerRow(){
         if (!state.unit) return;
         try {
+          tr.querySelector('input[type="radio"]').checked = true;
           await applyTickerFromRow(tr);
         } catch(e) {
           console.error("Failed to load ticker:", e);
         }
-      };
+      }
+
+      tr.querySelector('input[type="radio"]').onclick = applyThisTickerRow;
+      saveBtn.onclick = applyThisTickerRow;
 
       // DELETE
       const del = tr.querySelector("[data-del]");
@@ -1410,7 +1642,7 @@ function paintTickerRows(){
     });
 
     $("#addTicker").onclick = ()=>{
-      state.ticker.rows.push({text:"",pos:"bottom",speed:8,cycles:0});
+      state.ticker.rows.push({text:"",pos:"bottom",speed:8,cycles:0,fonth:10,fonttransparency:255,startx:0,starty:90,scroll:true,color:"#ffffff",direction:0});
       saveGlobalState();
       paintTickerRows();
     };
@@ -1434,31 +1666,20 @@ function paintTickerRows(){
 		const pill = $("#tgTicker .pill");
 		const isOn = pill.classList.contains("on");
 
-		// Set pending flag BEFORE UI update
-		pendingTicker = true;
-
 		if (isOn) {
 		  // Turn ticker OFF - send full structure to keep settings intact on device
+		  pendingTicker = true;
 		  pill.classList.remove("on");
 
 		  try {
 			state.ticker.enabled = false;
-			// Send full displaytext structure even when disabling, to maintain device state
-			const cfg = state.ticker.pending || {text:"", pos:"bottom", speed:8, cycles:0, fonth:10, starty:100-10, direction:0};
-			await rpc("OsdText.Set",{
-			  osdindex:0,
-			  osdtextenabled:false,
-			  displaytext:{
-				content:cfg.text,
-				fontcolor:state.tickerColor,
-				backcolor:"0.0.0",
-				fonttransparency:255,
-				backtransparency:0,
-				startpostion:{startx:0,starty:cfg.starty},
-				fontsize:{fonth:cfg.fonth,fontw:80},
-				displayscrolleffects:{enable:true,iterations:cfg.cycles,speed:cfg.speed,direction:cfg.direction}
-			  }
-			});
+			// Send a Producer-owned structure even when disabling; ticker rows are push-only.
+			const selectedRadio = document.querySelector('input[name="tickerApply"]:checked');
+			const cfg = state.ticker.pending
+              || (selectedRadio ? tickerCfgFromRow(selectedRadio.closest(".ticker-row")) : null)
+              || (state.ticker.rows?.[0])
+              || {text:"",pos:"bottom",speed:8,cycles:0,fonth:10,fonttransparency:255,startx:0,starty:90,scroll:true,color:"#ffffff",direction:0};
+			await rpc("OsdText.Set", tickerPayload(cfg, false));
 			saveGlobalState();
 		  } catch(e) {
 			pill.classList.add("on");
@@ -1468,8 +1689,13 @@ function paintTickerRows(){
 		} else {
 		  // Turn ticker ON - use the pending ticker settings
 		  if (!state.ticker.pending) {
-			alert("Please select a ticker first (check a radio button)");
-			return;
+            const selectedRadio = document.querySelector('input[name="tickerApply"]:checked');
+            if (selectedRadio) {
+              state.ticker.pending = tickerCfgFromRow(selectedRadio.closest(".ticker-row"));
+            } else {
+              alert("Please select a ticker first (check a radio button)");
+              return;
+            }
 		  }
 
 		  // Set pending flag AFTER validation guard
@@ -1479,20 +1705,7 @@ function paintTickerRows(){
 
 		  try {
             const cfg = state.ticker.pending;
-			await rpc("OsdText.Set",{
-			  osdindex:0,
-			  osdtextenabled:true,
-			  displaytext:{
-				content:cfg.text,
-				fontcolor:state.tickerColor,
-				backcolor:"0.0.0",
-				fonttransparency:255,
-				backtransparency:0,
-				startpostion:{startx:0,starty:cfg.starty},
-				fontsize:{fonth:cfg.fonth,fontw:80},
-				displayscrolleffects:{enable:true,iterations:cfg.cycles,speed:cfg.speed,direction:cfg.direction}
-			  }
-			});
+			await rpc("OsdText.Set", tickerPayload(cfg, true));
             state.ticker.enabled = true;
             saveGlobalState();
 		  } catch(e) {
@@ -1830,7 +2043,7 @@ function paintTickerRows(){
       const pill=$("#tgTicker .pill");
       if (pill && pill.classList.contains("on") !== !!st.ticker.osdtextenabled)
         pill.classList.toggle("on", st.ticker.osdtextenabled);
-      
+
       // Display loaded ticker text
       const tickerDisplay = $("#tickerLoadedText");
       if (tickerDisplay && st.ticker.displaytext && st.ticker.displaytext.content) {
@@ -1942,7 +2155,11 @@ function paintTickerRows(){
       });
 
       const selRes = $("#selResolution");
-      if (selRes && selRes.value !== r && document.activeElement !== selRes) selRes.value = r;
+      let resolutionChanged = false;
+      if (selRes && selRes.value !== r && document.activeElement !== selRes) {
+        selRes.value = r;
+        resolutionChanged = true;
+      }
       const selFps = $("#selFramerate");
       if (selFps && selFps.value !== f && document.activeElement !== selFps) selFps.value = f;
       const modeSelect = $("#selMode");
@@ -1951,6 +2168,12 @@ function paintTickerRows(){
       const bitrateInput = $("#inpBitrate");
       if (bitrateInput && document.activeElement !== bitrateInput && bitrateInput.value !== b) {
         bitrateInput.value = b;
+      }
+      const logoPosition = $("#logoPosition")?.value;
+      const recalcSig = `${r}|${logoPosition}|${$("#logoHeight")?.value || ""}|${state.logoImageDimensions?.width || ""}x${state.logoImageDimensions?.height || ""}`;
+      if (resolutionChanged && logoPosition && logoPosition !== "custom" && recalcSig !== lastLogoResolutionRecalc) {
+        lastLogoResolutionRecalc = recalcSig;
+        wireLogoHandlers.refreshLogoPresetCoordinates?.();
       }
     }
 
@@ -1987,6 +2210,7 @@ function paintTickerRows(){
   ============================================================ */
   async function selectUnit(ip){
     state.unit = state.encs.find(e=>e.ip===ip)||null;
+    state.logoImageDimensions = null;
     
     // If empty/placeholder selection, clear previews and return
     if (!ip || !state.unit) {
@@ -2039,6 +2263,12 @@ function paintTickerRows(){
     };
     logoImg.onerror = () => {
       setTimeout(() => { logoImg.src = DOWN_LOGO(ip)+`?t=${Date.now()}`; }, 1000);
+    };
+    logoImg.onload = () => {
+      logoImg.closest('.slot')?.classList.remove('placeholder');
+      if (!state.logoImageDimensions && logoImg.naturalWidth > 0 && logoImg.naturalHeight > 0) {
+        state.logoImageDimensions = { width: logoImg.naturalWidth, height: logoImg.naturalHeight };
+      }
     };
     
     activeImg.src = DOWN_IMG(ip)+`?t=${Date.now()}`;

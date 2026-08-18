@@ -35,7 +35,7 @@
     .w80 { width:80px; } .w120 { width:120px; } .w160 { width:160px; } .w240 { width:240px; }
     label.toggle { display:flex; align-items:center; gap:8px; user-select:none; cursor:pointer; }
     /* slider reduced 25% */
-    .switch { position:relative; width:33px; height:18px; background:var(--border); border-radius:999px; }
+    .switch { position:relative; width:33px; height:18px; background:var(--border); border:0; border-radius:999px; padding:0; cursor:pointer; transition:background .15s; }
     .switch.on { background:rgba(30,144,255,.25); }
     .knob { position:absolute; top:1px; left:2px; width:15px; height:15px; border-radius:50%; background:var(--fg); transition:left .15s; }
     .switch.on .knob { left:17px; background:var(--accent); }
@@ -94,13 +94,19 @@
 <style>
   .gear-btn { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid var(--border); background:var(--panel-2); cursor:pointer; font-size:18px; color:var(--fg); }
   .gear-choice { background:transparent;border:1px solid var(--border);padding:8px;border-radius:8px;cursor:pointer;color:var(--fg);display:flex;align-items:center;gap:8px }
+  .slate-manager-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .slate-manager-panel { border:1px solid var(--border); background:var(--panel-2); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .slate-manager-panel h4 { margin:0; font-size:14px; color:var(--fg); }
+  .slate-manager-status { border:1px solid var(--border); background:rgba(0,0,0,.14); border-radius:6px; padding:8px; min-height:34px; max-height:130px; overflow:auto; font-size:12px; color:var(--muted); white-space:pre-wrap; }
+  .slate-thumb { width:100%; aspect-ratio:16/9; border:1px solid var(--border); border-radius:6px; background:#05080d; object-fit:contain; display:block; }
+  @media (max-width:760px){ .slate-manager-grid { grid-template-columns:1fr; } }
   /* Column visibility toggles */
   .col-dante { display:table-cell; }
   .col-dante-name { display:table-cell; }
   .col-dante-ip { display:table-cell; }
   .col-edid-resolution { display:table-cell; }
   .col-model { display:table-cell; }
-  body.hide-dante .col-dante, body.hide-dante-name .col-dante-name, body.hide-dante-ip .col-dante-ip, body.hide-edid-resolution .col-edid-resolution, body.hide-model .col-model { display:none; }
+  body.hide-dante .col-dante, body.hide-dante .col-dante-name, body.hide-dante .col-dante-ip, body.hide-edid-resolution .col-edid-resolution, body.hide-model .col-model, body.hide-ntp .col-ntp { display:none; }
 </style>
 </head>
 <body>
@@ -134,12 +140,11 @@
             <span>🎬</span>
             <span>Production Studio</span>
           </a>
+          <a class="nav-tab" href="/ui/wall.html">
+            <span>🧱</span>
+            <span>Video Wall</span>
+          </a>
         </div>
-        <label class="toggle" id="header_dark_label" for="dark_mode_toggle" style="display:flex;align-items:center;gap:8px;margin-left:8px;">
-          <input type="checkbox" id="dark_mode_toggle" style="display:none;" />
-          <div style="font-size:14px;">Dark Mode</div>
-          <div id="dark_switch" class="switch on"><div class="knob"></div></div>
-        </label>
       </div>
   </div>
 
@@ -161,6 +166,17 @@
       <button class="btn" id="clear_units">Clear Units</button>
       <span id="scan_status" class="small pill"></span>
     </div>
+  </div>
+
+  <div class="box">
+    <div class="row-between">
+      <div class="row" style="gap:20px;">
+        <span class="small">Device Date/Time: <strong id="dashboard_datetime">(loading)</strong></span>
+        <span class="small">Device Timezone: <strong id="dashboard_timezone">(loading)</strong></span>
+        <span class="small">NTP Server: <strong id="dashboard_ntp_server">(loading)</strong></span>
+      </div>
+    </div>
+    <div id="ntp_status" class="small" style="margin-top:6px;min-height:16px;"></div>
   </div>
 
   <div class="box">
@@ -197,12 +213,8 @@
         <span>Dante</span>
       </label>
       <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
-        <input type="checkbox" id="toggle_dante_name" class="col-toggle" data-col="dante-name" checked />
-        <span>Dante Name</span>
-      </label>
-      <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
-        <input type="checkbox" id="toggle_dante_ip" class="col-toggle" data-col="dante-ip" checked />
-        <span>Dante IP</span>
+        <input type="checkbox" id="toggle_ntp" class="col-toggle" data-col="ntp" checked />
+        <span>NTP</span>
       </label>
       <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
         <input type="checkbox" id="toggle_edid_resolution" class="col-toggle" data-col="edid-resolution" checked />
@@ -223,6 +235,8 @@
           <th class="sortable" data-key="ip">IP <span class="caret">▾</span></th>
           <th class="sortable" data-key="mac">MAC <span class="caret">▾</span></th>
           <th class="sortable" data-key="hostname">Hostname <span class="caret">▾</span></th>
+          <th class="col-ntp">Timezone</th>
+          <th class="col-ntp">NTP Server</th>
           <th class="sortable" data-key="streamname">Streamname <span class="caret">▾</span></th>
           <th class="col-dante"><span class="tooltip-info" style="cursor:help;" data-tooltip="Only applicable for encoders">Dante</span></th>
           <th class="col-dante-name"><span class="tooltip-info" style="cursor:help;" data-tooltip="Only applicable for encoders">Dante name</span></th>
@@ -244,6 +258,8 @@
         <button class="btn" id="reboot_sel">Reboot Selected</button>
         <button class="btn" id="remove_sel" style="background:#991b1b;">Remove Selected</button>
         <button class="btn" id="password_sync_btn" style="background:#0066cc;">Password Sync</button>
+        <button class="btn" id="ntp_sync_btn" style="background:#0f766e;">Set NTP</button>
+        <button class="btn" id="slate_manager_btn" style="background:#475569;">Slate Manager</button>
       </div>
       <button class="btn" id="export_units">Inventory</button>
     </div>
@@ -254,6 +270,14 @@
   <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:520px;max-width:95%;color:var(--fg);">
     <h3 style="margin:0 0 8px 0;">Configuration</h3>
     <form autocomplete="off">
+      <div class="row" style="margin-bottom:8px; align-items:center; justify-content:space-between; gap:8px;">
+        <span class="small">App Version</span>
+        <span id="cfg_app_version" class="code small" style="user-select:text;">v?.?.?</span>
+      </div>
+      <div class="row" style="margin-bottom:8px; align-items:center; justify-content:space-between; gap:8px;">
+        <span class="small">Dark Mode</span>
+        <button id="dark_switch" class="switch on" type="button" aria-label="Toggle dark mode"><span class="knob"></span></button>
+      </div>
       <div class="row" style="margin-bottom:8px; align-items:center; gap:8px;">
         <label for="cfg_password" class="small">Password</label>
         <input id="cfg_password" type="password" style="width:160px;" autocomplete="current-password" />
@@ -294,6 +318,9 @@
     </div>
     <div id="browse_hint" class="small" style="display:none;color:var(--muted);margin-top:6px;">
       If you cannot browse to the file locations, copy and paste the absolute path into the field.
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <a href="/ui/manual.html" target="_blank" rel="noopener" style="color:#7cc4ff;">Open LumaSuite Manual</a>
     </div>
     <div id="cfg_error" class="row" style="color:var(--danger);display:none;margin-top:6px;"></div>
     <div class="row" style="justify-content:flex-end;gap:8px;">
@@ -350,6 +377,75 @@
   </div>
 </div>
 
+<!-- Time synchronization modal -->
+<div id="ntp_backdrop" class="modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:20000;">
+  <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:440px;max-width:95%;color:var(--fg);">
+    <h3 style="margin:0 0 12px 0;">Time Synchronization</h3>
+    <form id="ntp_form" autocomplete="off" style="display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <label for="ntp_timezone" style="font-size:12px;color:var(--muted);">Timezone</label>
+        <select id="ntp_timezone"></select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <label for="ntp_server" style="font-size:12px;color:var(--muted);">NTP Server</label>
+        <input id="ntp_server" type="text" placeholder="pool.ntp.org" />
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="ntp_all" />
+        <span>Apply to All Devices (override selection)</span>
+      </label>
+      <div id="ntp_modal_status" class="small" style="min-height:16px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="ntp_cancel" class="btn" type="button">Cancel</button>
+        <button id="ntp_submit" class="btn" type="button">Sync Time</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Slate Manager Modal -->
+<div id="slate_manager_backdrop" class="modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:20000;">
+  <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:720px;max-width:96%;color:var(--fg);">
+    <h3 style="margin:0 0 12px 0;">Slate Manager</h3>
+    <form id="slate_manager_form" autocomplete="off" style="display:flex;flex-direction:column;gap:12px;">
+      <div class="row" style="gap:18px;align-items:center;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="radio" name="slate_scope" id="slate_scope_selected" value="selected" checked />
+          <span>Selected Units</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="radio" name="slate_scope" id="slate_scope_encoders" value="encoders" />
+          <span>All Encoders</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="radio" name="slate_scope" id="slate_scope_decoders" value="decoders" />
+          <span>All Decoders</span>
+        </label>
+        <span id="slate_target_count" class="small" style="margin-left:auto;"></span>
+      </div>
+      <div class="slate-manager-grid">
+        <div class="slate-manager-panel">
+          <h4>Upload Image</h4>
+          <input id="slate_file" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
+          <img id="slate_upload_preview" class="slate-thumb" alt="Selected slate preview" />
+          <button id="slate_upload_btn" class="btn" type="button">Upload</button>
+        </div>
+        <div class="slate-manager-panel">
+          <h4>Current Image</h4>
+          <img id="slate_active_preview" class="slate-thumb" alt="Current slate preview" />
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="slate_save_default_btn" class="btn" type="button" style="background:#0f766e;">Load Default and Save</button>
+          </div>
+        </div>
+      </div>
+      <div id="slate_manager_status" class="slate-manager-status"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="slate_manager_close" class="btn" type="button">Close</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 function wirePasswordToggle(buttonId, inputId, revealCallback){
   const btn = document.getElementById(buttonId);
@@ -373,10 +469,23 @@ function isAllowedPassword(value){
 
 // Configuration modal logic (index page)
 (function initCfg(){
+  async function updateConfigVersion(){
+    const el = document.getElementById('cfg_app_version');
+    if(!el) return;
+    try{
+      const d = await fetch('/api/app_version', {cache:'no-store'}).then(r=>r.json());
+      el.textContent = d && d.ok && d.version ? ('v' + d.version) : 'v?.?.?';
+    }catch(e){
+      el.textContent = 'v?.?.?';
+    }
+  }
+
   function openCfg(){
     const d = document.getElementById('cfg_backdrop');
     if(!d) return;
     d.style.display='flex';
+    applyTheme();
+    updateConfigVersion();
     document.getElementById('cfg_password').value = '';
     const err = document.getElementById('cfg_error');
     if(err){ err.style.display='none'; err.textContent=''; }
@@ -601,8 +710,32 @@ const StatusStore = {
 function loadLocal(){ return []; }
 function saveLocal(rows){}
 function tolerantRows(payload){ if(!payload) return []; if(Array.isArray(payload)) return payload; if(payload.units) return payload.units; if(payload.rows) return payload.rows; if(payload.value && Array.isArray(payload.value)) return payload.value; return []; }
+function normalizeMac(value){ return String(value || "").replace(/[^0-9a-f]/gi, "").toLowerCase(); }
 function byIP(rows){ const m=new Map(); (rows||[]).forEach(r=> r&&r.ip && m.set(r.ip, r)); return m; }
-function mergeByIP(a,b){ const m=byIP(a); (b||[]).forEach(r=>{ if(!r||!r.ip) return; const prev=m.get(r.ip)||{}; m.set(r.ip, Object.assign({}, prev, r)); }); return Array.from(m.values()); }
+function mergeByIP(a,b){
+  const m=byIP(a);
+  const macToIp=new Map();
+  for(const [ip,row] of m.entries()){
+    const mac=normalizeMac(row && row.mac);
+    if(mac) macToIp.set(mac, ip);
+  }
+  (b||[]).forEach(r=>{
+    if(!r||!r.ip) return;
+    const mac=normalizeMac(r.mac);
+    let prev=m.get(r.ip)||{};
+    if(mac){
+      const oldIp=macToIp.get(mac);
+      if(oldIp && oldIp !== r.ip){
+        prev=m.get(oldIp)||prev;
+        m.delete(oldIp);
+        StatusStore.clear(oldIp);
+      }
+    }
+    m.set(r.ip, Object.assign({}, prev, r));
+    if(mac) macToIp.set(mac, r.ip);
+  });
+  return Array.from(m.values());
+}
 
 // On page load, clear any localStorage cache to avoid stale units
 try { localStorage.removeItem("units_cache"); } catch {}
@@ -610,6 +743,7 @@ try { localStorage.removeItem("units_cache"); } catch {}
 // ------- table model / sorting -------
 let units = [];
 const unitMap = new Map();
+const selectedUnitIPs = new Set();
 let sortKey = "ip";
 let sortDir = "asc";
 
@@ -712,6 +846,7 @@ function renderRows(list){
   list.forEach(u=>{
     const tr=document.createElement('tr'); tr.dataset.ip=u.ip;
     const chk=document.createElement('input'); chk.type="checkbox"; chk.className="sel"; chk.id=`sel_${u.ip.replace(/\./g,'_')}`;
+    chk.checked = selectedUnitIPs.has(u.ip);
     const tdSel=document.createElement('td'); tdSel.appendChild(chk);
 
     const tdIP=document.createElement('td'); const a=document.createElement('a');
@@ -755,6 +890,7 @@ function renderRows(list){
           // Update in units list
           const unitIndex = units.findIndex(unit => unit.ip === u.ip);
           if (unitIndex !== -1) units[unitIndex].hostname = result.hostname;
+          await refreshAfterSetting([u.ip]);
         }
       } catch (err) {
         alert('Error setting hostname: ' + err.message);
@@ -763,6 +899,13 @@ function renderRows(list){
     });
     
     tdHost.appendChild(hostnameInput);
+
+    const tdTimezone = document.createElement('td');
+    tdTimezone.className = 'col-ntp';
+    tdTimezone.textContent = u.timezone || u.active_timezone || u.details?.timezone?.config?.timezone || '';
+    const tdNtpServer = document.createElement('td');
+    tdNtpServer.className = 'col-ntp';
+    tdNtpServer.textContent = u.ntp_server || u.ntpserver || u.details?.systeminfo?.config?.ntpserver || '';
     
     // Create separate streamname cell
     const tdStreamname = document.createElement('td');
@@ -802,13 +945,14 @@ function renderRows(list){
             u.enc.audio.streamname = result.streamname;
             
             const unitIndex = units.findIndex(unit => unit.ip === u.ip);
-            if (unitIndex !== -1) {
+          if (unitIndex !== -1) {
               if (!units[unitIndex].enc) units[unitIndex].enc = {};
               if (!units[unitIndex].enc.video) units[unitIndex].enc.video = {};
               if (!units[unitIndex].enc.audio) units[unitIndex].enc.audio = {};
               units[unitIndex].enc.video.streamname = result.streamname;
               units[unitIndex].enc.audio.streamname = result.streamname;
             }
+            await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
           alert('Error setting streamname: ' + err.message);
@@ -851,6 +995,7 @@ function renderRows(list){
             e.target.checked = !enabled;
           } else {
             e.target.checked = j.dante_enabled;
+            await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
           alert('Error setting Dante power: ' + err.message);
@@ -908,6 +1053,7 @@ function renderRows(list){
             rowInUnits.edid_source = u.edid_source;
             rowInUnits.edid_resolution = edidOptions.find(o => o.mode === appliedMode)?.label || '';
           }
+          await refreshAfterSetting([u.ip]);
         } catch (err) {
           alert('Error setting EDID mode: ' + err.message);
           e.target.value = String(prevMode);
@@ -978,6 +1124,7 @@ function renderRows(list){
             rowInUnits.video_out_timing = appliedTiming;
             rowInUnits.edid_resolution = appliedTiming;
           }
+          await refreshAfterSetting([u.ip]);
         } catch (err) {
           alert('Error setting decoder output timing: ' + err.message);
           e.target.value = prevTiming;
@@ -1022,6 +1169,7 @@ function renderRows(list){
             alert('Failed to set HDCP: ' + (j.error || ''));
           } else {
             e.target.value = j.hdcp || hdcpValue;
+            await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
           alert('Error setting HDCP: ' + err.message);
@@ -1064,7 +1212,7 @@ function renderRows(list){
     }
      tdStatus.innerHTML='<span class="status s-idle-unchanged">idle</span>';
 
-    const row=[tdSel,tdIP,tdMAC,tdHost,tdStreamname,tdDanteCheck,tdDanteName,tdDanteIp,tdEdidResolution,tdType,tdModel,tdVer,tdHdcp,tdStatus,tdBlink,tdPreview];
+    const row=[tdSel,tdIP,tdMAC,tdHost,tdTimezone,tdNtpServer,tdStreamname,tdDanteCheck,tdDanteName,tdDanteIp,tdEdidResolution,tdType,tdModel,tdVer,tdHdcp,tdStatus,tdBlink,tdPreview];
     const trFrag=document.createDocumentFragment(); row.forEach(td=>trFrag.appendChild(td));
     tr.appendChild(trFrag); tb.appendChild(tr);
 
@@ -1216,6 +1364,31 @@ async function rescanIPs(ips){
   }
 }
 
+let detailPollInFlight = false;
+async function pollVisibleUnitDetails(ips){
+  const targets = Array.from(new Set((ips || [])
+    .filter(ip => ip && !(Upgrade && Upgrade.isActive && Upgrade.isActive(ip)))));
+  if(!targets.length || detailPollInFlight || scanAbortController) return;
+  detailPollInFlight = true;
+  try{
+    await rescanIPs(targets);
+    await loadNtpProfile(selectedNtpIPs());
+  }catch(e){
+    console.warn("pollVisibleUnitDetails error", e);
+  }finally{
+    detailPollInFlight = false;
+  }
+}
+
+async function refreshAfterSetting(ips){
+  const targets = Array.from(new Set((ips || []).filter(Boolean)));
+  if(!targets.length) return;
+  await rescanIPs(targets);
+  if(isSliderOn()){
+    try{ await heartbeatOnce({ skipDetailPoll: true }); }catch(e){ console.warn("heartbeat after setting error", e); }
+  }
+}
+
 // ------- scan & cache -------
 let scanAbortController = null;
 
@@ -1353,8 +1526,255 @@ async function loadAdapters(){
       o.textContent = `${cleanAdapterName(labelRaw)}` + (a.scan?` — ${a.scan}`:"");
       sel.appendChild(o);
     });
+    const saved = localStorage.getItem("lumasuite_selected_adapter");
+    if(saved){
+      const savedOption = Array.from(sel.options).find(o => o.value === saved);
+      const savedLabel = (savedOption?.textContent || "").toLowerCase();
+      if(savedOption && !/(virtual|vethernet|vmware|hyper-v|loopback|bluetooth)/.test(savedLabel)) sel.value = saved;
+      else localStorage.removeItem("lumasuite_selected_adapter");
+    }
+    sel.addEventListener("change", ()=> localStorage.setItem("lumasuite_selected_adapter", sel.value));
   }catch(e){
     $("#adapters").innerHTML=`<option value="">(adapters error)</option>`;
+  }
+}
+
+function selectedNtpIPs(){
+  return Array.from(document.querySelectorAll("#tbody tr"))
+    .filter(row => row.querySelector("input.sel")?.checked)
+    .map(row => row.dataset.ip)
+    .filter(Boolean);
+}
+
+let ntpModalTargetIPs = [];
+
+function setNtpStatus(text, error=false){
+  const targets = [$("#ntp_status"), $("#ntp_modal_status")].filter(Boolean);
+  targets.forEach(el => { el.textContent = text || ""; el.style.color = error ? "var(--danger)" : "var(--muted)"; });
+}
+
+async function loadNtpProfile(ips=[]){
+  try{
+    const data = await api("/api/ntp_profile", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ips})});
+    if(!data?.ok) throw new Error(data?.error || "Unable to read time settings");
+    $("#dashboard_timezone").textContent = data.timezone || "UTC";
+    $("#dashboard_ntp_server").textContent = data.ntp_server || "(not configured)";
+    $("#dashboard_datetime").textContent = data.datetime || "unavailable";
+    return data;
+  }catch(e){
+    $("#dashboard_timezone").textContent = "unavailable";
+    $("#dashboard_ntp_server").textContent = "unavailable";
+    $("#dashboard_datetime").textContent = "unavailable";
+    return null;
+  }
+}
+
+async function openNtpSync(){
+  ntpModalTargetIPs = selectedNtpIPs();
+  const profile = await loadNtpProfile(ntpModalTargetIPs);
+  if(!profile) { setNtpStatus("Unable to read time settings", true); return; }
+  const timezone = $("#ntp_timezone");
+  timezone.innerHTML = "";
+  const zones = Array.isArray(profile.zones) && profile.zones.length ? profile.zones : [{name: profile.timezone || "UTC"}];
+  zones.forEach(zone => {
+    const value = typeof zone === "string" ? zone : (zone.name || zone.value || "");
+    if(!value) return;
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    timezone.appendChild(option);
+  });
+  timezone.value = profile.timezone || "UTC";
+  $("#ntp_server").value = profile.ntp_server || "";
+  $("#ntp_all").checked = false;
+  setNtpStatus("");
+  $("#ntp_backdrop").style.display = "flex";
+}
+
+async function submitNtpSync(){
+  const all = $("#ntp_all").checked;
+  const ips = ntpModalTargetIPs.length ? [...ntpModalTargetIPs] : selectedNtpIPs();
+  if(!all && !ips.length){ setNtpStatus("Select at least one unit or choose all devices", true); return; }
+  const timezone = $("#ntp_timezone").value;
+  const server = $("#ntp_server").value.trim();
+  if(!timezone){ setNtpStatus("Select a timezone", true); return; }
+  $("#ntp_submit").disabled = true;
+  setNtpStatus("Synchronizing time...");
+  try{
+    const result = await api("/api/set_ntp", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({scope:all ? "all" : "selected", ips, timezone, server})});
+    const entries = Object.values(result?.results || {});
+    const failed = entries.filter(item => !item.ok);
+    if(!result?.ok || failed.length){
+      setNtpStatus(`Sync completed with ${failed.length} failure(s)`, true);
+    }else{
+      setNtpStatus(`Time synchronized on ${entries.length} device(s)`);
+      $("#ntp_backdrop").style.display = "none";
+    }
+    const refreshedIps = Object.keys(result?.results || {});
+    await refreshAfterSetting(refreshedIps.length ? refreshedIps : ips);
+    await loadNtpProfile(refreshedIps.length ? refreshedIps : ips);
+  }catch(e){
+    setNtpStatus(`Time sync failed: ${e.message}`, true);
+  }finally{
+    $("#ntp_submit").disabled = false;
+  }
+}
+
+let slateModalTargetIPs = [];
+let slateUploadPreviewUrl = "";
+
+function slateCapableUnits(){
+  return (units || []).filter(u => {
+    const role = classifyRole(u);
+    return role === "Encoder" || role === "Decoder";
+  });
+}
+
+function slateUnitsByRole(roleName){
+  return (units || []).filter(u => classifyRole(u) === roleName);
+}
+
+function selectedSlateIPs(){
+  const selected = new Set(selectedUnitIPs);
+  return slateCapableUnits().filter(u => selected.has(u.ip)).map(u => u.ip).filter(Boolean);
+}
+
+function slateTargetIPs(){
+  if($("#slate_scope_encoders")?.checked) return slateUnitsByRole("Encoder").map(u => u.ip).filter(Boolean);
+  if($("#slate_scope_decoders")?.checked) return slateUnitsByRole("Decoder").map(u => u.ip).filter(Boolean);
+  return slateModalTargetIPs.length ? [...slateModalTargetIPs] : selectedSlateIPs();
+}
+
+function setSlateStatus(text, error=false){
+  const el = $("#slate_manager_status");
+  if(!el) return;
+  el.textContent = text || "";
+  el.style.color = error ? "var(--danger)" : "var(--muted)";
+}
+
+function updateSlateTargetCount(){
+  const el = $("#slate_target_count");
+  if(!el) return;
+  const targets = slateTargetIPs();
+  const selectedUnsupported = Array.from(selectedUnitIPs).filter(ip => !slateCapableUnits().some(u => u.ip === ip)).length;
+  let label = "selected";
+  if($("#slate_scope_encoders")?.checked) label = "encoder";
+  if($("#slate_scope_decoders")?.checked) label = "decoder";
+  const suffix = label === "selected" ? "unit" : label;
+  el.textContent = `${targets.length} ${suffix}${targets.length === 1 ? "" : "s"}` + (selectedUnsupported && label === "selected" ? ` (${selectedUnsupported} unsupported ignored)` : "");
+}
+
+function refreshSlatePreview(){
+  const img = $("#slate_active_preview");
+  if(!img) return;
+  const firstIp = slateTargetIPs()[0];
+  if(!firstIp){
+    img.removeAttribute("src");
+    return;
+  }
+  img.src = `http://${firstIp}/downStreamImage?t=${Date.now()}`;
+}
+
+function formatSlateResults(result){
+  const results = result?.results || {};
+  const keys = Object.keys(results);
+  if(!keys.length) return result?.ok ? "Completed" : (result?.error || "No result details returned");
+  return keys.map(ip => {
+    const row = results[ip] || {};
+    return `${ip}: ${row.ok ? "OK" : (row.error || row.detail || "failed")}`;
+  }).join("\n");
+}
+
+function openSlateManager(){
+  slateModalTargetIPs = selectedSlateIPs();
+  $("#slate_scope_selected").checked = true;
+  $("#slate_file").value = "";
+  if(slateUploadPreviewUrl){
+    URL.revokeObjectURL(slateUploadPreviewUrl);
+    slateUploadPreviewUrl = "";
+  }
+  $("#slate_upload_preview").removeAttribute("src");
+  updateSlateTargetCount();
+  refreshSlatePreview();
+  setSlateStatus(slateModalTargetIPs.length ? "" : "Select one or more encoders/decoders, or choose all encoders or all decoders.");
+  $("#slate_manager_backdrop").style.display = "flex";
+}
+
+function closeSlateManager(){
+  $("#slate_manager_backdrop").style.display = "none";
+}
+
+function slateImageDimensions(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({width: img.naturalWidth, height: img.naturalHeight});
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Unable to read image dimensions"));
+    };
+    img.src = url;
+  });
+}
+
+async function uploadSlateImage(){
+  const ips = slateTargetIPs();
+  if(!ips.length){ setSlateStatus("Select at least one encoder/decoder or choose all.", true); return; }
+  const file = $("#slate_file").files?.[0];
+  if(!file){ setSlateStatus("Choose a PNG or JPG image first.", true); return; }
+  if(!/image\/(png|jpeg)/i.test(file.type || "") && !/\.(png|jpe?g)$/i.test(file.name || "")){
+    setSlateStatus("Choose a PNG or JPG image.", true);
+    return;
+  }
+  try{
+    const dim = await slateImageDimensions(file);
+    const validSize = (dim.width === 1280 && dim.height === 720) || (dim.width === 1920 && dim.height === 1080);
+    if(!validSize){
+      setSlateStatus(`Image must be 1280x720 or 1920x1080. Selected image is ${dim.width}x${dim.height}.`, true);
+      return;
+    }
+  }catch(e){
+    setSlateStatus(e.message, true);
+    return;
+  }
+  const btn = $("#slate_upload_btn");
+  btn.disabled = true;
+  setSlateStatus("Uploading slate image...");
+  try{
+    const fd = new FormData();
+    fd.append("ips", JSON.stringify(ips));
+    fd.append("file", file);
+    const result = await fetch("/api/slate_upload", {method:"POST", body:fd}).then(r=>r.json());
+    const failed = Object.values(result?.results || {}).filter(row => !row.ok);
+    setSlateStatus(formatSlateResults(result), !result?.ok || failed.length > 0);
+    refreshSlatePreview();
+    await refreshAfterSetting(ips);
+  }catch(e){
+    setSlateStatus(`Upload failed: ${e.message}`, true);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+async function saveDefaultSlate(){
+  const ips = slateTargetIPs();
+  if(!ips.length){ setSlateStatus("Select at least one encoder/decoder, all encoders, or all decoders.", true); return; }
+  const btn = $("#slate_save_default_btn");
+  btn.disabled = true;
+  setSlateStatus("Restoring factory image...");
+  try{
+    const result = await api("/api/slate_default", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ips})});
+    const failed = Object.values(result?.results || {}).filter(row => !row.ok);
+    setSlateStatus(formatSlateResults(result), !result?.ok || failed.length > 0);
+    refreshSlatePreview();
+    await refreshAfterSetting(ips);
+  }catch(e){
+    setSlateStatus(`Factory image failed: ${e.message}`, true);
+  }finally{
+    btn.disabled = false;
   }
 }
 
@@ -1364,8 +1784,12 @@ function rerenderFiltered(){ renderRows(getDisplayList()); }
 let connectionCheckInterval = null;
 let heartbeatInterval = null;
 let lastSuccessfulHeartbeat = Date.now();
-const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
+let heartbeatInFlight = false;
+let consecutiveHeartbeatFailures = 0;
+const CONNECTION_TIMEOUT_MS = 15000;
 const HEARTBEAT_INTERVAL_MS = 5000; // 5 seconds
+const HEARTBEAT_REQUEST_TIMEOUT_MS = 3000;
+const HEARTBEAT_FAILURE_LIMIT = 3;
 
 function showConnectionBanner() {
   const banner = $("#connection_banner");
@@ -1386,26 +1810,36 @@ function hideConnectionBanner() {
 function startConnectionMonitoring() {
   if(heartbeatInterval) return; // Already started
   
-  // Send heartbeat pings every 5 seconds
-  heartbeatInterval = setInterval(async () => {
+  const checkHeartbeat = async () => {
+    if(heartbeatInFlight) return;
+    heartbeatInFlight = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), HEARTBEAT_REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch('/api/heartbeat', { cache: 'no-store' });
+      const response = await fetch('/api/heartbeat', { cache: 'no-store', signal: controller.signal });
       if(response.ok) {
         lastSuccessfulHeartbeat = Date.now();
-        console.log('[ConnectionMonitor] Heartbeat successful, hiding banner');
+        consecutiveHeartbeatFailures = 0;
         hideConnectionBanner();
+      } else {
+        consecutiveHeartbeatFailures++;
       }
     } catch(e) {
-      console.log('[ConnectionMonitor] Heartbeat failed:', e.message);
+      consecutiveHeartbeatFailures++;
+    } finally {
+      clearTimeout(timeout);
+      heartbeatInFlight = false;
     }
-  }, HEARTBEAT_INTERVAL_MS);
+  };
+
+  checkHeartbeat();
+  heartbeatInterval = setInterval(checkHeartbeat, HEARTBEAT_INTERVAL_MS);
   
   // Check if heartbeat has stalled every 2 seconds
   if(connectionCheckInterval) return;
   connectionCheckInterval = setInterval(async () => {
     const timeSinceLastSuccess = Date.now() - lastSuccessfulHeartbeat;
-    if(timeSinceLastSuccess > CONNECTION_TIMEOUT_MS) {
-      console.log('[ConnectionMonitor] CONNECTION TIMEOUT - showing banner after', CONNECTION_TIMEOUT_MS, 'ms without heartbeat');
+    if(timeSinceLastSuccess > CONNECTION_TIMEOUT_MS && consecutiveHeartbeatFailures >= HEARTBEAT_FAILURE_LIMIT) {
       showConnectionBanner();
     }
   }, 2000); // Check every 2 seconds
@@ -1437,7 +1871,20 @@ window.fetch = async function(...args) {
 // Start monitoring when page loads
 startConnectionMonitoring();
 let pollTimer = null;
+const POLL_UNITS_STORAGE_KEY = "lumasuite.pollUnitsEnabled";
 function isSliderOn(){ return $("#poll_switch").classList.contains("on"); }
+function setPollSlider(on){
+  const sw = $("#poll_switch");
+  const input = $("#poll_units_toggle");
+  if(sw) sw.classList.toggle("on", !!on);
+  if(input) input.checked = !!on;
+}
+function loadSavedPollState(){
+  return localStorage.getItem(POLL_UNITS_STORAGE_KEY) === "true";
+}
+function savePollState(on){
+  localStorage.setItem(POLL_UNITS_STORAGE_KEY, (!!on).toString());
+}
 // Track reboot lifecycle per IP so polling doesn't immediately overwrite status
 // Structure: { [ip]: { startedAt:number, sawOffline:boolean, completed:boolean, rebootedAt?:number } }
 const rebootTracker = {};
@@ -1497,7 +1944,7 @@ async function tcpProbe(ip){
 function getVisibleIPs(){
   return Array.from(document.querySelectorAll("#tbody tr")).map(tr=>tr.dataset.ip).filter(Boolean);
 }
-async function heartbeatOnce(){
+async function heartbeatOnce(options={}){
   const now=Date.now();
   // Always include rebooting units even if poll slider is off
   const rebootIPs = Object.keys(rebootTracker);
@@ -1579,6 +2026,9 @@ async function heartbeatOnce(){
   if(Object.keys(rebootTracker).length===0 && rebootHeartbeatOwned && !isSliderOn()){
     enableHeartbeat(false);
     rebootHeartbeatOwned = false;
+  }
+  if(isSliderOn() && !options.skipDetailPoll){
+    await pollVisibleUnitDetails(visibleIPs);
   }
 }
 function enableHeartbeat(on){
@@ -1765,12 +2215,12 @@ const Upgrade = (function(){
 
   function pauseGlobal(){
     priorSliderWasOn = isSliderOn();
-    if(priorSliderWasOn) $("#poll_switch").classList.remove("on");
+    if(priorSliderWasOn) setPollSlider(false);
     enableHeartbeat(false);
   }
   function maybeResumeGlobal(){
     if(!anyActive() && priorSliderWasOn){
-      $("#poll_switch").classList.add("on");
+      setPollSlider(true);
       enableHeartbeat(true);
     }
   }
@@ -1824,9 +2274,12 @@ async function upgradeSelected(){
 
   const doReset = $("#reset_after").checked;
   if (doReset) {
-    const ok = window.confirm(
-      "You have elected to FACTORY RESET the unit(s).\n\nAll settings will be lost.\nPasswords and configuration will need to be set again.\n\nProceed?"
-    );
+    const ok = await window.lumaDialog.confirm({
+      title: "Factory Reset After Upgrade",
+      message: "You have elected to FACTORY RESET the unit(s).\n\nAll settings will be lost.\nPasswords and configuration will need to be set again.\n\nProceed?",
+      confirmText: "Proceed",
+      destructive: true
+    });
     if (!ok) return;
   }
 
@@ -1944,9 +2397,12 @@ async function removeSelected(){
   const ips = getSelectedIPs();
   if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
 
-  const ok = window.confirm(
-    `You are about to PERMANENTLY REMOVE ${ips.length} device(s) from all storage.\n\nThis will delete the device(s) from cache and all files.\n\nProceed?`
-  );
+  const ok = await window.lumaDialog.confirm({
+    title: "Remove Selected Devices",
+    message: `You are about to PERMANENTLY REMOVE ${ips.length} device(s) from all storage.\n\nThis will delete the device(s) from cache and all files.\n\nProceed?`,
+    confirmText: "Remove",
+    destructive: true
+  });
   if (!ok) return;
 
   $("#up_status").textContent="removing selected devices...";
@@ -1988,9 +2444,11 @@ async function rebootSelected(){
   const ips = getSelectedIPs();
   if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
 
-  const ok = window.confirm(
-    `You are about to reboot ${ips.length} device(s).\n\nProceed?`
-  );
+  const ok = await window.lumaDialog.confirm({
+    title: "Reboot Selected Devices",
+    message: `You are about to reboot ${ips.length} device(s).\n\nProceed?`,
+    confirmText: "Reboot"
+  });
   if (!ok) return;
 
   $("#up_status").textContent="rebooting devices...";
@@ -2023,8 +2481,8 @@ async function rebootSelected(){
   $("#up_status").textContent="reboot commands sent";
 }
 
-function applyTheme(){ const dark = localStorage.getItem("dark") !== "false"; document.body.classList.toggle("light", !dark); $("#dark_switch").classList.toggle("on", dark); }
-function toggleDark(){ const isOn = $("#dark_switch").classList.contains("on"); localStorage.setItem("dark", (!isOn).toString()); applyTheme(); }
+function applyTheme(){ const dark = localStorage.getItem("dark") !== "false"; document.body.classList.toggle("light", !dark); document.body.classList.toggle("dark", dark); const sw = $("#dark_switch"); if(sw) sw.classList.toggle("on", dark); }
+function toggleDark(){ const sw = $("#dark_switch"); const isOn = sw && sw.classList.contains("on"); localStorage.setItem("dark", (!isOn).toString()); applyTheme(); }
 
 // Helper: Convert string to base64
 function toBase64(str) {
@@ -2214,11 +2672,18 @@ async function submitPasswordSync(){
       }
     }catch(e){}
     
-    $("#dark_switch").addEventListener("click", ()=>{ toggleDark(); });
+    const darkSwitch = $("#dark_switch");
+    if(darkSwitch) darkSwitch.addEventListener("click", ()=>{ toggleDark(); });
     $("#scan").addEventListener("click", scan);
     $("#stop_scan").addEventListener("click", stopScan);
   $("#clear_units").addEventListener("click", async()=>{
-    if (!window.confirm("Clear all units from cache? This will remove all device data.")) {
+    const clearOk = await window.lumaDialog.confirm({
+      title: "Clear Units",
+      message: "Clear all units from cache?\n\nThis will remove all device data.",
+      confirmText: "Clear Units",
+      destructive: true
+    });
+    if (!clearOk) {
       return;
     }
     const statusEl = $("#scan_status");
@@ -2228,6 +2693,7 @@ async function submitPasswordSync(){
       if (response && response.ok) {
         units = [];
         unitMap.clear();
+        selectedUnitIPs.clear();
         saveLocal([]);
         StatusStore.clearAll();
         renderRows([]);
@@ -2259,6 +2725,29 @@ async function submitPasswordSync(){
   $("#upgrade_sel").addEventListener("click", upgradeSelected);
   $("#reboot_sel").addEventListener("click", rebootSelected);
   $("#remove_sel").addEventListener("click", removeSelected);
+  $("#ntp_sync_btn").addEventListener("click", openNtpSync);
+  $("#ntp_cancel").addEventListener("click", ()=>{ $("#ntp_backdrop").style.display="none"; });
+  $("#ntp_submit").addEventListener("click", submitNtpSync);
+  $("#slate_manager_btn").addEventListener("click", openSlateManager);
+  $("#slate_manager_close").addEventListener("click", closeSlateManager);
+  $("#slate_scope_selected").addEventListener("change", ()=>{ updateSlateTargetCount(); refreshSlatePreview(); });
+  $("#slate_scope_encoders").addEventListener("change", ()=>{ updateSlateTargetCount(); refreshSlatePreview(); });
+  $("#slate_scope_decoders").addEventListener("change", ()=>{ updateSlateTargetCount(); refreshSlatePreview(); });
+  $("#slate_file").addEventListener("change", ()=>{
+    const file = $("#slate_file").files?.[0];
+    if(slateUploadPreviewUrl){
+      URL.revokeObjectURL(slateUploadPreviewUrl);
+      slateUploadPreviewUrl = "";
+    }
+    if(file){
+      slateUploadPreviewUrl = URL.createObjectURL(file);
+      $("#slate_upload_preview").src = slateUploadPreviewUrl;
+    }else{
+      $("#slate_upload_preview").removeAttribute("src");
+    }
+  });
+  $("#slate_upload_btn").addEventListener("click", uploadSlateImage);
+  $("#slate_save_default_btn").addEventListener("click", saveDefaultSlate);
   $("#password_sync_btn").addEventListener("click", passwordSyncSelected);
   
   const pwSyncCancel = document.getElementById('pw_sync_cancel');
@@ -2271,6 +2760,11 @@ async function submitPasswordSync(){
   if(pwSyncBackdrop) pwSyncBackdrop.addEventListener("click", function(e){
     if(e.target === this) closePasswordSync();
   });
+
+  const slateBackdrop = document.getElementById('slate_manager_backdrop');
+  if(slateBackdrop) slateBackdrop.addEventListener("click", function(e){
+    if(e.target === this) closeSlateManager();
+  });
   
   $("#files").addEventListener("change", ()=>{ rerenderFiltered(); updateTotals(); });
   
@@ -2281,12 +2775,12 @@ async function submitPasswordSync(){
       const saved = localStorage.getItem(COL_VISIBILITY_KEY);
       if (!saved) {
         // Default: all columns hidden until user enables them
-        return { "dante": false, "dante-name": false, "dante-ip": false, "edid-resolution": false, "model": false };
+        return { "dante": false, "edid-resolution": false, "model": false, "ntp": true };
       }
       return JSON.parse(saved);
     } catch {
       // Default: all columns hidden until user enables them
-      return { "dante": false, "dante-name": false, "dante-ip": false, "edid-resolution": false, "model": false };
+      return { "dante": false, "edid-resolution": false, "model": false, "ntp": true };
     }
   }
   function saveColumnVisibility(state){
@@ -2295,7 +2789,7 @@ async function submitPasswordSync(){
     } catch {}
   }
   function applyColumnVisibility(state){
-    const cols = ["dante", "dante-name", "dante-ip", "edid-resolution", "model"];
+    const cols = ["dante", "edid-resolution", "model", "ntp"];
     cols.forEach(col => {
       const isHidden = state[col] === false;
       document.body.classList.toggle(`hide-${col}`, isHidden);
@@ -2319,7 +2813,25 @@ async function submitPasswordSync(){
     });
   });
   
-  $("#chk_all").addEventListener("change", (e)=>{ document.querySelectorAll("#tbody .sel").forEach(c=> c.checked=e.target.checked); });
+  $("#chk_all").addEventListener("change", (e)=>{
+    document.querySelectorAll("#tbody .sel").forEach(c=> c.checked=e.target.checked);
+    document.querySelectorAll("#tbody tr").forEach(row => {
+      const ip = row.dataset.ip;
+      if(!ip) return;
+      if(e.target.checked) selectedUnitIPs.add(ip);
+      else selectedUnitIPs.delete(ip);
+    });
+  });
+  $("#tbody").addEventListener("change", (e)=>{
+    if(e.target.classList.contains("sel")){
+      const ip = e.target.closest("tr")?.dataset.ip;
+      if(ip){
+        if(e.target.checked) selectedUnitIPs.add(ip);
+        else selectedUnitIPs.delete(ip);
+      }
+      loadNtpProfile(selectedNtpIPs());
+    }
+  });
 
   document.querySelectorAll("th.sortable").forEach(th=>{
     th.addEventListener("click", ()=>{
@@ -2334,6 +2846,7 @@ async function submitPasswordSync(){
 
   applyTheme();
   await Promise.allSettled([loadAdapters(), refreshFiles()]);
+  loadNtpProfile();
 
   const local = loadLocal();
   if(local.length){ units = mergeByIP(units, local); rerenderFiltered(); updateTotals(); }
@@ -2349,7 +2862,11 @@ async function submitPasswordSync(){
       // Mark that we've shown the prompt (don't show again this session)
       sessionStorage.setItem(CLEAR_UNITS_PROMPT_SESSION_KEY, "1");
       
-      const shouldClearUnits = window.confirm("Clear Units For Optimal Performance");
+      const shouldClearUnits = await window.lumaDialog.confirm({
+        title: "Clear Units For Optimal Performance",
+        message: "Clear cached units before scanning for the most reliable results?",
+        confirmText: "Clear Units"
+      });
       if (shouldClearUnits) {
         try {
           const clearResp = await api("/api/clear_units", { method: "POST" });
@@ -2390,8 +2907,14 @@ async function submitPasswordSync(){
     startRtmpPolling(); // Start polling for encoder RTMP status
   }catch(e){}
 
-  $("#poll_switch").addEventListener("click", ()=>{
-    const on = $("#poll_switch").classList.toggle("on");
+  setPollSlider(loadSavedPollState());
+  if(isSliderOn()){
+    enableHeartbeat(true);
+  }
+
+  function applyUserPollChoice(on){
+    setPollSlider(on);
+    savePollState(on);
     if (on) {
       // Enable polling: start heartbeat
       enableHeartbeat(true);
@@ -2404,7 +2927,16 @@ async function submitPasswordSync(){
         enableHeartbeat(false);
       }
     }
+  }
+
+  $("#poll_switch").addEventListener("click", (e)=>{
+    e.preventDefault();
+    applyUserPollChoice(!isSliderOn());
   });
+  const pollInput = $("#poll_units_toggle");
+  if(pollInput){
+    pollInput.addEventListener("change", ()=> applyUserPollChoice(pollInput.checked));
+  }
 
   // Blink LED button handler
   document.addEventListener("click", async (e)=>{

@@ -23,7 +23,8 @@ a = Analysis(
         'PIL.Image',
         'PIL.ImageTk',
         'PIL._tkinter_finder',
-        'pystray'
+        'pystray',
+        'psutil',
     ],
     hookspath=[],
     hooksconfig={},

@@ -1,0 +1,189 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Video Wall</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
+  <link rel="stylesheet" href="matrix.css">
+  <style>
+    .nav-tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); }
+    .nav-tab { padding:6px 14px; text-decoration:none; color:var(--text); border-radius:6px 6px 0 0; transition:all 0.2s; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; }
+    .nav-tab:hover { background:rgba(30,144,255,0.1); color:#fff; }
+    .nav-tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
+    .wall-page { display:grid; grid-template-columns:minmax(0, 1fr) 420px; gap:12px; align-items:start; }
+    .panel { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; }
+    .panel h2, .panel h3 { margin:0; font-size:15px; }
+    .panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+    .field { display:flex; flex-direction:column; gap:4px; min-width:90px; }
+    .field label { color:var(--muted); font-size:12px; }
+    .field.inline { flex-direction:row; align-items:center; min-width:0; gap:8px; }
+    select, input { color:var(--text); background:var(--panel-2); border:1px solid var(--border); padding:6px 8px; border-radius:6px; }
+    input[type=number] { width:76px; }
+    .btn-secondary { background:var(--panel-2); }
+    .btn-danger { background:#b91c1c; }
+    .status-chip { display:inline-flex; align-items:center; min-height:24px; padding:3px 8px; border-radius:999px; font-size:12px; background:var(--panel-2); color:var(--muted); }
+    .status-chip.healthy { background:#14532d; color:#bbf7d0; }
+    .status-chip.modified, .status-chip.partial { background:#854d0e; color:#fde68a; }
+    .status-chip.conflict, .status-chip.error { background:#7f1d1d; color:#fecaca; }
+    .status-chip.override { background:#4338ca; color:#c7d2fe; }
+    .wall-grid { display:grid; gap:8px; min-height:220px; }
+    .wall-cell { border:1px solid var(--border); border-radius:8px; background:var(--table); padding:8px; min-height:150px; display:flex; flex-direction:column; gap:7px; cursor:pointer; }
+    .wall-cell.selected { outline:2px solid var(--accent); }
+    .wall-cell .head { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+    .wall-cell .title { font-weight:600; }
+    .wall-cell select, .wall-cell input { width:100%; min-width:0; }
+    .wall-cell.compact { min-height:120px; font-size:12px; }
+    .wall-cell.compact .field label { display:none; }
+    .cell-row { display:grid; grid-template-columns:1fr 96px; gap:6px; }
+    .detail-grid { display:grid; gap:8px; }
+    .kv { display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px; padding:5px 0; border-bottom:1px solid var(--border); }
+    .kv span:first-child { color:var(--muted); }
+    .kv span:last-child { overflow-wrap:anywhere; }
+    .diff-list { margin:0; padding-left:18px; color:#fcd34d; }
+    .bezel-box { border:1px solid var(--border); border-radius:6px; padding:14px 16px; }
+    .bezel-box legend { padding:0 8px; font-size:16px; color:var(--text); }
+    .bezel-row { display:grid; grid-template-columns:130px minmax(0, 560px); gap:12px; align-items:center; margin-bottom:12px; }
+    .bezel-row > label { text-align:right; color:var(--text); font-size:16px; }
+    .bezel-row > input { width:100%; max-width:375px; font-size:16px; }
+    .bezel-diagram {
+      display:grid;
+      grid-template-areas:
+        ". top ."
+        "left screen right"
+        ". bottom .";
+      grid-template-columns:76px minmax(150px, 1fr) 76px;
+      grid-template-rows:42px minmax(90px, 1fr) 42px;
+      gap:8px;
+      align-items:center;
+      justify-items:center;
+      width:100%;
+      max-width:560px;
+      aspect-ratio:16/9;
+      min-height:200px;
+      border:1px solid var(--border);
+      background:rgba(0,0,0,.14);
+      padding:8px;
+    }
+    .bezel-screen { grid-area:screen; width:100%; max-width:100%; aspect-ratio:var(--bezel-ratio, 16 / 9); max-height:126px; border:2px solid #1d4ed8; display:flex; align-items:center; justify-content:center; font-size:16px; color:#fff; }
+    .bezel-input { width:76px!important; max-width:76px!important; text-align:center; font-size:16px; }
+    .bezel-input.top { grid-area:top; }
+    .bezel-input.bottom { grid-area:bottom; }
+    .bezel-input.left { grid-area:left; }
+    .bezel-input.right { grid-area:right; }
+    .bezel-grid { display:grid; grid-template-columns:repeat(3, minmax(70px, 1fr)); gap:8px; }
+    .empty { color:var(--muted); border:1px dashed var(--border); border-radius:8px; padding:20px; text-align:center; }
+    .muted { color:var(--muted); }
+    .reports { max-height:260px; overflow:auto; font-size:12px; }
+    @media (max-width:1200px) { .wall-page { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="row header" style="justify-content:space-between;align-items:center;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
+      <h1 class="title" style="margin:0;">LumaSuite Device Manager</h1>
+    </div>
+    <div class="right" style="display:flex;align-items:center;gap:16px;">
+      <div class="nav-tabs">
+        <a class="nav-tab" href="/ui/index.html"><span>📊</span><span>Device Manager</span></a>
+        <a class="nav-tab" href="/ui/matrix.html"><span>🔀</span><span>Matrix Routing</span></a>
+        <a class="nav-tab" href="/ui/producer.html"><span>🎬</span><span>Production Studio</span></a>
+        <a class="nav-tab active" href="/ui/wall.html"><span>🧱</span><span>Video Wall</span></a>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:12px;">
+    <div class="toolbar">
+      <div class="field">
+        <label for="wallSelect">Video Wall</label>
+        <select id="wallSelect"></select>
+      </div>
+      <div class="field">
+        <label for="wallName">Wall Name</label>
+        <input id="wallName" type="text" value="Video Wall 1">
+      </div>
+      <div class="field">
+        <label for="rowsInput">Rows</label>
+        <input id="rowsInput" type="number" min="1" max="16" value="2">
+      </div>
+      <div class="field">
+        <label for="colsInput">Columns</label>
+        <input id="colsInput" type="number" min="1" max="16" value="2">
+      </div>
+      <div class="field" style="min-width:240px;">
+        <label for="wallSource">Wall Video Source</label>
+        <select id="wallSource"></select>
+      </div>
+      <button id="routeWallSourceBtn" class="btn-secondary" title="Sync the selected wall source to displays that are out of sync">Sync Source</button>
+      <button id="newWallBtn" class="btn-secondary">New</button>
+      <button id="saveWallBtn">Save</button>
+      <button id="applyWallBtn">Apply Saved Wall</button>
+      <button id="refreshWallBtn" class="btn-secondary">Refresh From Devices</button>
+      <button id="exportWallConfigBtn" class="btn-secondary">Export Config</button>
+      <button id="importWallConfigBtn" class="btn-secondary">Import Config</button>
+      <input id="importWallConfigFile" type="file" accept="application/json,.json" style="display:none;">
+      <button id="deleteWallBtn" class="btn-danger">Delete</button>
+      <span id="statusChip" class="status-chip">Not refreshed</span>
+    </div>
+    <div id="stateFileInfo" class="muted" style="margin-top:8px;font-size:12px;"></div>
+  </div>
+
+  <div class="wall-page">
+    <main class="stack">
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Wall Layout</h2>
+          <span id="gridSummary" class="muted"></span>
+        </div>
+        <div id="wallGrid" class="wall-grid"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-title">
+          <h3>Display Bezel</h3>
+          <label class="field inline"><input id="applyBezelAll" type="checkbox" checked> Apply to all</label>
+        </div>
+        <fieldset class="bezel-box">
+          <legend>Display and Bezel (Unit: mm)</legend>
+          <div class="bezel-row"><label for="totalWidth">Total Width</label><input id="totalWidth" type="number" min="0" value="0"></div>
+          <div class="bezel-row"><label for="totalHeight">Total Height</label><input id="totalHeight" type="number" min="0" value="0"></div>
+          <div class="bezel-row">
+            <label>Bezel Width</label>
+            <div class="bezel-diagram">
+              <input id="topBorder" class="bezel-input top" type="number" min="0" value="0" aria-label="Top bezel">
+              <input id="leftBorder" class="bezel-input left" type="number" min="0" value="0" aria-label="Left bezel">
+              <div class="bezel-screen"><span id="bezelSizeLabel">0 x 0</span></div>
+              <input id="rightBorder" class="bezel-input right" type="number" min="0" value="0" aria-label="Right bezel">
+              <input id="bottomBorder" class="bezel-input bottom" type="number" min="0" value="0" aria-label="Bottom bezel">
+            </div>
+          </div>
+        </fieldset>
+      </section>
+    </main>
+
+    <aside class="stack">
+      <section class="panel">
+        <div class="panel-title">
+          <h3>Selected Display</h3>
+          <button id="identifyBtn" class="btn-secondary" title="Blink selected decoder front panel LED">Identify</button>
+        </div>
+        <div id="details" class="detail-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h3>Device Reports</h3>
+          <span id="reportCount" class="muted"></span>
+        </div>
+        <div id="reports" class="reports muted">Refresh from devices to compare saved state with decoder state.</div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="dialogs.js?v=1"></script>
+  <script src="wall.js?v=wall_config_dialogs_1"></script>
+</body>
+</html>

@@ -6,3 +6,4 @@ Werkzeug==2.3.7
 PyInstaller==6.19.0
 Pillow==10.0.0
 pystray==0.19.5
+psutil==5.9.8

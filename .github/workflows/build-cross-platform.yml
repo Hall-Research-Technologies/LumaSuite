@@ -25,11 +25,11 @@ jobs:
             platform: Windows
             mac_arch: ""
             artifact_name: LumaSuite-Windows
-          - os: macos-15-intel
+          - os: macos-26-intel
             platform: macOS
             mac_arch: x86_64
             artifact_name: LumaSuite-macOS-intel
-          - os: macos-latest
+          - os: macos-26
             platform: macOS
             mac_arch: arm64
             artifact_name: LumaSuite-macOS-arm64
@@ -57,6 +57,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-build-lock.txt
+
+      - name: Validate Python
+        run: python -m py_compile lumaserver.py producer2_routes.py app_launcher.py build_executable.py
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Validate JavaScript
+        shell: bash
+        run: |
+          node --check ui/wall.js
+          node --check ui/producer.js
+          node --check ui/dialogs.js
+          node tests/video_wall_model.test.js
+          node tests/producer_logo_position.test.js
 
       - name: Build Windows
         if: runner.os == 'Windows'

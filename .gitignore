@@ -70,6 +70,7 @@ __pycache__/
 producer_state.json
 producer_config.json
 units_cache.json
+video_walls.json
 ui/localdata/producer_cache.json
 
 # Archive files

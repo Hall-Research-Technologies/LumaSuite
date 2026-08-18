@@ -37,6 +37,10 @@
           <span>🎬</span>
           <span>Production Studio</span>
         </a>
+        <a class="nav-tab" href="/ui/wall.html">
+          <span>🧱</span>
+          <span>Video Wall</span>
+        </a>
       </div>
 
     </div>
@@ -97,12 +101,17 @@
   <script src="matrix.js"></script>
 
 <!-- Connection Monitoring -->
+<script src="/ui/dialogs.js?v=1"></script>
 <script>
 let connectionCheckInterval = null;
 let heartbeatInterval = null;
 let lastSuccessfulHeartbeat = Date.now();
+let heartbeatInFlight = false;
+let consecutiveHeartbeatFailures = 0;
 const CONNECTION_TIMEOUT_MS = 15000;
 const HEARTBEAT_INTERVAL_MS = 5000;
+const HEARTBEAT_REQUEST_TIMEOUT_MS = 3000;
+const HEARTBEAT_FAILURE_LIMIT = 3;
 
 function showConnectionBanner() {
   const banner = document.getElementById("connection_banner");
@@ -123,26 +132,36 @@ function hideConnectionBanner() {
 function startConnectionMonitoring() {
   if(heartbeatInterval) return;
   
-  // Send heartbeat pings
-  heartbeatInterval = setInterval(async () => {
+  const checkHeartbeat = async () => {
+    if(heartbeatInFlight) return;
+    heartbeatInFlight = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), HEARTBEAT_REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch('/api/heartbeat', { cache: 'no-store' });
+      const response = await fetch('/api/heartbeat', { cache: 'no-store', signal: controller.signal });
       if(response.ok) {
         lastSuccessfulHeartbeat = Date.now();
-        console.log('[ConnectionMonitor] Heartbeat successful, hiding banner');
+        consecutiveHeartbeatFailures = 0;
         hideConnectionBanner();
+      } else {
+        consecutiveHeartbeatFailures++;
       }
     } catch(e) {
-      console.log('[ConnectionMonitor] Heartbeat failed:', e.message);
+      consecutiveHeartbeatFailures++;
+    } finally {
+      clearTimeout(timeout);
+      heartbeatInFlight = false;
     }
-  }, HEARTBEAT_INTERVAL_MS);
+  };
+
+  checkHeartbeat();
+  heartbeatInterval = setInterval(checkHeartbeat, HEARTBEAT_INTERVAL_MS);
   
   // Check if heartbeat has stalled
   if(connectionCheckInterval) return;
   connectionCheckInterval = setInterval(async () => {
     const timeSinceLastSuccess = Date.now() - lastSuccessfulHeartbeat;
-    if(timeSinceLastSuccess > CONNECTION_TIMEOUT_MS) {
-      console.log('[ConnectionMonitor] CONNECTION TIMEOUT - showing banner after', CONNECTION_TIMEOUT_MS, 'ms without heartbeat');
+    if(timeSinceLastSuccess > CONNECTION_TIMEOUT_MS && consecutiveHeartbeatFailures >= HEARTBEAT_FAILURE_LIMIT) {
       showConnectionBanner();
     }
   }, 2000);

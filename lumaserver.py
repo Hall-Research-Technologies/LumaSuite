@@ -92,7 +92,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.0.3"
+__version__ = "1.0.5"
 
 # --- CSV Export Endpoint for Device Manager ---
 
@@ -269,6 +269,648 @@ def api_route_matrix():
         import traceback
         logging.error(f"[route_matrix] Exception: {e}\n{traceback.format_exc()}")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+# ---------------- Video Wall persistence and device API ----------------
+
+def _load_video_wall_state() -> Dict[str, Any]:
+    default = {"walls": []}
+    if not os.path.exists(VIDEO_WALL_STATE_FILE):
+        return default
+    try:
+        with open(VIDEO_WALL_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("walls"), list):
+            return data
+    except Exception as e:
+        logging.warning(f"[video_wall] load failed: {e}")
+    return default
+
+def _save_video_wall_state(data: Dict[str, Any]):
+    try:
+        payload = {
+            "kind": "lumasuite.video_walls",
+            "version": 1,
+            "walls": data.get("walls", []) if isinstance(data, dict) else []
+        }
+        with open(VIDEO_WALL_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+    except Exception as e:
+        logging.warning(f"[video_wall] save failed: {e}")
+        raise
+
+def _vw_device_id(unit: Dict[str, Any]) -> str:
+    for key in ("mac", "serialnumber", "uuid", "id"):
+        val = unit.get(key)
+        if isinstance(val, str) and val.strip():
+            return f"{key}:{val.strip().lower()}"
+    return f"ip:{unit.get('ip', '').strip()}"
+
+def _vw_unit_label(unit: Dict[str, Any]) -> str:
+    return unit.get("hostname") or unit.get("serialnumber") or unit.get("mac") or unit.get("ip") or "Unknown"
+
+def _vw_units_snapshot() -> Dict[str, Any]:
+    with cache_lock:
+        rows = [dict(u) for u in cache_units.values()]
+    encoders, decoders = [], []
+    for u in rows:
+        type_text = f"{u.get('type','')} {u.get('role','')} {u.get('model','')}".lower()
+        item = {
+            "id": _vw_device_id(u),
+            "ip": u.get("ip", ""),
+            "mac": u.get("mac", ""),
+            "serialnumber": u.get("serialnumber", ""),
+            "hostname": u.get("hostname", ""),
+            "model": u.get("model", ""),
+            "type": u.get("type", ""),
+            "role": u.get("role", ""),
+            "label": _vw_unit_label(u),
+            "streamname": _safe_get(u, "enc", "video", "streamname", default="") or _safe_get(u, "dec", "video", "streamname", default="")
+        }
+        if "encoder" in type_text:
+            encoders.append(item)
+        if "decoder" in type_text or "switcher" in type_text or "at-ome-cs31" in type_text:
+            decoders.append(item)
+    return {"encoders": encoders, "decoders": decoders}
+
+def _vw_compact_snapshot(unit: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(unit, dict):
+        return None
+    return {
+        "id": unit.get("id") or _vw_device_id(unit),
+        "ip": unit.get("ip", ""),
+        "mac": unit.get("mac", ""),
+        "serialnumber": unit.get("serialnumber", ""),
+        "hostname": unit.get("hostname", ""),
+        "model": unit.get("model", ""),
+        "type": unit.get("type", ""),
+        "role": unit.get("role", ""),
+        "label": unit.get("label") or _vw_unit_label(unit),
+        "streamname": unit.get("streamname", "")
+    }
+
+def _vw_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+def _vw_clean_snapshot(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "id": str(value.get("id") or ""),
+        "ip": str(value.get("ip") or ""),
+        "mac": str(value.get("mac") or ""),
+        "serialnumber": str(value.get("serialnumber") or ""),
+        "hostname": str(value.get("hostname") or ""),
+        "model": str(value.get("model") or ""),
+        "type": str(value.get("type") or ""),
+        "role": str(value.get("role") or ""),
+        "label": str(value.get("label") or value.get("hostname") or value.get("ip") or ""),
+        "streamname": str(value.get("streamname") or "")
+    }
+
+def _vw_clean_display(value: Any) -> Dict[str, int]:
+    display = value if isinstance(value, dict) else {}
+    return {
+        "totalwidth": _vw_int(display.get("totalwidth"), 0),
+        "totalheight": _vw_int(display.get("totalheight"), 0),
+        "topborder": _vw_int(display.get("topborder"), 0),
+        "bottomborder": _vw_int(display.get("bottomborder"), 0),
+        "leftborder": _vw_int(display.get("leftborder"), 0),
+        "rightborder": _vw_int(display.get("rightborder"), 0),
+    }
+
+def _vw_clean_wall(wall: Dict[str, Any]) -> Dict[str, Any]:
+    rows = max(1, min(16, _vw_int(wall.get("rows"), 2)))
+    columns = max(1, min(16, _vw_int(wall.get("columns"), 2)))
+    cleaned = {
+        "id": str(wall.get("id") or f"wall-{uuid.uuid4().hex[:12]}"),
+        "name": str(wall.get("name") or "Video Wall"),
+        "rows": rows,
+        "columns": columns,
+        "source_id": str(wall.get("source_id") or ""),
+        "source_snapshot": _vw_clean_snapshot(wall.get("source_snapshot")),
+        "display": _vw_clean_display(wall.get("display")),
+        "updated_at": _vw_int(wall.get("updated_at"), int(time.time())),
+        "cells": []
+    }
+    for cell in wall.get("cells", []) if isinstance(wall.get("cells"), list) else []:
+        if not isinstance(cell, dict):
+            continue
+        row = max(1, min(rows, _vw_int(cell.get("row"), 1)))
+        column = max(1, min(columns, _vw_int(cell.get("column"), 1)))
+        cleaned["cells"].append({
+            "row": row,
+            "column": column,
+            "decoder_id": str(cell.get("decoder_id") or ""),
+            "source_mode": "override" if cell.get("source_mode") == "override" else "wall",
+            "override_source_id": str(cell.get("override_source_id") or ""),
+            "rotation": _vw_int(cell.get("rotation"), 0),
+            "display": dict(cell.get("display") or {}) if isinstance(cell.get("display"), dict) else {},
+            "decoder_snapshot": _vw_clean_snapshot(cell.get("decoder_snapshot")),
+            "override_source_snapshot": _vw_clean_snapshot(cell.get("override_source_snapshot")),
+        })
+    return cleaned
+
+def _vw_enrich_wall(wall: Dict[str, Any]) -> Dict[str, Any]:
+    snap = _vw_units_snapshot()
+    devices = {u.get("id"): u for u in snap.get("encoders", []) + snap.get("decoders", []) if u.get("id")}
+    out = _vw_clean_wall(wall)
+    source_id = out.get("source_id")
+    out["source_snapshot"] = _vw_compact_snapshot(devices.get(source_id)) or out.get("source_snapshot")
+    cells = []
+    for cell in out.get("cells", []) if isinstance(out.get("cells"), list) else []:
+        next_cell = dict(cell)
+        next_cell.pop("live_source_pending", None)
+        decoder_id = next_cell.get("decoder_id")
+        override_id = next_cell.get("override_source_id")
+        next_cell["decoder_snapshot"] = _vw_compact_snapshot(devices.get(decoder_id)) or next_cell.get("decoder_snapshot")
+        next_cell["override_source_snapshot"] = _vw_compact_snapshot(devices.get(override_id)) or next_cell.get("override_source_snapshot")
+        cells.append(next_cell)
+    out["cells"] = cells
+    return out
+
+def _vw_find_unit(device_id: str) -> Optional[Dict[str, Any]]:
+    snap = _vw_units_snapshot()
+    for u in snap["encoders"] + snap["decoders"]:
+        if u.get("id") == device_id:
+            return u
+    return None
+
+def _vw_parse_matrix(value: Any) -> Dict[str, Optional[int]]:
+    out = {"rows": None, "columns": None, "row": None, "column": None}
+    if not isinstance(value, str):
+        return out
+    parts = value.split("_")
+    if len(parts) != 4:
+        return out
+    try:
+        out.update({"rows": int(parts[0]), "columns": int(parts[1]), "row": int(parts[2]), "column": int(parts[3])})
+    except Exception:
+        pass
+    return out
+
+def _vw_call(ip: str, method: str, params: Optional[Any] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+    try:
+        resp = _ws_call_auth(ip, method, params or {}, timeout or CONFIG.get("TIMEOUT", 3.0))
+        if not resp:
+            return {"ok": False, "error": "no response"}
+        if resp.get("error"):
+            return {"ok": False, "error": resp["error"]}
+        return {"ok": True, "result": resp.get("result")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+def _vw_read_decoder(unit: Dict[str, Any]) -> Dict[str, Any]:
+    ip = unit.get("ip", "")
+    reported = {"device_id": unit.get("id") or _vw_device_id(unit), "ip": ip, "label": unit.get("label") or _vw_unit_label(unit), "online": bool(ip)}
+    calls = {
+        "wall": _vw_call(ip, "StandardVideoWallInfo.Get"),
+        "bezel": _vw_call(ip, "VideoWallBezel.Get"),
+        "display": _vw_call(ip, "VideoWallDisplayPref.Get"),
+        "source": _vw_call(ip, "SelectVideoStream.Get", {"password": CONFIG.get("password", "password")}),
+    }
+    reported["calls"] = calls
+    wall = calls["wall"].get("result") if calls["wall"].get("ok") else None
+    if isinstance(wall, dict):
+        reported["video_wall"] = {**_vw_parse_matrix(wall.get("vwmatrix")), "vmenable": wall.get("vmenable")}
+    bezel = calls["bezel"].get("result") if calls["bezel"].get("ok") else None
+    if isinstance(bezel, dict):
+        reported["bezel"] = bezel
+    display = calls["display"].get("result") if calls["display"].get("ok") else None
+    if isinstance(display, dict):
+        reported["rotation"] = display.get("rotate")
+    source = calls["source"].get("result") if calls["source"].get("ok") else None
+    if isinstance(source, dict):
+        reported["source"] = source.get("streamname") or _safe_get(source, "multiaddr", "ipaddr", default="")
+    reported["online"] = any(c.get("ok") for c in calls.values())
+    return reported
+
+def _vw_encoder_stream(encoder_id: str) -> Dict[str, Any]:
+    unit = _vw_find_unit(encoder_id)
+    if not unit:
+        return {"ok": False, "error": "source encoder not found"}
+    ip = unit.get("ip")
+    streamname = unit.get("streamname")
+    if ip:
+        resp = _vw_call(ip, "VideoMultiIpStream.Get")
+        if resp.get("ok") and isinstance(resp.get("result"), dict):
+            streamname = resp["result"].get("streamname") or streamname
+    if not streamname:
+        return {"ok": False, "error": "source encoder has no streamname"}
+    return {"ok": True, "streamname": streamname, "ip": ip}
+
+def _vw_set_decoder_source(decoder_ip: str, streamname: str) -> Dict[str, Any]:
+    return _vw_call(decoder_ip, "SelectVideoStream.Set", {"selecttype": 0, "streamname": streamname, "password": CONFIG.get("password", "password")})
+
+def _vw_decoder_selected_stream(decoder_ip: str) -> Dict[str, Any]:
+    r = _vw_call(decoder_ip, "SelectVideoStream.Get", {"password": CONFIG.get("password", "password")})
+    if not r.get("ok"):
+        return r
+    result = r.get("result")
+    streamname = result.get("streamname") if isinstance(result, dict) else ""
+    return {"ok": True, "streamname": str(streamname or "").strip(), "result": result}
+
+def _vw_set_decoder_source_if_needed(decoder_ip: str, streamname: str) -> Dict[str, Any]:
+    streamname = str(streamname or "").strip()
+    current = _vw_decoder_selected_stream(decoder_ip)
+    if current.get("ok") and current.get("streamname") == streamname:
+        return {"ok": True, "skipped": True, "streamname": streamname, "current": current.get("streamname")}
+    r = _vw_set_decoder_source(decoder_ip, streamname)
+    if current.get("ok"):
+        r["previous_streamname"] = current.get("streamname")
+    else:
+        r["current_check_error"] = current.get("error")
+    return r
+
+def _vw_decoder_wall_info(decoder_ip: str) -> Dict[str, Any]:
+    r = _vw_call(decoder_ip, "StandardVideoWallInfo.Get")
+    if not r.get("ok"):
+        return r
+    result = r.get("result")
+    if not isinstance(result, dict):
+        return {"ok": False, "error": "invalid wall info response"}
+    return {
+        "ok": True,
+        "vmenable": result.get("vmenable"),
+        "vwmatrix": result.get("vwmatrix"),
+        "result": result,
+    }
+
+def _vw_set_wall_info_if_needed(decoder_ip: str, enabled: bool, matrix: str) -> Dict[str, Any]:
+    current = _vw_decoder_wall_info(decoder_ip)
+    if current.get("ok") and bool(current.get("vmenable")) == bool(enabled) and current.get("vwmatrix") == matrix:
+        return {"ok": True, "skipped": True, "vmenable": enabled, "vwmatrix": matrix}
+    r = _vw_call(decoder_ip, "StandardVideoWallInfo.Set", {"vmenable": enabled, "vwmatrix": matrix})
+    if current.get("ok"):
+        r["previous_vmenable"] = current.get("vmenable")
+        r["previous_vwmatrix"] = current.get("vwmatrix")
+    else:
+        r["current_check_error"] = current.get("error")
+    return r
+
+def _vw_decoder_bezel(decoder_ip: str) -> Dict[str, Any]:
+    r = _vw_call(decoder_ip, "VideoWallBezel.Get")
+    if not r.get("ok"):
+        return r
+    result = r.get("result")
+    if not isinstance(result, dict):
+        return {"ok": False, "error": "invalid bezel response"}
+    return {"ok": True, "bezel": _vw_clean_display(result), "result": result}
+
+def _vw_set_bezel_if_needed(decoder_ip: str, params: Dict[str, int]) -> Dict[str, Any]:
+    desired = _vw_clean_display(params)
+    current = _vw_decoder_bezel(decoder_ip)
+    if current.get("ok") and current.get("bezel") == desired:
+        return {"ok": True, "skipped": True, "bezel": desired}
+    r = _vw_call(decoder_ip, "VideoWallBezel.Set", desired)
+    if current.get("ok"):
+        r["previous_bezel"] = current.get("bezel")
+    else:
+        r["current_check_error"] = current.get("error")
+    return r
+
+def _vw_decoder_rotation(decoder_ip: str) -> Dict[str, Any]:
+    r = _vw_call(decoder_ip, "VideoWallDisplayPref.Get")
+    if not r.get("ok"):
+        return r
+    result = r.get("result")
+    rotation = result.get("rotate") if isinstance(result, dict) else None
+    return {"ok": True, "rotation": _vw_int(rotation, 0), "result": result}
+
+def _vw_set_rotation_if_needed(decoder_ip: str, rotation: int) -> Dict[str, Any]:
+    desired = _vw_int(rotation, 0)
+    current = _vw_decoder_rotation(decoder_ip)
+    if current.get("ok") and current.get("rotation") == desired:
+        return {"ok": True, "skipped": True, "rotation": desired}
+    r = _vw_call(decoder_ip, "VideoWallDisplayPref.Set", {"rotate": desired})
+    if current.get("ok"):
+        r["previous_rotation"] = current.get("rotation")
+    else:
+        r["current_check_error"] = current.get("error")
+    return r
+
+def _vw_cell_bezel(wall: Dict[str, Any], cell: Dict[str, Any]) -> Dict[str, Any]:
+    global_bezel = wall.get("display") or {}
+    return {**global_bezel, **(cell.get("display") or {})}
+
+def _vw_compare_cell(wall: Dict[str, Any], cell: Dict[str, Any], reported: Dict[str, Any]) -> List[str]:
+    diffs = []
+    vw = reported.get("video_wall") or {}
+    if not reported.get("online"):
+        return ["offline"]
+    for key, expected in (("rows", wall.get("rows")), ("columns", wall.get("columns")), ("row", cell.get("row")), ("column", cell.get("column"))):
+        if vw.get(key) is not None and int(vw.get(key)) != int(expected):
+            diffs.append(f"{key}: saved {expected}, reported {vw.get(key)}")
+    if vw.get("vmenable") is not None and bool(vw.get("vmenable")) != (cell.get("source_mode", "wall") == "wall"):
+        diffs.append(f"video wall enabled: saved {cell.get('source_mode', 'wall') == 'wall'}, reported {vw.get('vmenable')}")
+    if reported.get("rotation") is not None and int(reported.get("rotation") or 0) != int(cell.get("rotation") or 0):
+        diffs.append(f"rotation: saved {cell.get('rotation') or 0}, reported {reported.get('rotation')}")
+    return diffs
+
+def _vw_wall_status(wall: Dict[str, Any], reports: Dict[str, Any]) -> str:
+    cells = wall.get("cells") or []
+    if any((c.get("source_mode") or "wall") != "wall" for c in cells):
+        return "Override"
+    missing = [c for c in cells if c.get("decoder_id") and not reports.get(c.get("decoder_id"), {}).get("online")]
+    if missing:
+        return "Partial"
+    diffs = []
+    seen = set()
+    conflict = False
+    for c in cells:
+        pos = (c.get("row"), c.get("column"))
+        if pos in seen:
+            conflict = True
+        seen.add(pos)
+        if c.get("decoder_id"):
+            diffs.extend(_vw_compare_cell(wall, c, reports.get(c.get("decoder_id"), {})))
+    if conflict:
+        return "Conflict"
+    if diffs:
+        return "Modified"
+    return "Healthy"
+
+def _vw_apply_source_cell(wall: Dict[str, Any], cell: Dict[str, Any], wall_source: Dict[str, Any]) -> Dict[str, Any]:
+    did = cell.get("decoder_id")
+    if not did:
+        return {"ok": False, "error": "display has no decoder"}
+    unit = _vw_find_unit(did)
+    if not unit:
+        return {"ok": False, "error": "decoder not discovered"}
+    ip = unit.get("ip")
+    mode = cell.get("source_mode") or "wall"
+    row = int(cell.get("row") or 1)
+    col = int(cell.get("column") or 1)
+    steps = []
+    ok = True
+
+    if mode == "wall":
+        matrix = f"{int(wall.get('rows') or 1)}_{int(wall.get('columns') or 1)}_{row}_{col}"
+        if wall_source.get("ok"):
+            r = _vw_set_decoder_source_if_needed(ip, wall_source["streamname"])
+            steps.append({"step": "sync wall source" if r.get("skipped") else "route wall source", **r})
+            ok = ok and r.get("ok")
+        else:
+            steps.append({"step": "sync wall source", "ok": False, "error": wall_source.get("error")})
+            ok = False
+        r = _vw_set_wall_info_if_needed(ip, True, matrix)
+        steps.append({"step": "sync video wall" if r.get("skipped") else "video wall", **r})
+        ok = ok and r.get("ok")
+    else:
+        matrix = f"{int(wall.get('rows') or 1)}_{int(wall.get('columns') or 1)}_{row}_{col}"
+        r = _vw_set_wall_info_if_needed(ip, False, matrix)
+        steps.append({"step": "sync wall override" if r.get("skipped") else "disable wall override", **r})
+        ok = ok and r.get("ok")
+        override = _vw_encoder_stream(cell.get("override_source_id", ""))
+        if override.get("ok"):
+            r = _vw_set_decoder_source_if_needed(ip, override["streamname"])
+            steps.append({"step": "sync override source" if r.get("skipped") else "route override source", **r})
+            ok = ok and r.get("ok")
+        else:
+            steps.append({"step": "sync override source", "ok": False, "error": override.get("error")})
+            ok = False
+
+    return {"ok": ok, "ip": ip, "label": unit.get("label"), "steps": steps}
+
+def _vw_apply_full_cell(wall: Dict[str, Any], cell: Dict[str, Any], wall_source: Dict[str, Any]) -> Dict[str, Any]:
+    source_result = _vw_apply_source_cell(wall, cell, wall_source)
+    did = cell.get("decoder_id")
+    unit = _vw_find_unit(did) if did else None
+    if not unit:
+        return source_result
+    ip = unit.get("ip")
+    steps = list(source_result.get("steps") or [])
+    ok = bool(source_result.get("ok"))
+    try:
+        bezel = _vw_cell_bezel(wall, cell)
+        if bezel:
+            params = {
+                "totalwidth": int(bezel.get("totalwidth") or 0),
+                "totalheight": int(bezel.get("totalheight") or 0),
+                "topborder": int(bezel.get("topborder") or 0),
+                "bottomborder": int(bezel.get("bottomborder") or 0),
+                "leftborder": int(bezel.get("leftborder") or 0),
+                "rightborder": int(bezel.get("rightborder") or 0),
+            }
+            r = _vw_set_bezel_if_needed(ip, params)
+            steps.append({"step": "sync bezel" if r.get("skipped") else "bezel", **r})
+            ok = ok and r.get("ok")
+        r = _vw_set_rotation_if_needed(ip, int(cell.get("rotation") or 0))
+        steps.append({"step": "sync rotation" if r.get("skipped") else "rotation", **r})
+        ok = ok and r.get("ok")
+    except Exception as e:
+        ok = False
+        steps.append({"step": "exception", "ok": False, "error": str(e)})
+    return {"ok": ok, "ip": ip, "label": unit.get("label"), "steps": steps}
+
+def _vw_apply_bezel_cell(wall: Dict[str, Any], cell: Dict[str, Any], use_cell_override: bool = True) -> Dict[str, Any]:
+    did = cell.get("decoder_id")
+    if not did:
+        return {"ok": False, "error": "display has no decoder"}
+    unit = _vw_find_unit(did)
+    if not unit:
+        return {"ok": False, "error": "decoder not discovered"}
+    ip = unit.get("ip")
+    bezel = _vw_cell_bezel(wall, cell) if use_cell_override else (wall.get("display") or {})
+    params = {
+        "totalwidth": int(bezel.get("totalwidth") or 0),
+        "totalheight": int(bezel.get("totalheight") or 0),
+        "topborder": int(bezel.get("topborder") or 0),
+        "bottomborder": int(bezel.get("bottomborder") or 0),
+        "leftborder": int(bezel.get("leftborder") or 0),
+        "rightborder": int(bezel.get("rightborder") or 0),
+    }
+    r = _vw_set_bezel_if_needed(ip, params)
+    return {"ok": bool(r.get("ok")), "ip": ip, "label": unit.get("label"), "steps": [{"step": "sync bezel" if r.get("skipped") else "bezel", **r}]}
+
+@APP.get("/api/video_wall/state")
+def api_video_wall_state():
+    data = _load_video_wall_state()
+    original = json.dumps(data.get("walls", []), sort_keys=True, default=str)
+    needs_header = data.get("kind") != "lumasuite.video_walls" or data.get("version") != 1
+    data["walls"] = [_vw_enrich_wall(w) for w in data.get("walls", []) if isinstance(w, dict)]
+    if needs_header or json.dumps(data.get("walls", []), sort_keys=True, default=str) != original:
+        _save_video_wall_state(data)
+    return jsonify({"ok": True, **data, **_vw_units_snapshot(), "state_file": VIDEO_WALL_STATE_FILE})
+
+@APP.post("/api/video_wall/save")
+def api_video_wall_save():
+    body = request.get_json(silent=True) or {}
+    wall = body.get("wall") if isinstance(body.get("wall"), dict) else body
+    if not isinstance(wall, dict):
+        return jsonify({"ok": False, "error": "missing wall"}), 400
+    wall_id = wall.get("id") or f"wall-{uuid.uuid4().hex[:12]}"
+    wall["id"] = wall_id
+    wall["updated_at"] = int(time.time())
+    wall = _vw_enrich_wall(wall)
+    data = _load_video_wall_state()
+    walls = [w for w in data.get("walls", []) if w.get("id") != wall_id]
+    walls.append(wall)
+    data["walls"] = walls
+    _save_video_wall_state(data)
+    return jsonify({"ok": True, "wall": wall, **_vw_units_snapshot()})
+
+@APP.post("/api/video_wall/delete")
+def api_video_wall_delete():
+    body = request.get_json(silent=True) or {}
+    wall_id = body.get("id")
+    if not wall_id:
+        return jsonify({"ok": False, "error": "missing id"}), 400
+    data = _load_video_wall_state()
+    data["walls"] = [w for w in data.get("walls", []) if w.get("id") != wall_id]
+    _save_video_wall_state(data)
+    return jsonify({"ok": True, **data})
+
+@APP.post("/api/video_wall/import")
+def api_video_wall_import():
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or body.get("kind") != "lumasuite.video_walls":
+        return jsonify({"ok": False, "error": "import file is not a LumaSuite video wall config"}), 400
+    walls = body.get("walls")
+    if not isinstance(walls, list):
+        return jsonify({"ok": False, "error": "video wall config must contain a walls array"}), 400
+    cleaned = []
+    for wall in walls:
+        if not isinstance(wall, dict):
+            return jsonify({"ok": False, "error": "video wall config contains an invalid wall"}), 400
+        cells = wall.get("cells")
+        if not isinstance(cells, list):
+            return jsonify({"ok": False, "error": "video wall config contains a wall without cells"}), 400
+        if not all(isinstance(cell, dict) and "row" in cell and "column" in cell for cell in cells):
+            return jsonify({"ok": False, "error": "video wall config contains invalid display cells"}), 400
+        wall = _vw_enrich_wall(wall)
+        wall["id"] = wall.get("id") or f"wall-{uuid.uuid4().hex[:12]}"
+        wall["updated_at"] = int(time.time())
+        cleaned.append(wall)
+    data = {"walls": cleaned}
+    _save_video_wall_state(data)
+    return jsonify({"ok": True, **data, **_vw_units_snapshot(), "state_file": VIDEO_WALL_STATE_FILE})
+
+@APP.post("/api/video_wall/refresh")
+def api_video_wall_refresh():
+    body = request.get_json(silent=True) or {}
+    wall_id = body.get("id")
+    data = _load_video_wall_state()
+    walls = data.get("walls", [])
+    wall = next((w for w in walls if w.get("id") == wall_id), None) if wall_id else None
+    snap = _vw_units_snapshot()
+    target_ids = set()
+    if wall:
+        target_ids = {c.get("decoder_id") for c in wall.get("cells", []) if c.get("decoder_id")}
+    else:
+        target_ids = {d.get("id") for d in snap["decoders"]}
+    reports = {}
+    target_ids = [did for did in target_ids if did]
+    if target_ids:
+        with ThreadPoolExecutor(max_workers=min(16, len(target_ids))) as ex:
+            future_map = {}
+            for did in target_ids:
+                unit = _vw_find_unit(did)
+                if unit:
+                    future_map[ex.submit(_vw_read_decoder, unit)] = did
+                else:
+                    reports[did] = {"device_id": did, "online": False, "error": "not discovered"}
+            for fut in as_completed(future_map):
+                did = future_map[fut]
+                try:
+                    reports[did] = fut.result()
+                except Exception as e:
+                    reports[did] = {"device_id": did, "online": False, "error": str(e)}
+    status = _vw_wall_status(wall, reports) if wall else None
+    return jsonify({"ok": True, "wall": wall, "reports": reports, "status": status, **snap})
+
+@APP.post("/api/video_wall/source")
+def api_video_wall_source():
+    body = request.get_json(silent=True) or {}
+    wall = body.get("wall")
+    if not isinstance(wall, dict):
+        return jsonify({"ok": False, "error": "missing wall"}), 400
+    scope = body.get("scope") or "cell"
+    source = _vw_encoder_stream(wall.get("source_id", ""))
+    cells = wall.get("cells") or []
+    if scope == "wall":
+        targets = [c for c in cells if c.get("decoder_id") and (c.get("source_mode") or "wall") == "wall"]
+    else:
+        row = int(body.get("row") or 0)
+        column = int(body.get("column") or 0)
+        targets = [c for c in cells if c.get("decoder_id") and int(c.get("row") or 0) == row and int(c.get("column") or 0) == column]
+    if not targets:
+        return jsonify({"ok": False, "error": "no assigned displays to route"}), 400
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=min(16, len(targets))) as ex:
+        future_map = {ex.submit(_vw_apply_source_cell, wall, cell, source): cell for cell in targets}
+        for fut in as_completed(future_map):
+            cell = future_map[fut]
+            did = cell.get("decoder_id")
+            try:
+                results[did] = fut.result()
+            except Exception as e:
+                results[did] = {"ok": False, "error": str(e)}
+    success_count = sum(1 for r in results.values() if r.get("ok"))
+    overall = bool(results) and success_count == len(results)
+    return jsonify({"ok": overall, "results": results, "target_count": len(targets), "success_count": success_count})
+
+@APP.post("/api/video_wall/bezel")
+def api_video_wall_bezel():
+    body = request.get_json(silent=True) or {}
+    wall = body.get("wall")
+    if not isinstance(wall, dict):
+        return jsonify({"ok": False, "error": "missing wall"}), 400
+    scope = body.get("scope") or "wall"
+    cells = wall.get("cells") or []
+    if scope == "cell":
+        row = int(body.get("row") or 0)
+        column = int(body.get("column") or 0)
+        targets = [c for c in cells if c.get("decoder_id") and int(c.get("row") or 0) == row and int(c.get("column") or 0) == column]
+    else:
+        targets = [c for c in cells if c.get("decoder_id")]
+    if not targets:
+        return jsonify({"ok": False, "error": "no assigned displays to update"}), 400
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=min(16, len(targets))) as ex:
+        use_cell_override = scope == "cell"
+        future_map = {ex.submit(_vw_apply_bezel_cell, wall, cell, use_cell_override): cell for cell in targets}
+        for fut in as_completed(future_map):
+            cell = future_map[fut]
+            did = cell.get("decoder_id")
+            try:
+                results[did] = fut.result()
+            except Exception as e:
+                results[did] = {"ok": False, "error": str(e)}
+    success_count = sum(1 for r in results.values() if r.get("ok"))
+    overall = bool(results) and success_count == len(results)
+    return jsonify({"ok": overall, "results": results, "target_count": len(targets), "success_count": success_count})
+
+@APP.post("/api/video_wall/apply")
+def api_video_wall_apply():
+    body = request.get_json(silent=True) or {}
+    wall = body.get("wall")
+    wall_id = body.get("id")
+    if not wall and wall_id:
+        wall = next((w for w in _load_video_wall_state().get("walls", []) if w.get("id") == wall_id), None)
+    if not isinstance(wall, dict):
+        return jsonify({"ok": False, "error": "missing wall"}), 400
+
+    source = _vw_encoder_stream(wall.get("source_id", ""))
+    targets = [cell for cell in wall.get("cells", []) if cell.get("decoder_id")]
+    results = {}
+    if targets:
+        with ThreadPoolExecutor(max_workers=min(16, len(targets))) as ex:
+            future_map = {ex.submit(_vw_apply_full_cell, wall, cell, source): cell for cell in targets}
+            for fut in as_completed(future_map):
+                cell = future_map[fut]
+                did = cell.get("decoder_id")
+                try:
+                    results[did] = fut.result()
+                except Exception as e:
+                    results[did] = {"ok": False, "error": str(e)}
+
+    overall = bool(results) and all(r.get("ok") for r in results.values())
+    return jsonify({"ok": overall, "results": results})
 # ---- HARDEN: skip duplicate endpoint registrations (prevents AssertionError) ----
 import types as _types
 _orig_add_url_rule = APP.add_url_rule
@@ -404,6 +1046,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 UI_DIR = os.path.join(BASE_DIR, "ui")
 FIRMWARE_DIR = os.path.join(BASE_DIR, "firmware")
 CACHE_FILE = os.path.join(DATA_DIR, "units_cache.json")
+VIDEO_WALL_STATE_FILE = os.path.join(DATA_DIR, "video_walls.json")
 # in-memory cache structures (needed before autoload)
 cache_units: Dict[str, Dict[str, Any]] = {}
 cache_lock = threading.Lock()
@@ -1215,6 +1858,14 @@ def _ws_get_minimal(ip: str) -> Optional[Dict[str, Any]]:
     out["serialnumber"] = serial_val
     out["hostname"] = _ws_get_hostname(ip, SCAN_TIMEOUT) or ""
     out["mac"] = _ws_get_mac(ip, SCAN_TIMEOUT) or ""
+    ntp_settings = _read_ntp_settings(ip, SCAN_TIMEOUT)
+    if ntp_settings:
+        out["timezone"] = ntp_settings.get("timezone", "")
+        out["active_timezone"] = ntp_settings.get("active_timezone", "")
+        out["ntp_server"] = ntp_settings.get("ntp_server", "")
+        out["ntpserver"] = ntp_settings.get("ntpserver", "")
+        out["datetime"] = ntp_settings.get("datetime", "")
+        out["device_datetime"] = ntp_settings.get("device_datetime", "")
 
     type_hint = _first_key(r, ["Role", "role", "Type", "type", "DeviceType", "deviceType", "devicetype", "DevType", "devtype"]).lower()
     m = (out.get("model","") or "").lower()
@@ -1603,31 +2254,40 @@ def _merge_disk_into_memory():
 
 # ---------------- static/UI routes ----------------
 
+def _send_ui_file(filename: str):
+    resp = send_from_directory(UI_DIR, filename)
+    try:
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    except Exception:
+        pass
+    return resp
+
 @APP.get("/")
 def root():
     if os.path.exists(os.path.join(UI_DIR, "index.html")):
         logging.info("[root] serving /ui/index.html")
-        return send_from_directory(UI_DIR, "index.html")
+        return _send_ui_file("index.html")
     return "UI not found. Put index.html in ./ui/"
 
 @APP.get("/favicon.ico")
 def favicon():
     icon_path = os.path.join(UI_DIR, "favicon.ico")
     if os.path.isfile(icon_path):
-        return send_from_directory(UI_DIR, "favicon.ico")
+        return _send_ui_file("favicon.ico")
     abort(404)
 
 @APP.get("/ui/<path:filename>")
 def ui_files(filename):
     path = os.path.join(UI_DIR, filename)
     if os.path.isfile(path):
-        return send_from_directory(UI_DIR, filename)
+        return _send_ui_file(filename)
     abort(404)
 
 # ---------------- API routes ----------------
 
-@APP.get("/api/adapters")
-def api_adapters():
+def api_adapters_legacy():
     rows: List[Dict[str, Any]] = []
     try:
         import netifaces
@@ -1671,6 +2331,310 @@ def api_adapters():
     if not rows:
         rows=[{"name":"Default — 192.168.0.0/24","cidr":"192.168.0.0/24","scan":"192.168.0.0/24"}]
     return jsonify({"adapters": rows})
+
+def _is_private_ipv4(ip: str) -> bool:
+    try:
+        addr = ipaddress.IPv4Address(ip)
+        return addr.is_private and not addr.is_loopback
+    except Exception:
+        return False
+
+def _adapter_scan_entry(name: str, ip: str, mask: str) -> Optional[Dict[str, Any]]:
+    if not ip or not mask:
+        return None
+    if ip.startswith("169.254.") or not _is_private_ipv4(ip):
+        return None
+    try:
+        net = ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
+        cidr = f"{net.network_address}/{net.prefixlen}"
+        scan = f"{str(net.network_address).rsplit('.', 1)[0]}.1-254" if net.prefixlen <= 24 else cidr
+        return {"name": name or f"iface {ip}", "ip": ip, "netmask": str(net.netmask), "cidr": cidr, "scan": scan}
+    except Exception:
+        return None
+
+def _dedupe_adapters(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for row in rows:
+        key = (row.get("ip"), row.get("cidr"))
+        if not row.get("ip") or key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+def _sort_adapters(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def score(row: Dict[str, Any]):
+        name = str(row.get("name") or "").lower()
+        ip = str(row.get("ip") or "")
+        virtual = any(token in name for token in ("virtual", "vethernet", "vmware", "hyper-v", "loopback", "bluetooth"))
+        preferred = ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.")
+        return (1 if virtual else 0, 0 if preferred else 1, name, ip)
+    return sorted(rows, key=score)
+
+def _adapters_windows(active_only: bool = True) -> List[Dict[str, Any]]:
+    if not platform.system().lower().startswith("win"):
+        return []
+    rows: List[Dict[str, Any]] = []
+    try:
+        txt = _subprocess_check_output_no_window(["ipconfig", "/all"], text=True, encoding="utf-8", errors="ignore")
+    except Exception:
+        return rows
+    for block in re.split(r"\r?\n\r?\n", txt):
+        if active_only and re.search(r"(?mi)^\s*Media\s*State\s*.*:\s*Media\s*disconnected\s*$", block):
+            continue
+        name_m = re.search(r"(?mi)^(?:.*adapter)\s+(.+?):\s*$", block)
+        ipv4_m = re.search(r"(?mi)^\s*IPv4[^:]*:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", block)
+        mask_m = re.search(r"(?mi)^\s*Subnet\s*Mask[^:]*:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", block)
+        if not (name_m and ipv4_m and mask_m):
+            continue
+        entry = _adapter_scan_entry(name_m.group(1).strip(), ipv4_m.group(1), mask_m.group(1))
+        if entry:
+            rows.append(entry)
+    return _dedupe_adapters(rows)
+
+def _adapters_netifaces(active_only: bool = True) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    try:
+        import netifaces
+    except Exception:
+        return rows
+    try:
+        for iface in netifaces.interfaces():
+            addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
+            for addr in addrs:
+                entry = _adapter_scan_entry(iface, addr.get("addr"), addr.get("netmask"))
+                if entry:
+                    rows.append(entry)
+    except Exception:
+        return []
+    return _dedupe_adapters(rows)
+
+def _adapters_psutil(active_only: bool = True) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    try:
+        import psutil
+    except Exception:
+        return rows
+    try:
+        addrs = psutil.net_if_addrs()
+        stats = psutil.net_if_stats()
+    except Exception:
+        return rows
+    for name, addr_list in addrs.items():
+        if active_only and name in stats and not stats[name].isup:
+            continue
+        for addr in addr_list:
+            if getattr(addr, "family", None) != socket.AF_INET:
+                continue
+            entry = _adapter_scan_entry(name, addr.address, addr.netmask)
+            if entry:
+                rows.append(entry)
+    return _dedupe_adapters(rows)
+
+def _adapters_ip_addr(active_only: bool = True) -> List[Dict[str, Any]]:
+    if platform.system().lower() != "linux":
+        return []
+    cmd = ["ip", "-o", "-4", "addr", "show"]
+    if active_only:
+        cmd.append("up")
+    try:
+        txt = _subprocess_check_output_no_window(cmd, text=True, encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
+    rows: List[Dict[str, Any]] = []
+    for line in txt.splitlines():
+        m = re.match(r"\d+:\s+([^:\s]+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", line)
+        if not m:
+            continue
+        name, ip, prefix = m.groups()
+        try:
+            mask = str(ipaddress.IPv4Network(f"0.0.0.0/{prefix}").netmask)
+        except Exception:
+            continue
+        entry = _adapter_scan_entry(name, ip, mask)
+        if entry:
+            rows.append(entry)
+    return _dedupe_adapters(rows)
+
+def _adapters_ifconfig(active_only: bool = True) -> List[Dict[str, Any]]:
+    if platform.system().lower() not in ("darwin", "linux"):
+        return []
+    try:
+        txt = _subprocess_check_output_no_window(["ifconfig"], text=True, encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
+    rows: List[Dict[str, Any]] = []
+    for block in re.split(r"\n(?=\S)", txt):
+        first = block.splitlines()[0] if block.splitlines() else ""
+        name = first.split(":", 1)[0].strip()
+        if not name:
+            continue
+        if active_only and "status: inactive" in block.lower():
+            continue
+        m = re.search(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\s+(?:netmask\s+)?(0x[0-9a-fA-F]+|\d+\.\d+\.\d+\.\d+)", block)
+        if not m:
+            continue
+        ip, raw_mask = m.groups()
+        if raw_mask.lower().startswith("0x"):
+            try:
+                mask_int = int(raw_mask, 16)
+                mask = ".".join(str((mask_int >> shift) & 0xff) for shift in (24, 16, 8, 0))
+            except Exception:
+                continue
+        else:
+            mask = raw_mask
+        entry = _adapter_scan_entry(name, ip, mask)
+        if entry:
+            rows.append(entry)
+    return _dedupe_adapters(rows)
+
+def _adapters_route_print() -> List[Dict[str, Any]]:
+    if not platform.system().lower().startswith("win"):
+        return []
+    try:
+        txt = _subprocess_check_output_no_window(["route", "print", "-4"], text=True, encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
+    rows: List[Dict[str, Any]] = []
+    for line in txt.splitlines():
+        m = re.match(r"\s*(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+\S+\s+(\d+\.\d+\.\d+\.\d+)", line)
+        if not m:
+            continue
+        network, mask, iface_ip = m.groups()
+        try:
+            net = ipaddress.IPv4Network(f"{network}/{mask}", strict=False)
+            if net.prefixlen < 8 or net.prefixlen > 30:
+                continue
+        except Exception:
+            continue
+        entry = _adapter_scan_entry(f"iface {iface_ip}", iface_ip, str(net.netmask))
+        if entry:
+            rows.append(entry)
+    return _dedupe_adapters(rows)
+
+@APP.get("/api/adapters")
+def api_adapters():
+    include_all = str(request.args.get("all") or "").lower() in ("1", "true", "yes")
+    try:
+        rows: List[Dict[str, Any]] = []
+        for loader in (_adapters_windows, _adapters_psutil, _adapters_netifaces, _adapters_ip_addr, _adapters_ifconfig):
+            rows = loader(active_only=not include_all)
+            if rows:
+                break
+        if not rows:
+            rows = _adapters_route_print()
+        return jsonify({"ok": True, "adapters": _sort_adapters(rows)})
+    except Exception as e:
+        return jsonify({"ok": True, "adapters": [], "note": f"error: {e}"}), 200
+
+def _device_config_call(ip: str, config_get: str, timeout: float = 4.0):
+    method = "TimeSync.Get" if config_get == "timezone" else config_get
+    return _ws_call_auth(ip, method, {}, timeout)
+
+def _read_ntp_settings(ip: str, timeout: float = 4.0) -> Dict[str, Any]:
+    tz_resp = _device_config_call(ip, "timezone", timeout) or {}
+    cfg = tz_resp.get("result") or {}
+    if tz_resp.get("error") or not isinstance(cfg, dict):
+        return {}
+    ntp = cfg.get("ntp") if isinstance(cfg.get("ntp"), dict) else cfg
+    server = ntp.get("ntpserver") or ntp.get("ntp_server") or ntp.get("server") or ""
+    datetime_val = ""
+    try:
+        clock_resp = _ws_call_auth(ip, "SystemCurrentTime.Get", {}, timeout) or {}
+        clock = clock_resp.get("result") or {}
+        if isinstance(clock, dict):
+            datetime_val = clock.get("datetime") or clock.get("date_time") or clock.get("time") or ""
+    except Exception:
+        pass
+    return {
+        "timezone": ntp.get("timezone") or cfg.get("timezone") or "UTC",
+        "active_timezone": ntp.get("timezone") or cfg.get("timezone") or "UTC",
+        "ntp_server": server,
+        "ntpserver": server,
+        "datetime": datetime_val,
+        "device_datetime": datetime_val,
+        "timezonelist": ntp.get("timezonelist") or [],
+    }
+
+@APP.post("/api/ntp_profile")
+def api_ntp_profile():
+    data = request.get_json(silent=True) or {}
+    requested_ips = data.get("ips") or []
+    target_ips = [ip for ip in requested_ips if ip in cache_units] or list(cache_units)
+    if not target_ips:
+        return jsonify({"ok": True, "zones": [{"name": "UTC"}], "timezone": "UTC", "ntp_server": ""})
+
+    for ip in target_ips:
+        try:
+            ntp_settings = _read_ntp_settings(ip)
+            if ntp_settings:
+                clock_resp = _ws_call_auth(ip, "SystemCurrentTime.Get", {}, 4.0) or {}
+                clock = clock_resp.get("result") or {}
+                raw_zones = ntp_settings.get("timezonelist") or []
+                zones = [zone if isinstance(zone, dict) else {"name": str(zone)} for zone in raw_zones]
+                return jsonify({
+                    "ok": True,
+                    "source_ip": ip,
+                    "zones": zones or [{"name": ntp_settings.get("timezone") or "UTC"}],
+                    "timezone": ntp_settings.get("timezone") or "UTC",
+                    "ntp_server": ntp_settings.get("ntp_server") or "",
+                    "datetime": clock.get("datetime") if isinstance(clock, dict) else "",
+                })
+        except Exception as e:
+            logging.debug(f"[ntp_profile] {ip}: {e}")
+    return jsonify({"ok": False, "error": "Unable to read time settings from selected units", "devices": target_ips}), 502
+
+@APP.post("/api/set_ntp")
+def api_set_ntp():
+    data = request.get_json(silent=True) or {}
+    scope = str(data.get("scope") or "selected").lower()
+    timezone = str(data.get("timezone") or "").strip()
+    server = str(data.get("server") or "").strip()
+    requested_ips = data.get("ips") or []
+    target_ips = list(cache_units) if scope == "all" else [ip for ip in requested_ips if ip in cache_units]
+    if scope not in ("selected", "all") or not timezone or not target_ips:
+        return jsonify({"ok": False, "error": "timezone and at least one target unit are required"}), 400
+
+    results = {}
+    for ip in target_ips:
+        try:
+            tz_resp = _device_config_call(ip, "timezone") or {}
+            tz_cfg = tz_resp.get("result") or {}
+            if tz_resp.get("error") or not isinstance(tz_cfg, dict):
+                raise RuntimeError(tz_resp.get("error") or "timezone read failed")
+
+            ntp_cfg = dict(tz_cfg.get("ntp") or {})
+            ntp_cfg["ntpserver"] = server
+            ntp_cfg["timezone"] = timezone
+            tz_set = _ws_call_auth(ip, "TimeSync.Set", {
+                "synctype": "ntp" if server else "manual",
+                "ntp": ntp_cfg,
+                "timezone": timezone,
+            }, 6.0) or {}
+            if tz_set.get("error"):
+                raise RuntimeError(tz_set.get("error"))
+
+            refreshed_ntp = _read_ntp_settings(ip, 4.0) or {
+                "timezone": timezone,
+                "active_timezone": timezone,
+                "ntp_server": server,
+                "ntpserver": server,
+                "datetime": "",
+                "device_datetime": "",
+            }
+            cache_units[ip]["timezone"] = refreshed_ntp.get("timezone", timezone)
+            cache_units[ip]["active_timezone"] = refreshed_ntp.get("active_timezone", cache_units[ip]["timezone"])
+            cache_units[ip]["ntp_server"] = refreshed_ntp.get("ntp_server", server)
+            cache_units[ip]["ntpserver"] = refreshed_ntp.get("ntpserver", cache_units[ip]["ntp_server"])
+            cache_units[ip]["datetime"] = refreshed_ntp.get("datetime", "")
+            cache_units[ip]["device_datetime"] = refreshed_ntp.get("device_datetime", "")
+            results[ip] = {"ip": ip, "ok": True}
+        except Exception as e:
+            results[ip] = {"ip": ip, "ok": False, "error": str(e)}
+
+    _persist_units_cache()
+    return jsonify({"ok": True, "scope": scope, "timezone": timezone, "ntp_server": server, "results": results})
 
 def _collect_firmware_files() -> Tuple[List[Tuple[str,int]], List[str]]:
     checked: List[str] = []
@@ -2123,6 +3087,7 @@ def api_scan():
             with cache_lock:
                 # Determine if this IP already existed OR if another IP had same MAC (IP change)
                 existed = ip in cache_units
+                existing_unit = cache_units.get(ip, {})
                 mac_new = (info.get("mac") or "").strip().lower()
                 replaced_old_ip = None
                 if mac_new:
@@ -2130,6 +3095,7 @@ def api_scan():
                     old_ip = mac_to_ip_index.get(mac_new)
                     if old_ip and old_ip != ip:
                         # IP changed for this MAC — remove old entry, treat as update
+                        existing_unit = cache_units.get(old_ip, existing_unit)
                         del cache_units[old_ip]
                         existed = True
                         replaced_old_ip = old_ip
@@ -2137,12 +3103,14 @@ def api_scan():
                 # Use deep merge to preserve existing values while updating with new data
                 if existed:
                     # Unit already exists: merge new data while preserving existing values
-                    cache_units[ip] = _deep_merge_unit(cache_units[ip], info)
+                    cache_units[ip] = _deep_merge_unit(existing_unit, info)
                     counts["updated"] += 1
                 else:
                     # New unit: add it as-is
                     cache_units[ip] = info
                     counts["added"] += 1
+                if mac_new:
+                    mac_to_ip_index[mac_new] = ip
                 
                 if replaced_old_ip:
                     logging.info(f"[scan-fast] mac {mac_new} moved {replaced_old_ip} -> {ip}")
@@ -2884,7 +3852,7 @@ def api_app_version():
 
 # --- [producer integration] BEGIN ---
 
-import os, glob, json
+import os, glob, json, base64
 from flask import request, jsonify
 
 # expose lowercase alias for runners that import "app"
@@ -2904,6 +3872,7 @@ PRODUCER_ALLOWED_METHODS = {
     "OsdText.Get", "OsdText.Set",
     "ImageDisplay.Get", "ImageDisplay.Set",
     "OsdLogo.Get", "OsdLogo.Set",
+    "ImageReset.Set",
     "AudioInputMute.Get", "AudioInputMute.Set",
     "AudioInSelection.Get", "AudioInSelection.Set",
     "VideoInputMute.Get", "VideoInputMute.Set",
@@ -2931,6 +3900,147 @@ def _producer_mint_http_bearer(username: str = "admin", password: str = "passwor
     part1 = base64.b64encode(payload_meta).decode("utf-8").rstrip("=")
     part2 = base64.b64encode(payload_auth).decode("utf-8").rstrip("=")
     return f"{part1}.{part2}"
+
+def _slate_ips_from_request(raw_ips) -> List[str]:
+    if isinstance(raw_ips, str):
+        raw_ips = raw_ips.strip()
+        if not raw_ips:
+            return []
+        try:
+            parsed = json.loads(raw_ips)
+        except Exception:
+            parsed = [x.strip() for x in raw_ips.split(",")]
+    elif isinstance(raw_ips, list):
+        parsed = raw_ips
+    else:
+        parsed = []
+
+    out = []
+    seen = set()
+    for ip in parsed:
+        ip = str(ip or "").strip()
+        if not ip or ip in seen:
+            continue
+        try:
+            ipaddress.ip_address(ip)
+        except Exception:
+            continue
+        seen.add(ip)
+        out.append(ip)
+    return out
+
+def _slate_upload_one(ip: str, filename: str, blob: bytes, mimetype: str, timeout: float = 15.0) -> Dict[str, Any]:
+    username = CONFIG.get("username", "admin") or "admin"
+    password = CONFIG.get("password", "password") or "password"
+    url = f"http://{ip}/upload/priv"
+    headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=0)}"}
+    files = {"preImage": (filename, blob, mimetype)}
+    try:
+        resp = requests.post(url, files=files, headers=headers, timeout=timeout)
+        if resp.status_code in (401, 403):
+            headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=2)}"}
+            resp = requests.post(url, files=files, headers=headers, timeout=timeout)
+        ok = 200 <= resp.status_code < 300
+        detail = (resp.text or "")[:240]
+        return {"ok": ok, "status": resp.status_code, "detail": detail}
+    except Exception as e:
+        return {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
+
+def _slate_image_size(blob: bytes) -> Tuple[int, int]:
+    if blob.startswith(b"\x89PNG\r\n\x1a\n") and len(blob) >= 24:
+        return int.from_bytes(blob[16:20], "big"), int.from_bytes(blob[20:24], "big")
+    if blob.startswith(b"\xff\xd8"):
+        i = 2
+        while i + 9 < len(blob):
+            while i < len(blob) and blob[i] == 0xff:
+                i += 1
+            if i >= len(blob):
+                break
+            marker = blob[i]
+            i += 1
+            if marker in (0x01,) or 0xd0 <= marker <= 0xd9:
+                continue
+            if i + 2 > len(blob):
+                break
+            seg_len = int.from_bytes(blob[i:i+2], "big")
+            if seg_len < 2 or i + seg_len > len(blob):
+                break
+            if marker in (0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf):
+                if seg_len >= 7:
+                    height = int.from_bytes(blob[i+3:i+5], "big")
+                    width = int.from_bytes(blob[i+5:i+7], "big")
+                    return width, height
+                break
+            i += seg_len
+    return 0, 0
+
+@app.post("/api/slate_upload")
+def api_slate_upload():
+    try:
+        ips = _slate_ips_from_request(request.form.get("ips"))
+        if not ips:
+            return jsonify({"ok": False, "error": "select at least one encoder/decoder"}), 400
+        upload = request.files.get("file")
+        if not upload or not upload.filename:
+            return jsonify({"ok": False, "error": "missing image file"}), 400
+        ext = os.path.splitext(upload.filename)[1].lower()
+        if ext not in (".png", ".jpg", ".jpeg"):
+            return jsonify({"ok": False, "error": "image must be png or jpg"}), 400
+        blob = upload.read()
+        if not blob:
+            return jsonify({"ok": False, "error": "empty image file"}), 400
+        width, height = _slate_image_size(blob)
+        if (width, height) not in ((1280, 720), (1920, 1080)):
+            detail = f"{width}x{height}" if width and height else "unknown"
+            return jsonify({"ok": False, "error": f"image must be 1280x720 or 1920x1080 (got {detail})"}), 400
+        filename = "slate" + (".jpg" if ext == ".jpeg" else ext)
+        mimetype = upload.mimetype or ("image/png" if ext == ".png" else "image/jpeg")
+
+        results: Dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=min(8, len(ips))) as ex:
+            futs = {ex.submit(_slate_upload_one, ip, filename, blob, mimetype): ip for ip in ips}
+            for fut in as_completed(futs):
+                ip = futs[fut]
+                try:
+                    results[ip] = fut.result()
+                except Exception as e:
+                    results[ip] = {"ok": False, "error": str(e)}
+        return jsonify({"ok": any(r.get("ok") for r in results.values()), "results": results})
+    except Exception as e:
+        logging.exception("[slate_upload] failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.post("/api/slate_default")
+def api_slate_default():
+    try:
+        body = request.get_json(silent=True) or {}
+        ips = _slate_ips_from_request(body.get("ips"))
+        if not ips:
+            return jsonify({"ok": False, "error": "select at least one encoder/decoder"}), 400
+        timeout = float(body.get("timeout") or CONFIG.get("TIMEOUT", 3.0))
+        results: Dict[str, Any] = {}
+
+        def reset_one(ip: str) -> Dict[str, Any]:
+            resp = _ws_call_auth(ip, "ImageReset.Set", {}, timeout)
+            if resp is None:
+                return {"ok": False, "error": "device_no_response"}
+            if resp.get("error"):
+                err = resp.get("error")
+                return {"ok": False, "error": err if isinstance(err, str) else json.dumps(err)}
+            return {"ok": True, "response": resp.get("result", resp)}
+
+        with ThreadPoolExecutor(max_workers=min(8, len(ips))) as ex:
+            futs = {ex.submit(reset_one, ip): ip for ip in ips}
+            for fut in as_completed(futs):
+                ip = futs[fut]
+                try:
+                    results[ip] = fut.result()
+                except Exception as e:
+                    results[ip] = {"ok": False, "error": str(e)}
+        return jsonify({"ok": any(r.get("ok") for r in results.values()), "results": results})
+    except Exception as e:
+        logging.exception("[slate_default] failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.post("/api/producer/jsonrpc")
 def api_producer_jsonrpc():

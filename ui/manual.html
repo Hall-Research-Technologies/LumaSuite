@@ -1,0 +1,137 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>LumaSuite Manual</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
+  <link rel="stylesheet" href="matrix.css">
+  <style>
+    body { padding:24px; }
+    main { max-width:1040px; margin:0 auto 40px; }
+    h1 { margin:0; }
+    h2 { margin:0 0 10px; font-size:20px; }
+    h3 { margin:18px 0 8px; font-size:16px; }
+    p, li { color:var(--muted); line-height:1.55; }
+    ol, ul { margin-top:8px; }
+    .topbar { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:16px; }
+    .panel { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:18px; margin:12px 0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
+    .callout { border-left:3px solid var(--accent); padding:8px 12px; background:rgba(30,144,255,.08); border-radius:6px; }
+    a { color:#7cc4ff; }
+    code { color:#e5e7eb; background:var(--panel-2); border:1px solid var(--border); border-radius:4px; padding:1px 4px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <div>
+        <h1>LumaSuite Manual</h1>
+        <p>How to scan, configure, route, and save LumaStream systems.</p>
+      </div>
+      <a href="/ui/index.html">Back to Device Manager</a>
+    </div>
+
+    <section class="panel">
+      <h2>First-Time Setup</h2>
+      <ol>
+        <li>Open Device Manager.</li>
+        <li>Open the gear button and verify the password, websocket port, firmware path, static image path, and logo path.</li>
+        <li>Use Dark Mode in the gear popup if the display theme needs to change.</li>
+        <li>Choose the network adapter that matches the LumaStream subnet.</li>
+        <li>Enter a scan range such as <code>192.168.100.1/24</code> or <code>192.168.100.1-254</code>, then press Scan.</li>
+      </ol>
+      <div class="callout">Devices are tracked by MAC address when available. If DHCP changes a unit IP, rescan and LumaSuite updates the existing unit instead of creating a duplicate.</div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Device Manager Basics</h2>
+        <h3>Select Units</h3>
+        <p>Use the left checkboxes to select units for reboot, firmware update, password sync, NTP sync, and Slate Manager actions.</p>
+        <h3>Firmware Updates</h3>
+        <ol>
+          <li>Select the firmware file.</li>
+          <li>Select the target units.</li>
+          <li>Enable factory reset only when the job requires a clean device configuration.</li>
+          <li>Press Upgrade Selected and leave the app open until the status returns to idle or upgrade successful.</li>
+        </ol>
+        <h3>NTP Sync</h3>
+        <p>Select units, press Set NTP, choose timezone and server, then sync. The dashboard refreshes NTP values after scan or polling.</p>
+      </div>
+
+      <div class="panel">
+        <h2>Matrix Routing</h2>
+        <ol>
+          <li>Open Matrix Routing.</li>
+          <li>Pick an encoder/source for each decoder output.</li>
+          <li>Route changes are sent live and should behave like fast switching.</li>
+          <li>Use refresh if the device state was changed from outside LumaSuite.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Video Wall Workflow</h2>
+      <ol>
+        <li>Open Video Wall.</li>
+        <li>Create or select a saved wall.</li>
+        <li>Set Rows and Columns.</li>
+        <li>Assign one decoder to each display cell. Assigned decoders are hidden from other cells to prevent duplicate use.</li>
+        <li>Select the Wall Video Source. Sources are shown as <code>IP - stream name</code>.</li>
+        <li>Set display size and bezel values. If Apply to all is checked, the values apply to every assigned display. If unchecked, values apply only to the selected display.</li>
+        <li>Press Apply Saved Wall when building or restoring the complete wall layout.</li>
+      </ol>
+
+      <h3>Sync Source</h3>
+      <p>Use Sync Source when a wall is supposed to be on the selected source but one or more displays drifted. LumaSuite checks each decoder first. If a decoder already has the right stream and wall position, LumaSuite skips the write so video is not interrupted.</p>
+
+      <h3>Individual Display Breakout</h3>
+      <p>Inside a display cell, choose a source other than Wall Video to break that one display out of the wall. Selecting a new Wall Video Source snaps all displays back to Wall Video.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Saving Wall Configs By Job Site</h2>
+      <h3>Export</h3>
+      <ol>
+        <li>Open Video Wall.</li>
+        <li>Press Export Config.</li>
+        <li>Confirm the export popup.</li>
+        <li>Rename the downloaded JSON with the job-site name, for example <code>north-campus-lobby-video-walls.json</code>.</li>
+      </ol>
+
+      <h3>Import</h3>
+      <ol>
+        <li>Press Import Config.</li>
+        <li>Select a JSON that was exported from Video Wall.</li>
+        <li>Review the replacement popup.</li>
+        <li>Confirm only when you are ready to replace the current saved wall configs.</li>
+      </ol>
+      <div class="callout">Unit cache JSON and unrelated JSON files are rejected. Import is only for files marked as <code>lumasuite.video_walls</code>.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Production Studio</h2>
+      <ol>
+        <li>Select an encoder from the top dropdown. Encoders are shown as <code>IP - stream name</code>.</li>
+        <li>Use the preview to verify the selected encoder.</li>
+        <li>Adjust output, input, RTMP, ticker, static image, and logo controls as needed.</li>
+        <li>Most controls apply live. Use Save buttons where the panel provides them for preset or explicit push actions.</li>
+      </ol>
+      <h3>Slate Manager</h3>
+      <p>Open Slate Manager from Device Manager, select encoders or decoders, choose a 1280x720 or 1920x1080 image, and upload. Load Default and Save restores the factory image.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Troubleshooting</h2>
+      <ul>
+        <li>If adapters do not appear, reopen the app after connecting the network adapter and check the OS network settings.</li>
+        <li>If a device changed IP, rescan the subnet. MAC matching should update the existing unit.</li>
+        <li>If Video Wall shows Modified, press Refresh From Devices to compare the saved wall with device state.</li>
+        <li>If Sync Source would interrupt video, confirm the wall is Healthy first. Healthy displays should be skipped.</li>
+        <li>If an import fails, confirm the file was exported from Video Wall and contains <code>kind: "lumasuite.video_walls"</code>.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

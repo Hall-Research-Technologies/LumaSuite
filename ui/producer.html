@@ -19,16 +19,19 @@
     .nav-tab:hover { background:rgba(30,144,255,0.1); color:#fff; }
     .nav-tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
     :root{--bg:#1d232a;--card:#222a33;--panel:#222a33;--panel-2:#262f39;--fg:#e9eef5;--muted:#9aa7b4;--accent:#1e90ff;--danger:#e5534b;--border:rgba(255,255,255,0.08)}
-    body.light{--bg:#f7f8fb;--card:#fff;--panel:#fff;--panel-2:#f2f5f8;--fg:#0d1117;--muted:#5a6b7a;--border:rgba(0,0,0,.08)}
-    body.dark{--bg:#1d232a;--card:#222a33;--panel:#222a33;--panel-2:#262f39;--fg:#e9eef5;--muted:#9aa7b4;--accent:#1e90ff;--danger:#e5534b;--border:rgba(255,255,255,0.08)}
+    body.light{--bg:#f7f8fb;--card:#fff;--panel:#fff;--panel-2:#f2f5f8;--fg:#0d1117;--muted:#5a6b7a;--border:rgba(0,0,0,.08);color-scheme:light}
+    body.dark{--bg:#1d232a;--card:#222a33;--panel:#222a33;--panel-2:#262f39;--fg:#e9eef5;--muted:#9aa7b4;--accent:#1e90ff;--danger:#e5534b;--border:rgba(255,255,255,0.08);color-scheme:dark}
+    *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 Calibri,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-width:1044px}
-    .wrap{max-width:1200px;margin:20px auto 48px;padding:0 16px}
+    .wrap{max-width:1360px;margin:20px auto 48px;padding:0 16px}
     h1{margin:0 0 14px;font-size:22px;font-weight:600}
     .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .col{display:flex;flex-direction:column;gap:10px}
     .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px}
     .panel-title{font-weight:600;margin-bottom:8px;opacity:.9}
-    select,input[type=text],input[type=number],textarea{background:var(--panel-2);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;outline:none;font-size:14px}
+    select,input[type=text],input[type=password],input[type=number],textarea{background:var(--panel-2);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;outline:none;font-size:14px}
+    option{background:var(--panel-2);color:var(--fg)}
+    input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
     textarea{min-height:120px;width:100%;resize:vertical}
     input.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
     /* no spinners */
@@ -49,8 +52,8 @@
     .toggle .pill::after{content:"";position:absolute;top:50%;left:2px;width:15px;height:15px;margin-top:-7.5px;border-radius:50%;background:#d3d7dc;box-shadow:0 1px 1px rgba(0,0,0,.25);transition:left .16s ease,background .16s ease,box-shadow .16s ease}
     .toggle .pill.on{background:rgba(30,144,255,.25)!important;box-shadow:inset 0 0 0 2px rgba(30,144,255,.15)}
     .toggle .pill.on::after{left:18px;background:var(--accent)!important;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
-    .grid{display:grid;grid-template-columns:1fr 270px;gap:16px}
-    .stack{display:flex;flex-direction:column;gap:12px}
+    .grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:16px;align-items:start}
+    .stack{display:flex;flex-direction:column;gap:12px;min-width:0}
     #tickerRows.stack,#rtmpPanel.stack{gap:4px}
     /* Custom tooltip styling */
     .tooltip-info { position:relative; display:inline-block; }
@@ -138,7 +141,7 @@
   order: -1; /* Moves it to the far left */
   margin-right: 6px;
 }
-    .slot{padding:10px;border:1px dashed var(--border);border-radius:12px;background:var(--panel-2)}
+    .slot{padding:10px;border:1px dashed var(--border);border-radius:12px;background:var(--panel-2);max-width:100%}
     .badge{display:inline-block;background:var(--danger);color:#fff;padding:2px 6px;border-radius:999px;font-size:11px}
     .small{font-size:12px;color:var(--muted)}
     .w-port{width:6.2ch}
@@ -198,6 +201,7 @@
     .tab:hover { background:rgba(30,144,255,0.1); }
     .tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
     .gear-btn { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid var(--border); background:var(--panel-2); cursor:pointer; font-size:18px; color:var(--fg); }
+    #gear{display:none!important}
     .modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:20000; }
     .modal { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; width:520px; max-width:95%; color:var(--fg); }
     .modal h3 { margin:0 0 8px 0; }
@@ -234,6 +238,10 @@
             <span>🎬</span>
             <span>Production Studio</span>
           </span>
+          <a class="nav-tab" href="/ui/wall.html">
+            <span>🧱</span>
+            <span>Video Wall</span>
+          </a>
         </div>
       </div>
     </div>
@@ -332,6 +340,14 @@
     <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:520px;max-width:95%;color:var(--fg);">
     <form autocomplete="off">
     <h3 style="margin:0 0 8px 0;">Configuration</h3>
+    <div class="row" style="margin-bottom:8px;align-items:center;justify-content:space-between;gap:8px;">
+      <span class="small">App Version</span>
+      <span id="cfg_app_version" class="code small" style="user-select:text;">v?.?.?</span>
+    </div>
+    <div class="row" style="margin-bottom:8px;align-items:center;justify-content:space-between;gap:8px;">
+      <span class="small">Dark Mode</span>
+      <button id="dark_switch" class="switch on" type="button" aria-label="Toggle dark mode"><span class="knob"></span></button>
+    </div>
     <input type="text" name="username" autocomplete="username" style="display:none;" />
     <div class="row" style="margin-bottom:8px;align-items:center;gap:8px;">
       <label class="small" for="cfg_password">Password</label>
@@ -369,6 +385,9 @@
       </div>
       <div id="browse_hint" class="small" style="display:none;color:var(--muted);margin-top:6px;">
         If you cannot browse to the file locations, copy and paste the absolute path into the field.
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <a href="/ui/manual.html" target="_blank" rel="noopener" style="color:#7cc4ff;">Open LumaSuite Manual</a>
       </div>
       <div id="cfg_error" class="row" style="color:var(--danger);display:none;margin-top:6px;"></div>
       <div class="row" style="justify-content:flex-end;gap:8px;">
@@ -415,7 +434,17 @@
 
   // Gear modal logic
   (function initCfg(){
-    function openCfg(){ const d = document.getElementById('cfg_backdrop'); if(!d) return; d.style.display='flex'; document.getElementById('cfg_password').value = '';
+    function applyTheme(){ const dark = localStorage.getItem('dark') !== 'false'; document.body.classList.toggle('light', !dark); document.body.classList.toggle('dark', dark); const sw = document.getElementById('dark_switch'); if(sw) sw.classList.toggle('on', dark); }
+    function toggleDark(){ const sw = document.getElementById('dark_switch'); const isOn = sw && sw.classList.contains('on'); localStorage.setItem('dark', (!isOn).toString()); applyTheme(); }
+    async function updateConfigVersion(){
+      const el = document.getElementById('cfg_app_version');
+      if(!el) return;
+      try{
+        const d = await fetch('/api/app_version', {cache:'no-store'}).then(r=>r.json());
+        el.textContent = d && d.ok && d.version ? ('v' + d.version) : 'v?.?.?';
+      }catch(e){ el.textContent = 'v?.?.?'; }
+    }
+    function openCfg(){ const d = document.getElementById('cfg_backdrop'); if(!d) return; d.style.display='flex'; applyTheme(); updateConfigVersion(); document.getElementById('cfg_password').value = '';
       const err = document.getElementById('cfg_error'); if(err){ err.style.display='none'; err.textContent=''; }
       const hint = document.getElementById('browse_hint'); if(hint) hint.style.display = 'block';
       const MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"; // bullets
@@ -431,6 +460,7 @@
       if(toggle && inp){ toggle.onclick = async function(){ const show = inp.type === 'password'; inp.type = show ? 'text' : 'password'; if(show){ try{ const cfg2 = await (await fetch('/api/config?include_password=1',{cache:'no-store'})).json(); if(cfg2 && typeof cfg2.password === 'string') inp.value = cfg2.password; }catch(e){} } } }
     }
     var g=document.getElementById('gear'); if(g) g.addEventListener('click', openCfg);
+    var dark=document.getElementById('dark_switch'); if(dark) dark.addEventListener('click', toggleDark);
     var closeBtn = document.getElementById('cfg_close'); if(closeBtn) closeBtn.addEventListener('click', ()=>{ document.getElementById('cfg_backdrop').style.display='none'; const h=document.getElementById('browse_hint'); if(h) h.style.display='none'; });
     var back = document.getElementById('cfg_backdrop'); if(back) back.addEventListener('click', function(e){ if(e.target===this){ this.style.display='none'; const h=document.getElementById('browse_hint'); if(h) h.style.display='none'; } });
     var saveBtn = document.getElementById('cfg_save'); if(saveBtn) saveBtn.addEventListener('click', function(){
@@ -672,11 +702,16 @@
                 <th style="width:28px;"></th>
                 <th style="width:260px;text-align:left;">Ticker Text</th>
                 <th style="width:80px;text-align:center;">Location</th>
+                <th style="width:5ch;text-align:center;">H %</th>
+                <th style="width:5ch;text-align:center;">V %</th>
                 <th style="width:5ch;text-align:center;">Speed</th>
                 <th style="width:5ch;text-align:center;">Cycles</th>
                 <th style="width:5ch;text-align:center;">Size</th>
+                <th style="width:5ch;text-align:center;">Trans</th>
                 <th style="width:80px;text-align:center;">Direction</th>
+                <th style="width:28px;text-align:center;">Scroll</th>
                 <th style="width:28px;text-align:center;">Color</th>
+                <th style="width:56px;text-align:center;">Save</th>
                 <th style="width:28px;"></th>
               </tr>
             </thead>
@@ -689,6 +724,8 @@
           display: flex;
           flex-direction: column;
           align-items: flex-start;
+          overflow-x: auto;
+          max-width: 100%;
         }
         #panel-ticker .stack {
           align-items: flex-start;
@@ -850,15 +887,20 @@ window.closeFloatingPreview = function(){
 </script>
 
 <!-- Load Producer JS LAST -->
-<script src="/ui/producer.js?v=R14_FIXED_FULL"></script>
+<script src="/ui/dialogs.js?v=1"></script>
+<script src="/ui/producer.js?v=R20_STREAM_LABELS"></script>
 
 <!-- Connection Monitoring -->
 <script>
 let connectionCheckInterval = null;
 let heartbeatInterval = null;
 let lastSuccessfulHeartbeat = Date.now();
+let heartbeatInFlight = false;
+let consecutiveHeartbeatFailures = 0;
 const CONNECTION_TIMEOUT_MS = 15000;
 const HEARTBEAT_INTERVAL_MS = 5000;
+const HEARTBEAT_REQUEST_TIMEOUT_MS = 3000;
+const HEARTBEAT_FAILURE_LIMIT = 3;
 
 function showConnectionBanner() {
   const banner = document.getElementById("connection_banner");
@@ -879,26 +921,36 @@ function hideConnectionBanner() {
 function startConnectionMonitoring() {
   if(heartbeatInterval) return;
   
-  // Send heartbeat pings
-  heartbeatInterval = setInterval(async () => {
+  const checkHeartbeat = async () => {
+    if(heartbeatInFlight) return;
+    heartbeatInFlight = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), HEARTBEAT_REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch('/api/heartbeat', { cache: 'no-store' });
+      const response = await fetch('/api/heartbeat', { cache: 'no-store', signal: controller.signal });
       if(response.ok) {
         lastSuccessfulHeartbeat = Date.now();
-        console.log('[ConnectionMonitor] Heartbeat successful, hiding banner');
+        consecutiveHeartbeatFailures = 0;
         hideConnectionBanner();
+      } else {
+        consecutiveHeartbeatFailures++;
       }
     } catch(e) {
-      console.log('[ConnectionMonitor] Heartbeat failed:', e.message);
+      consecutiveHeartbeatFailures++;
+    } finally {
+      clearTimeout(timeout);
+      heartbeatInFlight = false;
     }
-  }, HEARTBEAT_INTERVAL_MS);
+  };
+
+  checkHeartbeat();
+  heartbeatInterval = setInterval(checkHeartbeat, HEARTBEAT_INTERVAL_MS);
   
   // Check if heartbeat has stalled
   if(connectionCheckInterval) return;
   connectionCheckInterval = setInterval(async () => {
     const timeSinceLastSuccess = Date.now() - lastSuccessfulHeartbeat;
-    if(timeSinceLastSuccess > CONNECTION_TIMEOUT_MS) {
-      console.log('[ConnectionMonitor] CONNECTION TIMEOUT - showing banner after', CONNECTION_TIMEOUT_MS, 'ms without heartbeat');
+    if(timeSinceLastSuccess > CONNECTION_TIMEOUT_MS && consecutiveHeartbeatFailures >= HEARTBEAT_FAILURE_LIMIT) {
       showConnectionBanner();
     }
   }, 2000);
