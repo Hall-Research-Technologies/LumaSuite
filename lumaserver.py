@@ -2788,6 +2788,7 @@ def api_clear_units():
 @APP.post("/api/remove_units")
 def api_remove_units():
     """Remove selected units from cache and all storage"""
+    global cache_generation
     data = request.get_json(silent=True) or {}
     ips_to_remove = data.get("ips") or []
     if not ips_to_remove:
@@ -2795,6 +2796,7 @@ def api_remove_units():
     
     try:
         with cache_lock:
+            cache_generation += 1
             removed_count = 0
             for ip in ips_to_remove:
                 if ip in cache_units:

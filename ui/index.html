@@ -2421,6 +2421,9 @@ async function removeSelected(){
   if (!ok) return;
 
   $("#up_status").textContent="removing selected devices...";
+  unitDataEpoch += 1;
+  stopRtmpPolling();
+  enableHeartbeat(false);
   
   try{
     const response = await fetch('/api/remove_units', {
