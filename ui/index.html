@@ -110,6 +110,7 @@
 </style>
 </head>
 <body>
+  <script src="/ui/dialogs.js?v=2"></script>
   <!-- Connection Status Banner -->
   <div id="connection_banner" style="display:none; position:fixed; top:0; left:0; right:0; background:#d32f2f; color:white; padding:12px 20px; font-weight:bold; text-align:center; z-index:10000; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
     ⚠️ Connection lost, check application.
@@ -668,6 +669,12 @@ function isAllowedPassword(value){
 <script>
 const $ = sel => document.querySelector(sel);
 const api = (p, opt={}) => fetch(p, opt).then(r => r.json());
+function lumaConfirm(options) {
+  if (window.lumaDialog && typeof window.lumaDialog.confirm === "function") {
+    return window.lumaDialog.confirm(options);
+  }
+  return Promise.resolve(window.confirm(options?.message || "Continue?"));
+}
 const producerRpc = (ip, method, params={}) => fetch('/api/producer/jsonrpc', {
   method: 'POST',
   headers: {'Content-Type': 'application/json'},
@@ -2274,7 +2281,7 @@ async function upgradeSelected(){
 
   const doReset = $("#reset_after").checked;
   if (doReset) {
-    const ok = await window.lumaDialog.confirm({
+    const ok = await lumaConfirm({
       title: "Factory Reset After Upgrade",
       message: "You have elected to FACTORY RESET the unit(s).\n\nAll settings will be lost.\nPasswords and configuration will need to be set again.\n\nProceed?",
       confirmText: "Proceed",
@@ -2397,7 +2404,7 @@ async function removeSelected(){
   const ips = getSelectedIPs();
   if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
 
-  const ok = await window.lumaDialog.confirm({
+  const ok = await lumaConfirm({
     title: "Remove Selected Devices",
     message: `You are about to PERMANENTLY REMOVE ${ips.length} device(s) from all storage.\n\nThis will delete the device(s) from cache and all files.\n\nProceed?`,
     confirmText: "Remove",
@@ -2444,7 +2451,7 @@ async function rebootSelected(){
   const ips = getSelectedIPs();
   if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
 
-  const ok = await window.lumaDialog.confirm({
+  const ok = await lumaConfirm({
     title: "Reboot Selected Devices",
     message: `You are about to reboot ${ips.length} device(s).\n\nProceed?`,
     confirmText: "Reboot"
@@ -2677,7 +2684,7 @@ async function submitPasswordSync(){
     $("#scan").addEventListener("click", scan);
     $("#stop_scan").addEventListener("click", stopScan);
   $("#clear_units").addEventListener("click", async()=>{
-    const clearOk = await window.lumaDialog.confirm({
+    const clearOk = await lumaConfirm({
       title: "Clear Units",
       message: "Clear all units from cache?\n\nThis will remove all device data.",
       confirmText: "Clear Units",
@@ -2867,7 +2874,7 @@ async function submitPasswordSync(){
       // Mark that we've shown the prompt (don't show again this session)
       sessionStorage.setItem(CLEAR_UNITS_PROMPT_SESSION_KEY, "1");
       
-      const shouldClearUnits = await window.lumaDialog.confirm({
+      const shouldClearUnits = await lumaConfirm({
         title: "Clear Units For Optimal Performance",
         message: "Clear cached units before scanning for the most reliable results?",
         confirmText: "Clear Units"

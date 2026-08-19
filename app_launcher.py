@@ -49,7 +49,7 @@ sys.excepthook = _log_unhandled_exception
 # Try to import GUI libraries
 try:
     import tkinter as tk
-    from tkinter import messagebox
+    from tkinter import messagebox, ttk
     from PIL import Image, ImageTk
     import pystray
 except ImportError as e:
@@ -252,37 +252,52 @@ class AppWindow:
         btn_frame = tk.Frame(main_frame, bg="#000000")
         btn_frame.pack(pady=14)
         
-        # Open Browser button with better styling
-        self.open_btn = tk.Button(
-            btn_frame,
-            text="Open Browser",
-            command=self.open_browser,
-            width=14,
-            bg="#2196F3",
-            fg="white",
-            font=("Helvetica", 10, "bold"),
-            relief="flat",
-            padx=10,
-            pady=6,
-            cursor="hand2",
-            state="disabled"
-        )
+        if sys.platform == 'win32':
+            self.open_btn = tk.Button(
+                btn_frame,
+                text="Open Browser",
+                command=self.open_browser,
+                width=14,
+                bg="#2196F3",
+                fg="white",
+                font=("Helvetica", 10, "bold"),
+                relief="flat",
+                padx=10,
+                pady=6,
+                cursor="hand2",
+                state="disabled"
+            )
+        else:
+            self.open_btn = ttk.Button(
+                btn_frame,
+                text="Open Browser",
+                command=self.open_browser,
+                width=14,
+                state="disabled"
+            )
         self.open_btn.grid(row=0, column=0, padx=6)
         
-        # Exit button with better styling
-        exit_btn = tk.Button(
-            btn_frame,
-            text="Exit",
-            command=self.on_close,
-            width=14,
-            bg="#f44336",
-            fg="white",
-            font=("Helvetica", 10, "bold"),
-            relief="flat",
-            padx=10,
-            pady=6,
-            cursor="hand2"
-        )
+        if sys.platform == 'win32':
+            exit_btn = tk.Button(
+                btn_frame,
+                text="Exit",
+                command=self.on_close,
+                width=14,
+                bg="#f44336",
+                fg="white",
+                font=("Helvetica", 10, "bold"),
+                relief="flat",
+                padx=10,
+                pady=6,
+                cursor="hand2"
+            )
+        else:
+            exit_btn = ttk.Button(
+                btn_frame,
+                text="Exit",
+                command=self.on_close,
+                width=14
+            )
         exit_btn.grid(row=0, column=1, padx=6)
         
         # Info label at bottom
