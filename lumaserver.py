@@ -1053,6 +1053,7 @@ PRODUCER2_STATE_FILE = os.path.join(DATA_DIR, "producer2_state.json")
 # in-memory cache structures (needed before autoload)
 cache_units: Dict[str, Dict[str, Any]] = {}
 cache_lock = threading.Lock()
+cache_generation = 0
 
 def _ensure_json_file(path: str, default: Any):
     """Create a state file if it is missing; leave existing files untouched."""
@@ -2770,8 +2771,10 @@ def api_heartbeat():
 
 @APP.post("/api/clear_units")
 def api_clear_units():
+    global cache_generation
     # Atomic: clear memory and file together under single lock
     with cache_lock:
+        cache_generation += 1
         cache_units.clear()
         try:
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
@@ -3025,6 +3028,7 @@ def _scan_one(ip: str) -> Optional[Dict[str, Any]]:
 @APP.post("/api/scan")
 def api_scan():
     data = request.get_json(silent=True) or {}
+    global cache_generation
     logging.info(f"===== [API_SCAN] STARTING - received targets: {data.get('targets')} =====")
     logging.debug(f"[api_scan] received data: {data}")
     targets = data.get("targets") or ""
@@ -3050,10 +3054,14 @@ def api_scan():
     start = time.time()
     counts = {"scanned":0,"added":0,"updated":0}
     errors = []  # Track authentication and other errors
+    with cache_lock:
+        scan_generation = cache_generation
 
     # Build MAC-to-IP index once for O(1) lookups (prevents O(n²) complexity)
     mac_to_ip_index = {}
     with cache_lock:
+        if cache_generation != scan_generation:
+            return jsonify({"ok": True, "duration": 0, "scanned": 0, "units": list(cache_units.values()), "errors": errors, "stale": True})
         for cached_ip, cached_unit in cache_units.items():
             cached_mac = (cached_unit.get("mac") or "").strip().lower()
             if cached_mac:
@@ -3108,6 +3116,9 @@ def api_scan():
                 continue
             
             with cache_lock:
+                if cache_generation != scan_generation:
+                    logging.info("[api_scan] cache was cleared during scan; ignoring stale scan result")
+                    continue
                 # Determine if this IP already existed OR if another IP had same MAC (IP change)
                 existed = ip in cache_units
                 existing_unit = cache_units.get(ip, {})
@@ -3139,13 +3150,17 @@ def api_scan():
                     logging.info(f"[scan-fast] mac {mac_new} moved {replaced_old_ip} -> {ip}")
 
     dur = round(time.time()-start, 2)
-    _persist_units_cache()
     with cache_lock:
+        stale = cache_generation != scan_generation
         all_units = list(cache_units.values())
+    if stale:
+        logging.info("[api_scan] finished stale scan after clear; skipping cache persist")
+    else:
+        _persist_units_cache()
     logging.info(f"[scan-fast] done {counts} errors={len(errors)} duration={dur}s total_mem={len(all_units)}")
     
     # Return errors along with units
-    return jsonify({"ok": True, "duration": dur, "scanned": counts["scanned"], "units": all_units, "errors": errors})
+    return jsonify({"ok": True, "duration": dur, "scanned": counts["scanned"], "units": all_units, "errors": errors, "stale": stale})
 
 # -------- misc endpoints --------
 @APP.post("/api/tcp_probe")

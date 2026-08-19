@@ -751,6 +751,7 @@ try { localStorage.removeItem("units_cache"); } catch {}
 let units = [];
 const unitMap = new Map();
 const selectedUnitIPs = new Set();
+let unitDataEpoch = 0;
 let sortKey = "ip";
 let sortDir = "asc";
 
@@ -1358,9 +1359,11 @@ function cleanAdapterName(name){
 async function rescanIPs(ips){
   if(!ips || !ips.length) return;
   const targets = ips.join(",");
+  const requestEpoch = unitDataEpoch;
   try{
     const resp = await fetch('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets})});
     const data = await resp.json();
+    if(requestEpoch !== unitDataEpoch || data.stale) return;
     const rows = data.units || data.rows || [];
     units = mergeByIP(units, rows);
     saveLocal(units);
@@ -1430,6 +1433,7 @@ async function scan(){
   
   // Create new AbortController for this scan
   scanAbortController = new AbortController();
+  const requestEpoch = unitDataEpoch;
   const quietState = beginScanQuietMode();
   
   el.innerHTML=`scanning <span class="spinner"></span>`;
@@ -1448,6 +1452,10 @@ async function scan(){
     console.log("[SCAN] Response received, status:", resp.status);
     const data = await resp.json();
     console.log("[SCAN] Response data:", data);
+    if(requestEpoch !== unitDataEpoch || data.stale) {
+      console.log("[SCAN] Ignoring stale scan response after units were cleared");
+      return;
+    }
     const rows = data.units || data.rows || [];
     const errors = data.errors || [];
     console.log("[SCAN] Units:", rows.length, "Errors:", errors.length);
@@ -2695,6 +2703,9 @@ async function submitPasswordSync(){
     }
     const statusEl = $("#scan_status");
     if (statusEl) statusEl.textContent = "Clearing units...";
+    unitDataEpoch += 1;
+    stopRtmpPolling();
+    enableHeartbeat(false);
     try {
       const response = await api("/api/clear_units", {method:"POST"});
       if (response && response.ok) {
@@ -2881,6 +2892,9 @@ async function submitPasswordSync(){
       });
       if (shouldClearUnits) {
         try {
+          unitDataEpoch += 1;
+          stopRtmpPolling();
+          enableHeartbeat(false);
           const clearResp = await api("/api/clear_units", { method: "POST" });
           if (clearResp && clearResp.ok) {
             units = [];
