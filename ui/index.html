@@ -470,6 +470,8 @@ function isAllowedPassword(value){
 
 // Configuration modal logic (index page)
 (function initCfg(){
+  const PASSWORD_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+
   async function updateConfigVersion(){
     const el = document.getElementById('cfg_app_version');
     if(!el) return;
@@ -496,10 +498,9 @@ function isAllowedPassword(value){
     const pwToggle = document.getElementById('cfg_pw_toggle');
     if(pwInput) pwInput.type = 'password';
     if(pwToggle) pwToggle.textContent = '👁️';
-    const MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
     fetch('/api/config').then(r=>r.json()).then(cfg=>{
       if(cfg){
-        const inp = document.getElementById('cfg_password'); if(inp) inp.value = MASK;
+        const inp = document.getElementById('cfg_password'); if(inp) inp.value = PASSWORD_MASK;
         const hashEl = document.getElementById('cfg_password_hash');
         if(hashEl) hashEl.textContent = (cfg.password_hash || '(unavailable)');
         if(cfg.ws_port) document.getElementById('cfg_ws_port').value = String(cfg.ws_port);
@@ -543,7 +544,8 @@ function isAllowedPassword(value){
   const saveBtn = document.getElementById('cfg_save');
   if(saveBtn) saveBtn.addEventListener('click', function(){
     const passwordValue = document.getElementById('cfg_password').value;
-    if(passwordValue && !isAllowedPassword(passwordValue)){
+    const passwordChanged = passwordValue && passwordValue !== PASSWORD_MASK;
+    if(passwordChanged && !isAllowedPassword(passwordValue)){
       const errDiv = document.getElementById('cfg_error');
       if(errDiv){
         errDiv.textContent = 'Password must be at least 6 characters and may only include A-Z, a-z, 0-9, and !@#$%^&*';
@@ -554,13 +556,13 @@ function isAllowedPassword(value){
 
     const payload = {
       username:'admin',
-      password: passwordValue,
       ws_port: parseInt(document.getElementById('cfg_ws_port').value || '80', 10),
       concurrency: parseInt(document.getElementById('cfg_concurrency').value || '6', 10),
       logos_path: document.getElementById('cfg_logos_path').value,
       firmware_path: document.getElementById('cfg_firmware_path').value,
       imagestream_path: document.getElementById('cfg_imagestream_path').value
     };
+    if(passwordChanged) payload.password = passwordValue;
     const errDiv = document.getElementById('cfg_error');
     if(errDiv){ errDiv.style.display='none'; errDiv.textContent=''; }
     fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -584,7 +586,7 @@ function isAllowedPassword(value){
         }
         try{ await r.json(); }catch(e){}
         // Update appConfig with saved values
-        appConfig.password = payload.password;
+        if(passwordChanged) appConfig.password = payload.password;
         appConfig.ws_port = payload.ws_port;
         appConfig.concurrency = payload.concurrency;
         const b=document.getElementById('cfg_backdrop');
