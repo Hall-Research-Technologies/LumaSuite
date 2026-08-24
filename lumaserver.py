@@ -92,7 +92,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 # --- CSV Export Endpoint for Device Manager ---
 
@@ -725,6 +725,17 @@ def _vw_apply_bezel_cell(wall: Dict[str, Any], cell: Dict[str, Any], use_cell_ov
     r = _vw_set_bezel_if_needed(ip, params)
     return {"ok": bool(r.get("ok")), "ip": ip, "label": unit.get("label"), "steps": [{"step": "sync bezel" if r.get("skipped") else "bezel", **r}]}
 
+def _vw_apply_rotation_cell(cell: Dict[str, Any]) -> Dict[str, Any]:
+    did = cell.get("decoder_id")
+    if not did:
+        return {"ok": False, "error": "display has no decoder"}
+    unit = _vw_find_unit(did)
+    if not unit:
+        return {"ok": False, "error": "decoder not discovered"}
+    ip = unit.get("ip")
+    r = _vw_set_rotation_if_needed(ip, int(cell.get("rotation") or 0))
+    return {"ok": bool(r.get("ok")), "ip": ip, "label": unit.get("label"), "steps": [{"step": "sync rotation" if r.get("skipped") else "rotation", **r}]}
+
 @APP.get("/api/video_wall/state")
 def api_video_wall_state():
     data = _load_video_wall_state()
@@ -881,6 +892,32 @@ def api_video_wall_bezel():
                 results[did] = fut.result()
             except Exception as e:
                 results[did] = {"ok": False, "error": str(e)}
+    success_count = sum(1 for r in results.values() if r.get("ok"))
+    overall = bool(results) and success_count == len(results)
+    return jsonify({"ok": overall, "results": results, "target_count": len(targets), "success_count": success_count})
+
+@APP.post("/api/video_wall/rotation")
+def api_video_wall_rotation():
+    body = request.get_json(silent=True) or {}
+    wall = body.get("wall")
+    if not isinstance(wall, dict):
+        return jsonify({"ok": False, "error": "missing wall"}), 400
+    row = int(body.get("row") or 0)
+    column = int(body.get("column") or 0)
+    targets = [
+        c for c in (wall.get("cells") or [])
+        if c.get("decoder_id") and int(c.get("row") or 0) == row and int(c.get("column") or 0) == column
+    ]
+    if not targets:
+        return jsonify({"ok": False, "error": "no assigned display to update"}), 400
+
+    results = {}
+    for cell in targets:
+        did = cell.get("decoder_id")
+        try:
+            results[did] = _vw_apply_rotation_cell(cell)
+        except Exception as e:
+            results[did] = {"ok": False, "error": str(e)}
     success_count = sum(1 for r in results.values() if r.get("ok"))
     overall = bool(results) and success_count == len(results)
     return jsonify({"ok": overall, "results": results, "target_count": len(targets), "success_count": success_count})
@@ -2593,8 +2630,6 @@ def api_ntp_profile():
         try:
             ntp_settings = _read_ntp_settings(ip)
             if ntp_settings:
-                clock_resp = _ws_call_auth(ip, "SystemCurrentTime.Get", {}, 4.0) or {}
-                clock = clock_resp.get("result") or {}
                 raw_zones = ntp_settings.get("timezonelist") or []
                 zones = [zone if isinstance(zone, dict) else {"name": str(zone)} for zone in raw_zones]
                 return jsonify({
@@ -2603,7 +2638,7 @@ def api_ntp_profile():
                     "zones": zones or [{"name": ntp_settings.get("timezone") or "UTC"}],
                     "timezone": ntp_settings.get("timezone") or "UTC",
                     "ntp_server": ntp_settings.get("ntp_server") or "",
-                    "datetime": clock.get("datetime") if isinstance(clock, dict) else "",
+                    "datetime": ntp_settings.get("datetime") or ntp_settings.get("device_datetime") or "",
                 })
         except Exception as e:
             logging.debug(f"[ntp_profile] {ip}: {e}")
@@ -2896,6 +2931,8 @@ def _is_empty_value(v):
         return True
     return False
 
+CLEARABLE_SCAN_FIELDS = {"ntp_server", "ntpserver"}
+
 def _has_empty_values(obj, max_depth=3, current_depth=0):
     """Recursively check if a nested structure contains empty/null values (used for retry decision)."""
     if current_depth >= max_depth:
@@ -2934,8 +2971,9 @@ def _deep_merge_unit(existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[str,
             # If both are dicts, recursively merge
             if isinstance(existing_val, dict) and isinstance(new_val, dict):
                 merged[key] = _deep_merge_unit(existing_val, new_val)
-            # If new value is not empty, use it; otherwise keep existing
-            elif not _is_empty_value(new_val):
+            # If new value is not empty, use it; otherwise keep existing.
+            # Some device fields are legitimately blank and must clear stale cache.
+            elif key in CLEARABLE_SCAN_FIELDS or not _is_empty_value(new_val):
                 merged[key] = new_val
             # else: new_val is empty, keep existing_val
     

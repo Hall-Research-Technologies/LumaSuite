@@ -1,25 +1,22 @@
-# LumaSuite v1.0.5 Release Notes
+# LumaSuite v1.0.6 Release Notes
 
 ## Highlights
 
-LumaSuite v1.0.5 adds the Video Wall workflow and tightens release readiness for field use. Installers can save wall layouts, export the full wall configuration JSON for a job site, import it later, and restore wall behavior after units are cleared or rescanned.
+LumaSuite v1.0.6 tightens live Device Manager behavior and cache accuracy. The dashboard clock now runs locally from one stable source device, polling rebases that clock without jumping between units, and NTP cache updates correctly clear stale server names when a device reports an intentionally blank server.
 
 ## What's New
 
-- Video Wall page with saved wall layouts, decoder assignment, display source control, display/bezel settings, refresh-from-devices, and source sync.
-- Video wall export downloads the entire wall config file. Import only accepts LumaSuite video wall config JSON and replaces the existing saved wall configurations after confirmation.
-- Device Manager polling now remembers whether Poll Units was on or off when returning to the page.
-- Configurator popups now show the app version and contain the Dark Mode control.
-- Manual was rewritten as a how-to guide and linked from the configurator popup.
-- Encoder/source display format was changed to use IP and stream name where applicable.
+- Device Date/Time now ticks locally in the browser and rebases from the selected device, or from one sticky fallback device when no row is selected.
+- Video Wall rotation can be applied to assigned displays and checked during refresh/reporting.
+- Matrix, Producer, Video Wall, and Device Manager refresh paths defer table or panel rerenders while the user is actively editing controls.
+- Matrix and Producer device lists now reflect the shared backend cache without hiding devices solely because another page marked them offline.
 
 ## Fixes
 
-- Source sync skips decoders that are already subscribed to the selected source to avoid unnecessary video freezes.
-- Video wall state is stored in `video_walls.json` with a guarded file kind so unrelated JSON imports are rejected.
-- Adapter discovery includes additional OS-friendly paths for packaged builds.
-- Production Studio gear icon was removed from the visible UI.
-- Producer logo positioning and ticker behavior received focused fixes and test coverage.
+- Prevented the dashboard clock from jumping forward and backward by locking it to a single source IP unless selection changes.
+- Removed an extra `SystemCurrentTime.Get` call from `/api/ntp_profile`.
+- Allowed blank `ntp_server` and `ntpserver` scan values to overwrite stale cached values.
+- Ignored local `*.code-workspace` IDE files so they are not accidentally included in release commits.
 
 ## Build And Automation
 
@@ -30,5 +27,4 @@ The release workflow validates Python and JavaScript before building artifacts f
 - macOS Intel
 - macOS Apple Silicon
 
-The Windows executable was built locally at `dist/Windows/LumaSuite.exe`.
-
+Local release validation was run before tagging this release.

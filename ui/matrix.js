@@ -10,6 +10,26 @@ document.addEventListener('DOMContentLoaded', function() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ip, method, params, timeout })
   }).then(r => r.json());
+  let matrixRenderDeferred = false;
+
+  function isMatrixLiveControlActive() {
+    const active = document.activeElement;
+    return !!(active && active.closest && active.closest('#matrix') && active.matches('input,select,textarea'));
+  }
+
+  async function requestRenderMatrix(force = false) {
+    if (!force && isMatrixLiveControlActive()) {
+      matrixRenderDeferred = true;
+      return;
+    }
+    matrixRenderDeferred = false;
+    await renderMatrix();
+  }
+
+  function flushDeferredMatrixRender() {
+    if (!matrixRenderDeferred || isMatrixLiveControlActive()) return;
+    requestRenderMatrix(true).catch(e => logDebug('Deferred matrix render failed', e));
+  }
 
   // Wire up filter boxes ONCE
   const encFilterInput = document.getElementById('encFilterInput');
@@ -93,10 +113,10 @@ document.addEventListener('DOMContentLoaded', function() {
   // Render matrix immediately from cache, then poll live and update
   async function refreshAndRenderMatrix() {
     // 1. Render immediately from cache
-    await renderMatrix();
+    await requestRenderMatrix();
     // 2. Poll live device state in background, then re-render
     fetch('/api/refresh_matrix_state', { method: 'POST' })
-      .then(() => renderMatrix())
+      .then(() => requestRenderMatrix())
       .catch(e => logDebug('Error refreshing matrix state', e));
   }
 
@@ -118,6 +138,10 @@ document.addEventListener('DOMContentLoaded', function() {
       toast('Matrix refreshed', true);
     });
   }
+
+  document.addEventListener('focusout', () => {
+    setTimeout(flushDeferredMatrixRender, 150);
+  });
 
 
 
@@ -213,19 +237,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const data = await res.json();
     console.debug('[fetchUnits] Response:', data);
     let units = (data.units || []);
-    
-    // Filter out offline devices based on index page status
-    try {
-      const statusMap = JSON.parse(localStorage.getItem('status_map_v1') || '{}');
-      units = units.filter(u => {
-        const status = statusMap[u.ip];
-        // Hide if marked as offline
-        return !status || status.text !== 'offline';
-      });
-      console.debug('[fetchUnits] Filtered out offline devices');
-    } catch(e) {
-      console.warn('[fetchUnits] Failed to filter offline devices:', e);
-    }
     
     // Check both type and role fields for encoder/decoder/switcher classification
     const typeOrRole = (u) => `${(u.type||'')} ${(u.role||'')} ${(u.model||'')}`.toLowerCase();
@@ -474,6 +485,13 @@ document.addEventListener('DOMContentLoaded', function() {
         // Determine which decoders to route: all checked, or just this one
         const group = Array.from(window.selectedDecoders || []);
         const targets = group.length > 0 && group.includes(decIp) ? group : [decIp];
+        const applyRouteSelection = (targetIps, encoderIp) => {
+          targetIps.forEach(targetIp => {
+            const rowRadios = tbody.querySelectorAll(`input.route-radio[data-dec-ip="${CSS.escape(targetIp)}"]`);
+            rowRadios.forEach(radio => { radio.checked = radio.getAttribute('data-enc-ip') === encoderIp; });
+          });
+        };
+        applyRouteSelection(targets, encIp);
         
         // Validate encoder profile for CS31 compatibility
         const getEncoderEncodeMode = (encUnit) => {
@@ -607,7 +625,7 @@ document.addEventListener('DOMContentLoaded', function() {
           if (confirmed) {
             // Single backend refresh and single renderMatrix call
             await fetch('/api/refresh_matrix_state', { method: 'POST' });
-            await renderMatrix();
+            await requestRenderMatrix(true);
           }
         }
       }

@@ -226,6 +226,10 @@ let pollNow = false;
   let pendingLogo = false;
   let pendingTicker = false;
   let pendingRtmp = false;
+  function isProducerLiveFieldActive() {
+    const active = document.activeElement;
+    return !!(active && active.closest && active.closest("select, input, textarea"));
+  }
   let lastLogoResolutionRecalc = "";
   let savedProfileBeforeRtmp = null;  // Track profile before RTMP is enabled
 
@@ -328,18 +332,6 @@ fetch = async function(url, opts){
       const arr = JSON.parse(text);
       let units = Array.isArray(arr) ? arr :
                   Array.isArray(arr?.units) ? arr.units : [];
-
-      // Filter out offline devices based on index page status
-      try {
-        const statusMap = JSON.parse(localStorage.getItem('status_map_v1') || '{}');
-        units = units.filter(u => {
-          const status = statusMap[u.ip];
-          // Hide if marked as offline
-          return !status || status.text !== 'offline';
-        });
-      } catch(e) {
-        console.warn('[producer] Failed to filter offline devices:', e);
-      }
 
       state.units = units;
       state.encs = units.filter(u => (u.role || u.type || "").toLowerCase() === "encoder");
@@ -2194,13 +2186,13 @@ function paintTickerRows(){
           profileSel.value = modeVal;
         }
         // Lock profile dropdown if RTMP is enabled
-        if (profileSel) {
+        if (profileSel && document.activeElement !== profileSel && !isProducerLiveFieldActive()) {
           profileSel.disabled = !!(st.rtmp && st.rtmp.enable);
         }
     }
       // Lock HDCP dropdown if RTMP is enabled
       const hdcpSel = $("#selHdcp");
-      if (hdcpSel) {
+      if (hdcpSel && document.activeElement !== hdcpSel && !isProducerLiveFieldActive()) {
         hdcpSel.disabled = !!(st.rtmp && st.rtmp.enable);
       }
     }

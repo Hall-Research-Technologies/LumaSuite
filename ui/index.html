@@ -721,6 +721,78 @@ function saveLocal(rows){}
 function tolerantRows(payload){ if(!payload) return []; if(Array.isArray(payload)) return payload; if(payload.units) return payload.units; if(payload.rows) return payload.rows; if(payload.value && Array.isArray(payload.value)) return payload.value; return []; }
 function normalizeMac(value){ return String(value || "").replace(/[^0-9a-f]/gi, "").toLowerCase(); }
 function byIP(rows){ const m=new Map(); (rows||[]).forEach(r=> r&&r.ip && m.set(r.ip, r)); return m; }
+const pendingUnitFields = new Map();
+
+function fieldValue(row, path){
+  return path.split(".").reduce((cur, key) => cur && typeof cur === "object" ? cur[key] : undefined, row);
+}
+
+function setFieldValue(row, path, value){
+  const parts = path.split(".");
+  let cur = row;
+  for(let i = 0; i < parts.length - 1; i++){
+    const key = parts[i];
+    if(!cur[key] || typeof cur[key] !== "object") cur[key] = {};
+    cur = cur[key];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+function sameFieldValue(a, b){
+  if(a == null && b == null) return true;
+  return String(a ?? "") === String(b ?? "");
+}
+
+function setPendingUnitFields(ip, fields, ttlMs = 30000){
+  if(!ip || !fields) return;
+  const current = pendingUnitFields.get(ip) || { fields: {}, expires: 0 };
+  Object.assign(current.fields, fields);
+  current.expires = Math.max(current.expires || 0, Date.now() + ttlMs);
+  pendingUnitFields.set(ip, current);
+}
+
+function clearPendingUnitFields(ip, paths){
+  const pending = pendingUnitFields.get(ip);
+  if(!pending) return;
+  for(const path of paths || Object.keys(pending.fields)) delete pending.fields[path];
+  if(!Object.keys(pending.fields).length) pendingUnitFields.delete(ip);
+}
+
+function applyPendingUnitFields(row){
+  if(!row || !row.ip) return row;
+  const pending = pendingUnitFields.get(row.ip);
+  if(!pending) return row;
+  if(Date.now() > pending.expires){
+    pendingUnitFields.delete(row.ip);
+    return row;
+  }
+  for(const [path, value] of Object.entries(pending.fields)){
+    if(sameFieldValue(fieldValue(row, path), value)) {
+      delete pending.fields[path];
+    } else {
+      setFieldValue(row, path, value);
+    }
+  }
+  if(!Object.keys(pending.fields).length) pendingUnitFields.delete(row.ip);
+  return row;
+}
+
+function updateUnitFields(ip, fields){
+  if(!ip || !fields) return;
+  const row = units.find(unit => unit.ip === ip);
+  if(row){
+    for(const [path, value] of Object.entries(fields)) setFieldValue(row, path, value);
+  }
+  const live = unitMap.get(ip);
+  if(live){
+    for(const [path, value] of Object.entries(fields)) setFieldValue(live, path, value);
+  }
+}
+
+function applyPendingToRows(rows){
+  return (rows || []).map(row => applyPendingUnitFields(row));
+}
+
 function mergeByIP(a,b){
   const m=byIP(a);
   const macToIp=new Map();
@@ -743,7 +815,7 @@ function mergeByIP(a,b){
     m.set(r.ip, Object.assign({}, prev, r));
     if(mac) macToIp.set(mac, r.ip);
   });
-  return Array.from(m.values());
+  return applyPendingToRows(Array.from(m.values()));
 }
 
 // On page load, clear any localStorage cache to avoid stale units
@@ -872,7 +944,7 @@ function renderRows(list){
     // Add editable hostname input
     const hostnameInput = document.createElement('input');
     hostnameInput.type = 'text';
-    hostnameInput.className = 'hostname-input';
+    hostnameInput.className = 'hostname-input unit-field-control';
     hostnameInput.value = u.hostname || "";
     hostnameInput.style.cssText = 'width:140px;padding:2px;margin-right:4px;';
     hostnameInput.title = 'Click to edit hostname';
@@ -890,20 +962,25 @@ function renderRows(list){
         return;
       }
       
+      setPendingUnitFields(u.ip, { hostname: newHostname });
+      updateUnitFields(u.ip, { hostname: newHostname });
       try {
         const result = await setHostname(u.ip, newHostname);
         if (!result.ok) {
           alert('Failed to set hostname: ' + result.error);
+          clearPendingUnitFields(u.ip, ["hostname"]);
+          updateUnitFields(u.ip, { hostname: oldHostname });
           e.target.value = oldHostname;
         } else {
           u.hostname = result.hostname;
-          // Update in units list
-          const unitIndex = units.findIndex(unit => unit.ip === u.ip);
-          if (unitIndex !== -1) units[unitIndex].hostname = result.hostname;
+          setPendingUnitFields(u.ip, { hostname: result.hostname });
+          updateUnitFields(u.ip, { hostname: result.hostname });
           await refreshAfterSetting([u.ip]);
         }
       } catch (err) {
         alert('Error setting hostname: ' + err.message);
+        clearPendingUnitFields(u.ip, ["hostname"]);
+        updateUnitFields(u.ip, { hostname: oldHostname });
         e.target.value = oldHostname;
       }
     });
@@ -923,7 +1000,7 @@ function renderRows(list){
     if (isEncoder) {
       streamnameInput = document.createElement('input');
       streamnameInput.type = 'text';
-      streamnameInput.className = 'streamname-input';
+      streamnameInput.className = 'streamname-input unit-field-control';
       streamnameInput.value = (u.enc?.video?.streamname || u.enc?.audio?.streamname) || "";
       streamnameInput.style.cssText = 'width:140px;padding:2px;margin-right:4px;';
       streamnameInput.title = 'Click to edit streamname';
@@ -941,31 +1018,43 @@ function renderRows(list){
           return;
         }
         
+        setPendingUnitFields(u.ip, {
+          "enc.video.streamname": newStreamname,
+          "enc.audio.streamname": newStreamname
+        });
+        updateUnitFields(u.ip, {
+          "enc.video.streamname": newStreamname,
+          "enc.audio.streamname": newStreamname
+        });
         try {
           const result = await setStreamname(u.ip, newStreamname);
           if (!result.ok) {
             alert('Failed to set streamname: ' + result.error);
+            clearPendingUnitFields(u.ip, ["enc.video.streamname", "enc.audio.streamname"]);
+            updateUnitFields(u.ip, {
+              "enc.video.streamname": oldStreamname,
+              "enc.audio.streamname": oldStreamname
+            });
             e.target.value = oldStreamname;
           } else {
             // Update data structures
-            if (!u.enc) u.enc = {};
-            if (!u.enc.video) u.enc.video = {};
-            if (!u.enc.audio) u.enc.audio = {};
-            u.enc.video.streamname = result.streamname;
-            u.enc.audio.streamname = result.streamname;
-            
-            const unitIndex = units.findIndex(unit => unit.ip === u.ip);
-          if (unitIndex !== -1) {
-              if (!units[unitIndex].enc) units[unitIndex].enc = {};
-              if (!units[unitIndex].enc.video) units[unitIndex].enc.video = {};
-              if (!units[unitIndex].enc.audio) units[unitIndex].enc.audio = {};
-              units[unitIndex].enc.video.streamname = result.streamname;
-              units[unitIndex].enc.audio.streamname = result.streamname;
-            }
+            setPendingUnitFields(u.ip, {
+              "enc.video.streamname": result.streamname,
+              "enc.audio.streamname": result.streamname
+            });
+            updateUnitFields(u.ip, {
+              "enc.video.streamname": result.streamname,
+              "enc.audio.streamname": result.streamname
+            });
             await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
           alert('Error setting streamname: ' + err.message);
+          clearPendingUnitFields(u.ip, ["enc.video.streamname", "enc.audio.streamname"]);
+          updateUnitFields(u.ip, {
+            "enc.video.streamname": oldStreamname,
+            "enc.audio.streamname": oldStreamname
+          });
           e.target.value = oldStreamname;
         }
       });
@@ -993,6 +1082,8 @@ function renderRows(list){
       danteChk.style.cursor = 'pointer';
       danteChk.addEventListener('change', async (e) => {
         const enabled = e.target.checked;
+        setPendingUnitFields(u.ip, { dante_enabled: enabled });
+        updateUnitFields(u.ip, { dante_enabled: enabled });
         try {
           const res = await fetch('/api/set_dante_power', {
             method: 'POST',
@@ -1002,13 +1093,19 @@ function renderRows(list){
           const j = await res.json();
           if (!j.ok) {
             alert('Failed to set Dante power: ' + (j.error || ''));
+            clearPendingUnitFields(u.ip, ["dante_enabled"]);
+            updateUnitFields(u.ip, { dante_enabled: !enabled });
             e.target.checked = !enabled;
           } else {
             e.target.checked = j.dante_enabled;
+            setPendingUnitFields(u.ip, { dante_enabled: j.dante_enabled });
+            updateUnitFields(u.ip, { dante_enabled: j.dante_enabled });
             await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
           alert('Error setting Dante power: ' + err.message);
+          clearPendingUnitFields(u.ip, ["dante_enabled"]);
+          updateUnitFields(u.ip, { dante_enabled: !enabled });
           e.target.checked = !enabled;
         }
       });
@@ -1027,6 +1124,7 @@ function renderRows(list){
     tdEdidResolution.className = 'col-edid-resolution';
     if (isEncoder) {
       const edidSelect = document.createElement('select');
+      edidSelect.className = 'unit-field-control';
       edidSelect.style.cssText = 'width:100%;padding:2px;';
       edidSelect.dataset.ip = u.ip || '';
       const edidOptions = [
@@ -1046,32 +1144,60 @@ function renderRows(list){
       edidSelect.addEventListener('change', async (e) => {
         const newMode = Number(e.target.value);
         const prevMode = Number(u.edid_mode || 1);
+        const prevSource = u.edid_source || '';
+        const prevResolution = u.edid_resolution || '';
+        const nextResolution = edidOptions.find(o => o.mode === newMode)?.label || '';
+        setPendingUnitFields(u.ip, {
+          edid_mode: newMode,
+          edid_resolution: nextResolution
+        });
+        updateUnitFields(u.ip, {
+          edid_mode: newMode,
+          edid_resolution: nextResolution
+        });
         try {
           const source = (u.edid_source && String(u.edid_source).trim()) ? String(u.edid_source) : 'hdmiin';
           const resp = await producerRpc(u.ip, 'EdidInput.Set', { source, edidmode: newMode });
           if (!resp || resp.error || !resp.result) {
             alert('Failed to set EDID mode: ' + (resp?.error?.message || 'Unknown error'));
+            clearPendingUnitFields(u.ip, ["edid_mode", "edid_source", "edid_resolution"]);
+            updateUnitFields(u.ip, {
+              edid_mode: prevMode,
+              edid_source: prevSource,
+              edid_resolution: prevResolution
+            });
             e.target.value = String(prevMode);
             return;
           }
           const appliedMode = Number(resp.result.edidmode || newMode);
-          u.edid_mode = appliedMode;
-          u.edid_source = resp.result.source || source;
-          const rowInUnits = units.find(unit => unit.ip === u.ip);
-          if (rowInUnits) {
-            rowInUnits.edid_mode = appliedMode;
-            rowInUnits.edid_source = u.edid_source;
-            rowInUnits.edid_resolution = edidOptions.find(o => o.mode === appliedMode)?.label || '';
-          }
+          const appliedSource = resp.result.source || source;
+          const appliedResolution = edidOptions.find(o => o.mode === appliedMode)?.label || '';
+          setPendingUnitFields(u.ip, {
+            edid_mode: appliedMode,
+            edid_source: appliedSource,
+            edid_resolution: appliedResolution
+          });
+          updateUnitFields(u.ip, {
+            edid_mode: appliedMode,
+            edid_source: appliedSource,
+            edid_resolution: appliedResolution
+          });
           await refreshAfterSetting([u.ip]);
         } catch (err) {
           alert('Error setting EDID mode: ' + err.message);
+          clearPendingUnitFields(u.ip, ["edid_mode", "edid_source", "edid_resolution"]);
+          updateUnitFields(u.ip, {
+            edid_mode: prevMode,
+            edid_source: prevSource,
+            edid_resolution: prevResolution
+          });
           e.target.value = String(prevMode);
         }
       });
       tdEdidResolution.appendChild(edidSelect);
     } else if (isDecoder) {
       const timingSelect = document.createElement('select');
+      timingSelect.className = 'unit-field-control';
       timingSelect.style.cssText = 'width:100%;padding:2px;';
       timingSelect.dataset.ip = u.ip || '';
       const currentTiming = u.video_out_timing || u.edid_resolution || '';
@@ -1107,6 +1233,7 @@ function renderRows(list){
         const match = Array.from(timingSelect.options).find(opt => String(opt.value).toLowerCase() === currentKey);
         if (match) timingSelect.value = match.value;
       }
+      timingSelect.dataset.lastValue = timingSelect.value || '';
 
       if (!timingSelect.options.length) {
         const option = document.createElement('option');
@@ -1118,25 +1245,47 @@ function renderRows(list){
       }
       timingSelect.addEventListener('change', async (e) => {
         const newTiming = e.target.value;
-        const prevTiming = u.video_out_timing || timingSelect.value || '';
+        const prevTiming = u.video_out_timing || timingSelect.dataset.lastValue || '';
+        const prevResolution = u.edid_resolution || '';
+        setPendingUnitFields(u.ip, {
+          video_out_timing: newTiming,
+          edid_resolution: newTiming
+        });
+        updateUnitFields(u.ip, {
+          video_out_timing: newTiming,
+          edid_resolution: newTiming
+        });
         try {
           const resp = await producerRpc(u.ip, 'VideoOutTiming.Set', { timing: newTiming });
           if (!resp || resp.error || !resp.result) {
             alert('Failed to set decoder output timing: ' + (resp?.error?.message || 'Unknown error'));
+            clearPendingUnitFields(u.ip, ["video_out_timing", "edid_resolution"]);
+            updateUnitFields(u.ip, {
+              video_out_timing: prevTiming,
+              edid_resolution: prevResolution
+            });
             e.target.value = prevTiming;
             return;
           }
           const appliedTiming = resp.result.timing || newTiming;
-          u.video_out_timing = appliedTiming;
-          u.edid_resolution = appliedTiming;
-          const rowInUnits = units.find(unit => unit.ip === u.ip);
-          if (rowInUnits) {
-            rowInUnits.video_out_timing = appliedTiming;
-            rowInUnits.edid_resolution = appliedTiming;
-          }
+          setPendingUnitFields(u.ip, {
+            video_out_timing: appliedTiming,
+            edid_resolution: appliedTiming
+          });
+          updateUnitFields(u.ip, {
+            video_out_timing: appliedTiming,
+            edid_resolution: appliedTiming
+          });
+          e.target.value = appliedTiming;
+          timingSelect.dataset.lastValue = appliedTiming;
           await refreshAfterSetting([u.ip]);
         } catch (err) {
           alert('Error setting decoder output timing: ' + err.message);
+          clearPendingUnitFields(u.ip, ["video_out_timing", "edid_resolution"]);
+          updateUnitFields(u.ip, {
+            video_out_timing: prevTiming,
+            edid_resolution: prevResolution
+          });
           e.target.value = prevTiming;
         }
       });
@@ -1149,7 +1298,7 @@ function renderRows(list){
     const tdHdcp = document.createElement('td');
     if (isEncoder || isDecoder) {
       const hdcpSelect = document.createElement('select');
-      hdcpSelect.className = 'hdcp-select';
+      hdcpSelect.className = 'hdcp-select unit-field-control';
       hdcpSelect.style.cssText = 'width:100%;padding:2px;';
       hdcpSelect.dataset.ip = u.ip || '';
       hdcpSelect.dataset.role = roleLbl;
@@ -1165,9 +1314,13 @@ function renderRows(list){
       });
       
       hdcpSelect.value = u.hdcp || '';
+      hdcpSelect.dataset.lastValue = hdcpSelect.value || '';
       
       hdcpSelect.addEventListener('change', async (e) => {
         const hdcpValue = e.target.value;
+        const prevHdcp = u.hdcp || hdcpSelect.dataset.lastValue || '';
+        setPendingUnitFields(u.ip, { hdcp: hdcpValue });
+        updateUnitFields(u.ip, { hdcp: hdcpValue });
         try {
           const res = await fetch('/api/set_hdcp', {
             method: 'POST',
@@ -1177,12 +1330,21 @@ function renderRows(list){
           const j = await res.json();
           if (!j.ok) {
             alert('Failed to set HDCP: ' + (j.error || ''));
+            clearPendingUnitFields(u.ip, ["hdcp"]);
+            updateUnitFields(u.ip, { hdcp: prevHdcp });
+            e.target.value = prevHdcp;
           } else {
             e.target.value = j.hdcp || hdcpValue;
+            setPendingUnitFields(u.ip, { hdcp: j.hdcp || hdcpValue });
+            updateUnitFields(u.ip, { hdcp: j.hdcp || hdcpValue });
+            hdcpSelect.dataset.lastValue = e.target.value;
             await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
           alert('Error setting HDCP: ' + err.message);
+          clearPendingUnitFields(u.ip, ["hdcp"]);
+          updateUnitFields(u.ip, { hdcp: prevHdcp });
+          e.target.value = prevHdcp;
         }
       });
       
@@ -1384,7 +1546,7 @@ async function pollVisibleUnitDetails(ips){
   detailPollInFlight = true;
   try{
     await rescanIPs(targets);
-    await loadNtpProfile(selectedNtpIPs());
+    updateDashboardNtpFromUnits(selectedNtpIPs(), targets, { allowNewSource: true });
   }catch(e){
     console.warn("pollVisibleUnitDetails error", e);
   }finally{
@@ -1564,10 +1726,99 @@ function selectedNtpIPs(){
 }
 
 let ntpModalTargetIPs = [];
+let dashboardClockTimer = null;
+let dashboardClockState = null;
+let dashboardClockSourceIp = "";
 
 function setNtpStatus(text, error=false){
   const targets = [$("#ntp_status"), $("#ntp_modal_status")].filter(Boolean);
   targets.forEach(el => { el.textContent = text || ""; el.style.color = error ? "var(--danger)" : "var(--muted)"; });
+}
+
+function parseDeviceDateTime(value){
+  if(!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if(m){
+    const parts = m.slice(1).map(Number);
+    return Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
+  }
+  const parsed = Date.parse(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDeviceDateTime(ms){
+  const d = new Date(ms);
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+function renderDashboardClock(){
+  if(!dashboardClockState) return;
+  const elapsed = Date.now() - dashboardClockState.syncedAt;
+  $("#dashboard_datetime").textContent = formatDeviceDateTime(dashboardClockState.baseTime + elapsed);
+}
+
+function currentDashboardClockTime(){
+  if(!dashboardClockState) return null;
+  return dashboardClockState.baseTime + (Date.now() - dashboardClockState.syncedAt);
+}
+
+function stopDashboardClock(text="unavailable"){
+  dashboardClockState = null;
+  dashboardClockSourceIp = "";
+  if(dashboardClockTimer){
+    clearInterval(dashboardClockTimer);
+    dashboardClockTimer = null;
+  }
+  $("#dashboard_datetime").textContent = text;
+}
+
+function startDashboardClock(datetime, sourceIp=""){
+  let baseTime = parseDeviceDateTime(datetime);
+  if(baseTime === null){
+    stopDashboardClock("unavailable");
+    return false;
+  }
+  const activeTime = currentDashboardClockTime();
+  if(sourceIp && sourceIp === dashboardClockSourceIp && activeTime !== null){
+    const correction = baseTime - activeTime;
+    if(correction < 0 && correction > -1500) baseTime = activeTime;
+  }
+  dashboardClockState = { baseTime, syncedAt: Date.now(), sourceIp };
+  dashboardClockSourceIp = sourceIp || dashboardClockSourceIp;
+  renderDashboardClock();
+  if(!dashboardClockTimer) dashboardClockTimer = setInterval(renderDashboardClock, 1000);
+  return true;
+}
+
+function findDashboardNtpUnit(selectedIps=[], fallbackIps=[], allowNewSource=false){
+  const byUnitIp = new Map((units || []).filter(u => u && u.ip).map(u => [u.ip, u]));
+  const pickFrom = list => {
+    for(const ip of list || []){
+      const unit = byUnitIp.get(ip);
+      if(unit) return unit;
+    }
+    return null;
+  };
+  if(selectedIps.length){
+    const selectedUnit = pickFrom(selectedIps);
+    if(selectedUnit) return selectedUnit;
+  }
+  if(dashboardClockSourceIp && byUnitIp.has(dashboardClockSourceIp)){
+    return byUnitIp.get(dashboardClockSourceIp);
+  }
+  if(!allowNewSource) return null;
+  return pickFrom(fallbackIps) || (units || [])[0] || null;
+}
+
+function updateDashboardNtpFromUnits(selectedIps=[], fallbackIps=[], options={}){
+  const unit = findDashboardNtpUnit(selectedIps, fallbackIps, !!options.allowNewSource);
+  if(!unit) return false;
+  $("#dashboard_timezone").textContent = unit.timezone || unit.active_timezone || unit.details?.timezone?.config?.timezone || "UTC";
+  $("#dashboard_ntp_server").textContent = unit.ntp_server || unit.ntpserver || unit.details?.systeminfo?.config?.ntpserver || "(not configured)";
+  startDashboardClock(unit.device_datetime || unit.datetime || "", unit.ip || "");
+  return true;
 }
 
 async function loadNtpProfile(ips=[]){
@@ -1576,12 +1827,12 @@ async function loadNtpProfile(ips=[]){
     if(!data?.ok) throw new Error(data?.error || "Unable to read time settings");
     $("#dashboard_timezone").textContent = data.timezone || "UTC";
     $("#dashboard_ntp_server").textContent = data.ntp_server || "(not configured)";
-    $("#dashboard_datetime").textContent = data.datetime || "unavailable";
+    startDashboardClock(data.datetime || "", data.source_ip || "");
     return data;
   }catch(e){
     $("#dashboard_timezone").textContent = "unavailable";
     $("#dashboard_ntp_server").textContent = "unavailable";
-    $("#dashboard_datetime").textContent = "unavailable";
+    stopDashboardClock("unavailable");
     return null;
   }
 }
@@ -1628,6 +1879,18 @@ async function submitNtpSync(){
       $("#ntp_backdrop").style.display = "none";
     }
     const refreshedIps = Object.keys(result?.results || {});
+    const ntpPendingFields = {
+      timezone: result?.timezone || timezone,
+      active_timezone: result?.timezone || timezone,
+      ntp_server: result?.ntp_server ?? server,
+      ntpserver: result?.ntp_server ?? server
+    };
+    for(const [ip, item] of Object.entries(result?.results || {})){
+      if(item?.ok){
+        setPendingUnitFields(ip, ntpPendingFields);
+        updateUnitFields(ip, ntpPendingFields);
+      }
+    }
     await refreshAfterSetting(refreshedIps.length ? refreshedIps : ips);
     await loadNtpProfile(refreshedIps.length ? refreshedIps : ips);
   }catch(e){
@@ -1795,7 +2058,28 @@ async function saveDefaultSlate(){
   }
 }
 
-function rerenderFiltered(){ renderRows(getDisplayList()); }
+let unitTableRenderDeferred = false;
+
+function isUnitFieldActive(){
+  const active = document.activeElement;
+  return !!(active && active.closest && active.closest("#tbody") && active.matches(".unit-field-control"));
+}
+
+function flushDeferredUnitTableRender(){
+  if(!unitTableRenderDeferred || isUnitFieldActive()) return;
+  unitTableRenderDeferred = false;
+  renderRows(getDisplayList());
+  updateTotals();
+}
+
+function rerenderFiltered(options={}){
+  if(!options.force && isUnitFieldActive()){
+    unitTableRenderDeferred = true;
+    return;
+  }
+  unitTableRenderDeferred = false;
+  renderRows(getDisplayList());
+}
 
 // ------- connection monitoring -------
 let connectionCheckInterval = null;
@@ -2852,8 +3136,13 @@ async function submitPasswordSync(){
         if(e.target.checked) selectedUnitIPs.add(ip);
         else selectedUnitIPs.delete(ip);
       }
-      loadNtpProfile(selectedNtpIPs());
+      const selectedIps = selectedNtpIPs();
+      if(selectedIps.length) loadNtpProfile(selectedIps);
+      else updateDashboardNtpFromUnits([], getVisibleIPs(), { allowNewSource: !dashboardClockSourceIp });
     }
+  });
+  $("#tbody").addEventListener("focusout", ()=>{
+    setTimeout(flushDeferredUnitTableRender, 150);
   });
 
   document.querySelectorAll("th.sortable").forEach(th=>{

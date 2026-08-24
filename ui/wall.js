@@ -18,6 +18,26 @@
   let reports = {};
   let liveRouteSeq = 0;
   let autoRefreshTimer = null;
+  let renderDeferred = false;
+
+  function isLiveFieldActive() {
+    const active = document.activeElement;
+    return !!(active && active.closest && active.closest("select, input, textarea"));
+  }
+
+  function requestRender(force = false) {
+    if (!force && isLiveFieldActive()) {
+      renderDeferred = true;
+      return;
+    }
+    renderDeferred = false;
+    render();
+  }
+
+  function flushDeferredRender() {
+    if (!renderDeferred || isLiveFieldActive()) return;
+    requestRender(true);
+  }
 
   function clampInt(value, min, max, fallback) {
     const n = Number.parseInt(value, 10);
@@ -555,7 +575,7 @@
     currentWall = state.walls.find(w => w.id === remembered) || state.walls[0] || createWall("Video Wall 1", 2, 2);
     if (!state.walls.length) state.walls.push(currentWall);
     rememberSelectedWall(currentWall.id);
-    render();
+    requestRender();
     refreshWall({ silent: true }).catch(e => toast(e.message, false));
   }
 
@@ -568,7 +588,7 @@
     state.decoders = data.decoders || state.decoders;
     replaceCurrentInState();
     rememberSelectedWall(currentWall.id);
-    render();
+    requestRender();
     toast("Video wall saved", true);
     scheduleAutoSaveRefresh(100);
   }
@@ -597,7 +617,7 @@
       return;
     }
     for (const target of targets) target.live_source_pending = true;
-    renderGrid();
+    requestRender();
     setStatus("Syncing source...", "modified");
     try {
       await api("/api/video_wall/source", {
@@ -620,7 +640,7 @@
       }
     } finally {
       for (const target of currentWall.cells || []) delete target.live_source_pending;
-      renderGrid();
+      requestRender();
     }
   }
 
@@ -641,7 +661,7 @@
       : (cell && cell.decoder_id ? [cell] : []);
     if (!targets.length) {
       toast(applyAll ? "Assign decoders before applying bezel" : "Select an assigned display before applying bezel", false);
-      render();
+      requestRender();
       return;
     }
     setStatus(applyAll ? "Applying bezel to all..." : "Applying bezel...", "modified");
@@ -663,12 +683,38 @@
     }
   }
 
+  async function liveApplyRotation(cell) {
+    if (!cell || !cell.decoder_id) {
+      toast("Assign a decoder before applying rotation", false);
+      requestRender();
+      return;
+    }
+    syncWallFromForm();
+    replaceCurrentInState();
+    setStatus("Applying rotation...", "modified");
+    try {
+      const data = await api("/api/video_wall/rotation", {
+        wall: currentWall,
+        row: cell.row,
+        column: cell.column
+      });
+      await saveWallQuiet();
+      reports = {};
+      const count = data.success_count || Object.values(data.results || {}).filter(r => r.ok).length;
+      toast(count ? "Rotation applied" : "Rotation update sent", true);
+      refreshWall({ silent: true }).catch(() => {});
+    } catch (e) {
+      setStatus("Rotation apply failed", "error");
+      toast(e.message, false);
+    }
+  }
+
   async function refreshWall(options = {}) {
     const data = await api("/api/video_wall/refresh", { id: currentWall.id });
     state.encoders = data.encoders || state.encoders;
     state.decoders = data.decoders || state.decoders;
     reports = data.reports || {};
-    render();
+    requestRender();
     setStatus(data.status || statusFromReports(currentWall, reports));
     if (!options.silent) toast("Device state refreshed", true);
   }
@@ -696,7 +742,7 @@
     const failed = Object.values(data.results || {}).filter(r => !r.ok);
     toast(failed.length ? `Applied with ${failed.length} display error(s)` : "Video wall applied", !failed.length);
     reports = {};
-    render();
+    requestRender();
     refreshWall({ silent: true }).catch(() => {});
   }
 
@@ -715,7 +761,7 @@
     if (!state.walls.length) state.walls.push(currentWall);
     rememberSelectedWall(currentWall.id);
     reports = {};
-    render();
+    requestRender();
     toast("Video wall deleted", true);
   }
 
@@ -792,7 +838,7 @@
     rememberSelectedWall(currentWall.id);
     selectedPos = "1:1";
     reports = {};
-    render();
+    requestRender();
     toast(`Imported ${state.walls.length} wall config(s)`, true);
     refreshWall({ silent: true }).catch(() => {});
   }
@@ -831,12 +877,16 @@
   }
 
   function wireEvents() {
+    document.addEventListener("focusout", () => {
+      window.setTimeout(flushDeferredRender, 150);
+    });
+
     document.getElementById("wallSelect").addEventListener("change", event => {
       currentWall = state.walls.find(w => w.id === event.target.value) || currentWall;
       rememberSelectedWall(currentWall?.id);
       reports = {};
       selectedPos = "1:1";
-      render();
+      requestRender(true);
       refreshWall({ silent: true }).catch(() => {});
     });
     document.getElementById("newWallBtn").addEventListener("click", () => {
@@ -845,7 +895,7 @@
       rememberSelectedWall(currentWall.id);
       reports = {};
       selectedPos = "1:1";
-      render();
+      requestRender();
     });
     document.getElementById("saveWallBtn").addEventListener("click", () => saveWall().catch(e => toast(e.message, false)));
     document.getElementById("refreshWallBtn").addEventListener("click", () => refreshWall().catch(e => toast(e.message, false)));
@@ -865,7 +915,7 @@
         syncWallFromForm();
         replaceCurrentInState();
         reports = {};
-        render();
+        requestRender();
         scheduleAutoSaveRefresh();
       });
     }
@@ -908,7 +958,12 @@
         liveRouteSource("cell", cell);
         return;
       }
-      if (select.dataset.action === "rotation") cell.rotation = clampInt(select.value, 0, 270, 0);
+      if (select.dataset.action === "rotation") {
+        cell.rotation = clampInt(select.value, 0, 270, 0);
+        replaceCurrentInState();
+        liveApplyRotation(cell);
+        return;
+      }
       reports = {};
       replaceCurrentInState();
       renderGrid();
