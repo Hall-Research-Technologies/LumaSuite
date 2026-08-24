@@ -4,7 +4,10 @@
   const MAX_GRID = 16;
   const WALL_PREVIEW_KEY = "lumasuite_video_wall_preview_enabled";
   const WALL_PREVIEW_OPACITY_KEY = "lumasuite_video_wall_preview_opacity";
-  const DEFAULT_WALL_PREVIEW_OPACITY = 50;
+  const WALL_PREVIEW_REFRESH_KEY = "lumasuite_video_wall_preview_refresh_seconds";
+  const DEFAULT_WALL_PREVIEW_OPACITY = 100;
+  const DEFAULT_WALL_PREVIEW_REFRESH_SECONDS = 10;
+  const WALL_PREVIEW_PRELOAD_TIMEOUT_MS = 3000;
   const WALL_CELL_WIDTH = 340;
   const DEFAULT_DISPLAY = {
     totalwidth: 0,
@@ -25,6 +28,7 @@
   let renderDeferred = false;
   let wallPreviewEnabled = false;
   let wallPreviewOpacity = DEFAULT_WALL_PREVIEW_OPACITY;
+  let wallPreviewRefreshSeconds = DEFAULT_WALL_PREVIEW_REFRESH_SECONDS;
   let wallPreviewRefreshTimer = null;
   let wallPreviewRefreshTimestamp = Date.now();
 
@@ -477,7 +481,7 @@
   function loadWallPreviewOpacity() {
     try {
       const value = Number(localStorage.getItem(WALL_PREVIEW_OPACITY_KEY));
-      return Number.isFinite(value) ? clampInt(value, 20, 80, DEFAULT_WALL_PREVIEW_OPACITY) : DEFAULT_WALL_PREVIEW_OPACITY;
+      return Number.isFinite(value) ? clampInt(value, 20, 100, DEFAULT_WALL_PREVIEW_OPACITY) : DEFAULT_WALL_PREVIEW_OPACITY;
     } catch {
       return DEFAULT_WALL_PREVIEW_OPACITY;
     }
@@ -485,15 +489,36 @@
 
   function saveWallPreviewOpacity(value) {
     try {
-      localStorage.setItem(WALL_PREVIEW_OPACITY_KEY, String(clampInt(value, 20, 80, DEFAULT_WALL_PREVIEW_OPACITY)));
+      localStorage.setItem(WALL_PREVIEW_OPACITY_KEY, String(clampInt(value, 20, 100, DEFAULT_WALL_PREVIEW_OPACITY)));
+    } catch {}
+  }
+
+  function loadWallPreviewRefreshSeconds() {
+    try {
+      const value = Number(localStorage.getItem(WALL_PREVIEW_REFRESH_KEY));
+      return Number.isFinite(value) ? clampInt(value, 2, 10, DEFAULT_WALL_PREVIEW_REFRESH_SECONDS) : DEFAULT_WALL_PREVIEW_REFRESH_SECONDS;
+    } catch {
+      return DEFAULT_WALL_PREVIEW_REFRESH_SECONDS;
+    }
+  }
+
+  function saveWallPreviewRefreshSeconds(value) {
+    try {
+      localStorage.setItem(WALL_PREVIEW_REFRESH_KEY, String(clampInt(value, 2, 10, DEFAULT_WALL_PREVIEW_REFRESH_SECONDS)));
     } catch {}
   }
 
   function updateWallPreviewControls() {
-    const control = document.getElementById("wallPreviewOpacityControl");
-    const slider = document.getElementById("wallPreviewOpacity");
-    if (control) control.style.display = wallPreviewEnabled ? "flex" : "none";
-    if (slider) slider.value = String(wallPreviewOpacity);
+    const opacityControl = document.getElementById("wallPreviewOpacityControl");
+    const opacitySlider = document.getElementById("wallPreviewOpacity");
+    const refreshControl = document.getElementById("wallPreviewRefreshControl");
+    const refreshSlider = document.getElementById("wallPreviewRefreshSeconds");
+    const refreshValue = document.getElementById("wallPreviewRefreshValue");
+    if (opacityControl) opacityControl.style.display = wallPreviewEnabled ? "flex" : "none";
+    if (opacitySlider) opacitySlider.value = String(wallPreviewOpacity);
+    if (refreshControl) refreshControl.style.display = wallPreviewEnabled ? "flex" : "none";
+    if (refreshSlider) refreshSlider.value = String(wallPreviewRefreshSeconds);
+    if (refreshValue) refreshValue.textContent = `${wallPreviewRefreshSeconds}s`;
   }
 
   function decoderPreviewBaseUrl(decoder) {
@@ -506,20 +531,65 @@
     return `${base}${base.includes("?") ? "&" : "?"}t=${timestamp}`;
   }
 
-  function refreshWallPreviewImages() {
-    if (!wallPreviewEnabled) return;
-    const timestamp = Date.now();
-    wallPreviewRefreshTimestamp = timestamp;
-    document.querySelectorAll(".wall-cell-preview[data-preview-base]").forEach(el => {
-      const base = el.dataset.previewBase || "";
-      if (base) el.style.backgroundImage = `url('${previewUrlWithCacheBuster(base, timestamp)}')`;
+  function preloadWallPreviewImage(url) {
+    return new Promise(resolve => {
+      if (!url) {
+        resolve(false);
+        return;
+      }
+      const img = new Image();
+      let done = false;
+      const finish = ok => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        img.onload = null;
+        img.onerror = null;
+        resolve(ok);
+      };
+      const timer = window.setTimeout(() => finish(false), WALL_PREVIEW_PRELOAD_TIMEOUT_MS);
+      img.onload = () => finish(true);
+      img.onerror = () => finish(false);
+      img.src = url;
     });
+  }
+
+  async function refreshWallPreviewImages() {
+    if (!wallPreviewEnabled) return;
+    const previews = Array.from(document.querySelectorAll(".wall-cell-preview[data-preview-base]"));
+    if (!previews.length) return;
+    const timestamp = Date.now();
+    const loaded = await Promise.all(previews.map(async el => {
+      const base = el.dataset.previewBase || "";
+      const url = previewUrlWithCacheBuster(base, timestamp);
+      return { el, url, ok: await preloadWallPreviewImage(url) };
+    }));
+    wallPreviewRefreshTimestamp = timestamp;
+    for (const item of loaded) {
+      if (item.ok) item.el.style.backgroundImage = `url('${item.url}')`;
+    }
   }
 
   function stopWallPreviewRefresh() {
     if (!wallPreviewRefreshTimer) return;
-    window.clearInterval(wallPreviewRefreshTimer);
+    window.clearTimeout(wallPreviewRefreshTimer);
     wallPreviewRefreshTimer = null;
+  }
+
+  function wallPreviewRefreshDelayMs() {
+    return clampInt(wallPreviewRefreshSeconds, 2, 10, DEFAULT_WALL_PREVIEW_REFRESH_SECONDS) * 1000;
+  }
+
+  function scheduleWallPreviewRefresh(delay = wallPreviewRefreshDelayMs()) {
+    stopWallPreviewRefresh();
+    if (!wallPreviewEnabled) {
+      return;
+    }
+    wallPreviewRefreshTimer = window.setTimeout(async () => {
+      wallPreviewRefreshTimer = null;
+      await refreshWallPreviewImages();
+      if (wallPreviewEnabled) scheduleWallPreviewRefresh();
+    }, delay);
   }
 
   function syncWallPreviewRefresh() {
@@ -528,7 +598,7 @@
       return;
     }
     if (wallPreviewRefreshTimer) return;
-    wallPreviewRefreshTimer = window.setInterval(refreshWallPreviewImages, 7000);
+    scheduleWallPreviewRefresh();
   }
 
   function rotationClassValue(value) {
@@ -564,8 +634,8 @@
       const previewUrl = previewUrlWithCacheBuster(previewBase);
       const rotation = rotationClassValue(cell.rotation || 0);
       const previewScale = previewFitScale(rotation);
-      const previewOpacity = Math.max(0.2, Math.min(0.8, wallPreviewOpacity / 100));
-      const previewVeil = Math.max(0.12, 0.55 - previewOpacity * 0.42);
+      const previewOpacity = Math.max(0.2, Math.min(1, wallPreviewOpacity / 100));
+      const previewVeil = previewOpacity >= 1 ? 0 : Math.max(0.12, 0.55 - previewOpacity * 0.42);
       const cellEl = document.createElement("div");
       cellEl.className = `wall-cell ${compact ? "compact" : ""} ${key === selectedPos ? "selected" : ""} ${previewBase ? "preview-enabled" : ""}`;
       cellEl.dataset.pos = key;
@@ -1038,6 +1108,7 @@
     if (wallPreviewToggle) {
       wallPreviewEnabled = loadWallPreviewEnabled();
       wallPreviewOpacity = loadWallPreviewOpacity();
+      wallPreviewRefreshSeconds = loadWallPreviewRefreshSeconds();
       wallPreviewToggle.checked = wallPreviewEnabled;
       updateWallPreviewControls();
       wallPreviewToggle.addEventListener("change", () => {
@@ -1053,9 +1124,19 @@
     if (wallPreviewOpacitySlider) {
       wallPreviewOpacitySlider.value = String(wallPreviewOpacity);
       wallPreviewOpacitySlider.addEventListener("input", () => {
-        wallPreviewOpacity = clampInt(wallPreviewOpacitySlider.value, 20, 80, DEFAULT_WALL_PREVIEW_OPACITY);
+        wallPreviewOpacity = clampInt(wallPreviewOpacitySlider.value, 20, 100, DEFAULT_WALL_PREVIEW_OPACITY);
         saveWallPreviewOpacity(wallPreviewOpacity);
         renderGrid();
+      });
+    }
+    const wallPreviewRefreshSlider = document.getElementById("wallPreviewRefreshSeconds");
+    if (wallPreviewRefreshSlider) {
+      wallPreviewRefreshSlider.value = String(wallPreviewRefreshSeconds);
+      wallPreviewRefreshSlider.addEventListener("input", () => {
+        wallPreviewRefreshSeconds = clampInt(wallPreviewRefreshSlider.value, 2, 10, DEFAULT_WALL_PREVIEW_REFRESH_SECONDS);
+        saveWallPreviewRefreshSeconds(wallPreviewRefreshSeconds);
+        updateWallPreviewControls();
+        if (wallPreviewEnabled) scheduleWallPreviewRefresh();
       });
     }
     document.getElementById("importWallConfigFile").addEventListener("change", event => {

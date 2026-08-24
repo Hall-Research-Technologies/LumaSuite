@@ -3,11 +3,14 @@
 ## v1.0.7 - 2026-08-24
 
 - Added Video Wall layout preview overlays using decoder thumbnails, with a Preview toggle and transparency slider in the Wall Layout header.
-- Refreshed enabled Video Wall previews on a synchronized 7-second cadence so all monitor thumbnails update together without changing on cell selection.
+- Refreshed enabled Video Wall previews with a buffered batch loader so existing images stay visible until the next set is ready.
+- Added a persisted Video Wall preview refresh slider from 2 to 10 seconds, defaulting to 10 seconds on first run.
 - Kept preview images fully visible and proportional, including corrected preview rotation handling for rotated displays.
+- Defaulted first-run Video Wall preview settings to full image strength with no dimming veil.
 - Fixed Video Wall full-layout apply so missing or stale wall source selections do not produce display-error toasts when the wall matrix, bezel, and rotation apply successfully.
 - Improved Video Wall apply error reporting to show the first display-level failure instead of a generic `Request failed: 200` message.
 - Standardized Video Wall monitor tiles to a fixed 16:9 size across 1x1 through larger layouts, centering smaller walls and letting larger walls expand outward with horizontal scrolling.
+- Moved the selected Video Wall monitor highlight inside the tile so the top row selection border is not clipped.
 
 ## v1.0.6 - 2026-08-24
 

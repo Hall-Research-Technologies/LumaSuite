@@ -30,7 +30,7 @@
     .status-chip.override { background:#4338ca; color:#c7d2fe; }
     .wall-grid { display:grid; gap:8px; min-height:220px; justify-content:center; overflow-x:auto; padding-bottom:4px; }
     .wall-cell { border:1px solid var(--border); border-radius:8px; background:var(--table); padding:8px; width:340px; min-height:0; aspect-ratio:16 / 9; display:flex; flex-direction:column; gap:7px; cursor:pointer; position:relative; overflow:hidden; }
-    .wall-cell.selected { outline:2px solid var(--accent); }
+    .wall-cell.selected { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
     .wall-cell.preview-enabled > :not(.wall-cell-preview) { position:relative; z-index:1; }
     .wall-cell-preview { position:absolute; inset:0; z-index:0; background-position:center; background-size:contain; background-repeat:no-repeat; opacity:var(--preview-opacity, .5); filter:saturate(1.15) contrast(1.05); pointer-events:none; transform-origin:center; }
     .wall-cell.preview-enabled::after { content:""; position:absolute; inset:0; z-index:0; pointer-events:none; background:rgba(7,13,28,var(--preview-veil, .34)); }
@@ -141,7 +141,8 @@
           <h2>Wall Layout</h2>
           <div style="display:flex;align-items:center;gap:14px;">
             <label class="field inline" title="Show each decoder thumbnail behind its layout controls"><input id="wallPreviewToggle" type="checkbox"> Preview</label>
-            <label id="wallPreviewOpacityControl" class="field inline" style="display:none;" title="Adjust preview transparency"><span class="muted">Transparency</span><input id="wallPreviewOpacity" type="range" min="20" max="80" step="5" value="50" style="width:120px;"></label>
+            <label id="wallPreviewOpacityControl" class="field inline" style="display:none;" title="Adjust preview transparency"><span class="muted">Transparency</span><input id="wallPreviewOpacity" type="range" min="20" max="100" step="5" value="100" style="width:120px;"></label>
+            <label id="wallPreviewRefreshControl" class="field inline" style="display:none;" title="Adjust preview refresh interval"><span class="muted">Refresh</span><input id="wallPreviewRefreshSeconds" type="range" min="2" max="10" step="1" value="10" style="width:90px;"><span id="wallPreviewRefreshValue" class="muted">10s</span></label>
             <span id="gridSummary" class="muted"></span>
           </div>
         </div>
