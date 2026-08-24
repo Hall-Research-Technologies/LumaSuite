@@ -2,6 +2,10 @@
   "use strict";
 
   const MAX_GRID = 16;
+  const WALL_PREVIEW_KEY = "lumasuite_video_wall_preview_enabled";
+  const WALL_PREVIEW_OPACITY_KEY = "lumasuite_video_wall_preview_opacity";
+  const DEFAULT_WALL_PREVIEW_OPACITY = 50;
+  const WALL_CELL_WIDTH = 340;
   const DEFAULT_DISPLAY = {
     totalwidth: 0,
     totalheight: 0,
@@ -19,6 +23,10 @@
   let liveRouteSeq = 0;
   let autoRefreshTimer = null;
   let renderDeferred = false;
+  let wallPreviewEnabled = false;
+  let wallPreviewOpacity = DEFAULT_WALL_PREVIEW_OPACITY;
+  let wallPreviewRefreshTimer = null;
+  let wallPreviewRefreshTimestamp = Date.now();
 
   function isLiveFieldActive() {
     const active = document.activeElement;
@@ -269,7 +277,19 @@
     window.setTimeout(() => el.classList.remove("show"), 2600);
   }
 
-  async function api(path, body) {
+  function summarizeResultFailures(data) {
+    const failures = [];
+    for (const [id, result] of Object.entries(data?.results || {})) {
+      if (result?.ok) continue;
+      const step = (result?.steps || []).find(item => !item.ok) || {};
+      const label = result?.label || id;
+      const detail = step.error || result?.error || "failed";
+      failures.push(`${label}: ${step.step || "apply"} ${detail}`);
+    }
+    return failures;
+  }
+
+  async function api(path, body, options = {}) {
     const response = await fetch(path, {
       method: body == null ? "GET" : "POST",
       headers: body == null ? undefined : { "Content-Type": "application/json" },
@@ -279,7 +299,14 @@
     if (response.status === 404 && path.startsWith("/api/video_wall/")) {
       throw new Error("Video Wall backend is not loaded. Restart LumaSuite and refresh this page.");
     }
-    if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed: ${response.status}`);
+    if (!response.ok || (data.ok === false && !options.allowOkFalse)) {
+      const failures = summarizeResultFailures(data);
+      const message = data.error || failures.slice(0, 2).join("; ") || `Request failed: ${response.status}`;
+      const error = new Error(message);
+      error.data = data;
+      error.status = response.status;
+      throw error;
+    }
     return data;
   }
 
@@ -367,7 +394,15 @@
       option.textContent = sourceLabel(encoder);
       wallSource.appendChild(option);
     }
-    if (currentWall) wallSource.value = currentWall.source_id || "";
+    if (currentWall) {
+      const requestedSourceId = currentWall.source_id || "";
+      wallSource.value = requestedSourceId;
+      if (requestedSourceId && wallSource.value !== requestedSourceId) {
+        currentWall.source_id = "";
+        currentWall.source_snapshot = null;
+        wallSource.value = "";
+      }
+    }
   }
 
   function optionHtml(items, selected, emptyText) {
@@ -425,16 +460,97 @@
     }[ch]));
   }
 
+  function loadWallPreviewEnabled() {
+    try {
+      return localStorage.getItem(WALL_PREVIEW_KEY) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  function saveWallPreviewEnabled(enabled) {
+    try {
+      localStorage.setItem(WALL_PREVIEW_KEY, enabled ? "true" : "false");
+    } catch {}
+  }
+
+  function loadWallPreviewOpacity() {
+    try {
+      const value = Number(localStorage.getItem(WALL_PREVIEW_OPACITY_KEY));
+      return Number.isFinite(value) ? clampInt(value, 20, 80, DEFAULT_WALL_PREVIEW_OPACITY) : DEFAULT_WALL_PREVIEW_OPACITY;
+    } catch {
+      return DEFAULT_WALL_PREVIEW_OPACITY;
+    }
+  }
+
+  function saveWallPreviewOpacity(value) {
+    try {
+      localStorage.setItem(WALL_PREVIEW_OPACITY_KEY, String(clampInt(value, 20, 80, DEFAULT_WALL_PREVIEW_OPACITY)));
+    } catch {}
+  }
+
+  function updateWallPreviewControls() {
+    const control = document.getElementById("wallPreviewOpacityControl");
+    const slider = document.getElementById("wallPreviewOpacity");
+    if (control) control.style.display = wallPreviewEnabled ? "flex" : "none";
+    if (slider) slider.value = String(wallPreviewOpacity);
+  }
+
+  function decoderPreviewBaseUrl(decoder) {
+    const ip = decoder?.ip || "";
+    return ip ? `http://${ip}/thumbnail/thumbnail1.jpg` : "";
+  }
+
+  function previewUrlWithCacheBuster(base, timestamp = wallPreviewRefreshTimestamp) {
+    if (!base) return "";
+    return `${base}${base.includes("?") ? "&" : "?"}t=${timestamp}`;
+  }
+
+  function refreshWallPreviewImages() {
+    if (!wallPreviewEnabled) return;
+    const timestamp = Date.now();
+    wallPreviewRefreshTimestamp = timestamp;
+    document.querySelectorAll(".wall-cell-preview[data-preview-base]").forEach(el => {
+      const base = el.dataset.previewBase || "";
+      if (base) el.style.backgroundImage = `url('${previewUrlWithCacheBuster(base, timestamp)}')`;
+    });
+  }
+
+  function stopWallPreviewRefresh() {
+    if (!wallPreviewRefreshTimer) return;
+    window.clearInterval(wallPreviewRefreshTimer);
+    wallPreviewRefreshTimer = null;
+  }
+
+  function syncWallPreviewRefresh() {
+    if (!wallPreviewEnabled) {
+      stopWallPreviewRefresh();
+      return;
+    }
+    if (wallPreviewRefreshTimer) return;
+    wallPreviewRefreshTimer = window.setInterval(refreshWallPreviewImages, 7000);
+  }
+
+  function rotationClassValue(value) {
+    const normalized = ((Number(value) % 360) + 360) % 360;
+    return [0, 90, 180, 270].includes(normalized) ? normalized : 0;
+  }
+
+  function previewFitScale(rotation) {
+    return rotation === 90 || rotation === 270 ? 0.5625 : 1;
+  }
+
   function renderGrid() {
     const grid = document.getElementById("wallGrid");
     const summary = document.getElementById("gridSummary");
     if (!currentWall) {
       grid.innerHTML = `<div class="empty">Create or select a video wall.</div>`;
       summary.textContent = "";
+      stopWallPreviewRefresh();
       return;
     }
     const compact = currentWall.rows * currentWall.columns > 9;
-    grid.style.gridTemplateColumns = `repeat(${currentWall.columns}, minmax(160px, 1fr))`;
+    grid.style.gridTemplateColumns = `repeat(${currentWall.columns}, ${WALL_CELL_WIDTH}px)`;
     summary.textContent = `${currentWall.rows} x ${currentWall.columns} (${currentWall.cells.length} displays)`;
     grid.innerHTML = "";
     for (const cell of currentWall.cells) {
@@ -443,10 +559,22 @@
       const hasReport = cell.decoder_id && Object.prototype.hasOwnProperty.call(reports, cell.decoder_id);
       const diffs = hasReport ? cellDiffs(currentWall, cell, report) : [];
       const sourceBusy = cell.live_source_pending;
+      const decoder = findDeviceWithSnapshot(cell.decoder_id, state.decoders, cell.decoder_snapshot);
+      const previewBase = wallPreviewEnabled ? decoderPreviewBaseUrl(decoder) : "";
+      const previewUrl = previewUrlWithCacheBuster(previewBase);
+      const rotation = rotationClassValue(cell.rotation || 0);
+      const previewScale = previewFitScale(rotation);
+      const previewOpacity = Math.max(0.2, Math.min(0.8, wallPreviewOpacity / 100));
+      const previewVeil = Math.max(0.12, 0.55 - previewOpacity * 0.42);
       const cellEl = document.createElement("div");
-      cellEl.className = `wall-cell ${compact ? "compact" : ""} ${key === selectedPos ? "selected" : ""}`;
+      cellEl.className = `wall-cell ${compact ? "compact" : ""} ${key === selectedPos ? "selected" : ""} ${previewBase ? "preview-enabled" : ""}`;
       cellEl.dataset.pos = key;
+      if (previewBase) {
+        cellEl.style.setProperty("--preview-opacity", previewOpacity.toFixed(2));
+        cellEl.style.setProperty("--preview-veil", previewVeil.toFixed(2));
+      }
       cellEl.innerHTML = `
+        ${previewBase ? `<div class="wall-cell-preview" data-preview-base="${escapeHtml(previewBase)}" style="background-image:url('${escapeHtml(previewUrl)}');transform:rotate(${rotation}deg) scale(${previewScale});"></div>` : ""}
         <div class="head">
           <div class="title">R${cell.row} C${cell.column}</div>
           <span class="status-chip ${sourceBusy ? "modified" : (diffs.length ? "modified" : (report.online ? "healthy" : ""))}">${sourceBusy ? "Routing" : (cell.decoder_id ? (diffs.length ? "Diff" : (hasReport ? (report.online ? "OK" : "Offline") : "Saved")) : "Empty")}</span>
@@ -462,6 +590,7 @@
       grid.appendChild(cellEl);
     }
     renderDetails();
+    syncWallPreviewRefresh();
   }
 
   function selectedCell() {
@@ -738,9 +867,9 @@
 
   async function applyWall() {
     await saveWallQuiet();
-    const data = await api("/api/video_wall/apply", { id: currentWall.id });
-    const failed = Object.values(data.results || {}).filter(r => !r.ok);
-    toast(failed.length ? `Applied with ${failed.length} display error(s)` : "Video wall applied", !failed.length);
+    const data = await api("/api/video_wall/apply", { id: currentWall.id }, { allowOkFalse: true });
+    const failed = summarizeResultFailures(data);
+    toast(failed.length ? `Applied with ${failed.length} display error(s): ${failed[0]}` : "Video wall applied", !failed.length);
     reports = {};
     requestRender();
     refreshWall({ silent: true }).catch(() => {});
@@ -905,6 +1034,30 @@
     document.getElementById("routeWallSourceBtn").addEventListener("click", () => routeSelectedWallSource());
     document.getElementById("exportWallConfigBtn").addEventListener("click", () => exportWallConfig().catch(e => toast(e.message, false)));
     document.getElementById("importWallConfigBtn").addEventListener("click", () => document.getElementById("importWallConfigFile").click());
+    const wallPreviewToggle = document.getElementById("wallPreviewToggle");
+    if (wallPreviewToggle) {
+      wallPreviewEnabled = loadWallPreviewEnabled();
+      wallPreviewOpacity = loadWallPreviewOpacity();
+      wallPreviewToggle.checked = wallPreviewEnabled;
+      updateWallPreviewControls();
+      wallPreviewToggle.addEventListener("change", () => {
+        wallPreviewEnabled = wallPreviewToggle.checked;
+        if (wallPreviewEnabled) wallPreviewRefreshTimestamp = Date.now();
+        saveWallPreviewEnabled(wallPreviewEnabled);
+        updateWallPreviewControls();
+        if (!wallPreviewEnabled) stopWallPreviewRefresh();
+        renderGrid();
+      });
+    }
+    const wallPreviewOpacitySlider = document.getElementById("wallPreviewOpacity");
+    if (wallPreviewOpacitySlider) {
+      wallPreviewOpacitySlider.value = String(wallPreviewOpacity);
+      wallPreviewOpacitySlider.addEventListener("input", () => {
+        wallPreviewOpacity = clampInt(wallPreviewOpacitySlider.value, 20, 80, DEFAULT_WALL_PREVIEW_OPACITY);
+        saveWallPreviewOpacity(wallPreviewOpacity);
+        renderGrid();
+      });
+    }
     document.getElementById("importWallConfigFile").addEventListener("change", event => {
       importWallConfig(event.target.files?.[0]).catch(e => toast(e.message, false));
       event.target.value = "";

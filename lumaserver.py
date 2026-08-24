@@ -92,7 +92,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
 # --- CSV Export Endpoint for Device Manager ---
 
@@ -652,6 +652,8 @@ def _vw_apply_source_cell(wall: Dict[str, Any], cell: Dict[str, Any], wall_sourc
             r = _vw_set_decoder_source_if_needed(ip, wall_source["streamname"])
             steps.append({"step": "sync wall source" if r.get("skipped") else "route wall source", **r})
             ok = ok and r.get("ok")
+        elif wall_source.get("skipped"):
+            steps.append({"step": "route wall source", "ok": True, "skipped": True, "detail": wall_source.get("error")})
         else:
             steps.append({"step": "sync wall source", "ok": False, "error": wall_source.get("error")})
             ok = False
@@ -932,7 +934,10 @@ def api_video_wall_apply():
     if not isinstance(wall, dict):
         return jsonify({"ok": False, "error": "missing wall"}), 400
 
-    source = _vw_encoder_stream(wall.get("source_id", ""))
+    source_id = str(wall.get("source_id") or "").strip()
+    source = _vw_encoder_stream(source_id) if source_id else {"ok": False, "skipped": True, "error": "wall source not selected"}
+    if source_id and not source.get("ok") and source.get("error") == "source encoder not found":
+        source = {"ok": False, "skipped": True, "error": "wall source not found"}
     targets = [cell for cell in wall.get("cells", []) if cell.get("decoder_id")]
     results = {}
     if targets:

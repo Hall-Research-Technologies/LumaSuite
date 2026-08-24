@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.7 - 2026-08-24
+
+- Added Video Wall layout preview overlays using decoder thumbnails, with a Preview toggle and transparency slider in the Wall Layout header.
+- Refreshed enabled Video Wall previews on a synchronized 7-second cadence so all monitor thumbnails update together without changing on cell selection.
+- Kept preview images fully visible and proportional, including corrected preview rotation handling for rotated displays.
+- Fixed Video Wall full-layout apply so missing or stale wall source selections do not produce display-error toasts when the wall matrix, bezel, and rotation apply successfully.
+- Improved Video Wall apply error reporting to show the first display-level failure instead of a generic `Request failed: 200` message.
+- Standardized Video Wall monitor tiles to a fixed 16:9 size across 1x1 through larger layouts, centering smaller walls and letting larger walls expand outward with horizontal scrolling.
+
 ## v1.0.6 - 2026-08-24
 
 - Added a running Device Manager dashboard clock that ticks locally and rebases from one stable source device instead of bouncing between devices during polling.
