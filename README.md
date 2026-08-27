@@ -1,6 +1,6 @@
 # LumaSuite - Device Management & Firmware Upgrade System
 
-**Current Version: 1.0.7**
+**Current Version: 1.0.8**
 
 A comprehensive Flask-based backend system for managing AV equipment including encoder/decoder devices and CS31 switchers with reliable firmware upgrade capabilities.
 

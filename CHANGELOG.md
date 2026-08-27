@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.8 - 2026-08-27
+
+- Moved LumaSuite runtime JSON storage to the user's application data directory on Windows, macOS, and Linux instead of writing beside the executable or into the source checkout.
+- Added `LUMA_DATA_DIR` override support so deployments can explicitly choose a runtime data location.
+- Updated the launcher to pass the shared LumaSuite data directory to the server before startup.
+- Added startup migration for existing `units_cache.json`, `video_walls.json`, `producer_config.json`, `producer_state.json`, and `producer2_state.json` files from legacy app/source locations.
+- Preserved existing user-data files during migration unless a legacy file is newer, in which case the existing user-data file is backed up before the newer file is copied forward.
+
 ## v1.0.7 - 2026-08-24
 
 - Added Video Wall layout preview overlays using decoder thumbnails, with a Preview toggle and transparency slider in the Wall Layout header.

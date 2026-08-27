@@ -4,7 +4,7 @@ from __future__ import annotations
 from io import StringIO
 import csv
 from datetime import datetime as dt
-import os, sys, json, time, re, threading, socket, ipaddress, platform, subprocess, logging, glob, io, uuid
+import os, sys, json, time, re, threading, socket, ipaddress, platform, subprocess, logging, glob, io, uuid, shutil
 def _upload_fw_cs31_socket(ip: str, firmware_path: str, attempts: list, debug: bool=False) -> Tuple[bool,str,Dict[str,Any]]:
     """Raw socket fallback for switcher devices that speak a custom protocol on port 80.
     Observed banner 'Upload data:' indicates non-HTTP; we treat it as prompt then stream bytes.
@@ -92,7 +92,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 
 # --- CSV Export Endpoint for Device Manager ---
 
@@ -1080,9 +1080,36 @@ def api_export_csv():
 PORT = int(os.environ.get("LUMA_PORT","8089"))
 
 IS_FROZEN = getattr(sys, "frozen", False)
-# When frozen, __file__ lives in a temp _MEIPASS; keep assets there but persist state beside the executable.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.dirname(sys.executable) if IS_FROZEN else BASE_DIR
+
+def _default_data_dir() -> str:
+    override = (os.environ.get("LUMA_DATA_DIR") or "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    system = platform.system().lower()
+    if system == "windows":
+        return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "LumaSuite")
+    if system == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "LumaSuite")
+    return os.path.join(os.path.expanduser("~"), ".lumasuite")
+
+def _legacy_data_dirs() -> List[str]:
+    candidates = []
+    if IS_FROZEN:
+        candidates.append(os.path.dirname(sys.executable))
+    candidates.append(BASE_DIR)
+    out = []
+    seen = set()
+    for path in candidates:
+        abs_path = os.path.abspath(path)
+        key = abs_path.lower() if os.name == "nt" else abs_path
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(abs_path)
+    return out
+
+DATA_DIR = _default_data_dir()
 os.makedirs(DATA_DIR, exist_ok=True)
 
 UI_DIR = os.path.join(BASE_DIR, "ui")
@@ -1097,6 +1124,44 @@ cache_units: Dict[str, Dict[str, Any]] = {}
 cache_lock = threading.Lock()
 cache_generation = 0
 
+_RUNTIME_JSON_DEFAULTS = {
+    "units_cache.json": [],
+    "video_walls.json": {
+        "kind": "lumasuite.video_walls",
+        "version": 1,
+        "walls": []
+    },
+    "producer_config.json": None,
+    "producer_state.json": {"ticker": {"dir": "rtl", "rows": []}, "streams": []},
+    "producer2_state.json": {"streams": [], "ticker": {}},
+}
+
+def _migrate_runtime_json_files():
+    """Copy legacy runtime JSON into the user data folder without discarding existing state."""
+    for filename in _RUNTIME_JSON_DEFAULTS:
+        dest = os.path.join(DATA_DIR, filename)
+        for legacy_dir in _legacy_data_dirs():
+            src = os.path.join(legacy_dir, filename)
+            if os.path.abspath(src) == os.path.abspath(dest) or not os.path.exists(src):
+                continue
+            if os.path.exists(dest):
+                try:
+                    if os.path.getmtime(src) <= os.path.getmtime(dest):
+                        continue
+                    backup = f"{dest}.bak-{time.strftime('%Y%m%d%H%M%S')}"
+                    shutil.copy2(dest, backup)
+                    logging.info(f"[startup] backed up existing {filename} to {backup}")
+                except Exception as e:
+                    logging.warning(f"[startup] skipping migration for {filename}; could not compare or back up: {e}")
+                    continue
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copy2(src, dest)
+                logging.info(f"[startup] migrated {filename} from {src} to {dest}")
+                break
+            except Exception as e:
+                logging.warning(f"[startup] failed to migrate {src} to {dest}: {e}")
+
 def _ensure_json_file(path: str, default: Any):
     """Create a state file if it is missing; leave existing files untouched."""
     if os.path.exists(path):
@@ -1109,6 +1174,7 @@ def _ensure_json_file(path: str, default: Any):
     except Exception as e:
         logging.warning(f"[startup] failed to create {path}: {e}")
 
+_migrate_runtime_json_files()
 _ensure_json_file(CACHE_FILE, [])
 _ensure_json_file(VIDEO_WALL_STATE_FILE, {
     "kind": "lumasuite.video_walls",

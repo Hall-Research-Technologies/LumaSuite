@@ -25,7 +25,19 @@ def _get_log_path() -> Path:
     return base / 'launcher.log'
 
 
+def _get_data_dir() -> Path:
+    if sys.platform == 'darwin':
+        base = Path.home() / 'Library' / 'Application Support' / 'LumaSuite'
+    elif sys.platform == 'win32':
+        base = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'LumaSuite'
+    else:
+        base = Path.home() / '.lumasuite'
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
 LOG_PATH = _get_log_path()
+DATA_DIR = _get_data_dir()
 
 
 def log_message(message: str):
@@ -58,7 +70,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Application Version
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 
 # Detect if we're running as a frozen executable
 IS_FROZEN = getattr(sys, 'frozen', False)
@@ -95,6 +107,7 @@ def resolve_asset(*relative_parts):
 sys.path.insert(0, str(BASE_DIR))
 
 try:
+    os.environ.setdefault("LUMA_DATA_DIR", str(DATA_DIR))
     from lumaserver import APP as app
 except ImportError as e:
     log_message(f"Error importing lumaserver: {e}")
