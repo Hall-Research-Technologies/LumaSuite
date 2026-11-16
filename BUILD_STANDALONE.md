@@ -1,200 +1,124 @@
-# Building Standalone Executables for LumaSuite
+# Building LumaSuite for Windows, macOS and Linux
 
-This guide explains how to build portable executables for LumaSuite on Windows, macOS, and Linux.
+This guide explains how to build the standalone LumaSuite application and how the release workflow
+does it. Each target is built on its own operating system; PyInstaller does not cross-compile.
 
 ## Requirements
 
-- Python 3.8+
-- pip (Python package manager)
-- Git (optional, for cloning the repository)
+- Python 3.12 (the version the lock was resolved on and CI uses). The Windows release build uses a
+  python-build-standalone CPython 3.12.16, because it carries OpenSSL 3.5.x.
+- `pip install -r requirements-build-lock.txt` (every package, direct and transitive, an exact pin).
+  `requirements-build.txt` lists only the direct pins and is what you edit; the lock is regenerated from
+  a fresh environment (see the header of the lock file).
+- Linux also needs `python3-tk libx11-dev libxkbcommon-x11-0` and a graphical session to run.
+- Node 24 only if you want to run the JavaScript suites (`python run_tests.py` runs everything).
 
-For reproducible builds (recommended for release artifacts), use:
+## What the build packages
 
-- `requirements-build-lock.txt` (fully pinned build dependencies)
+`build_executable.py` calls PyInstaller with `app_launcher.py` as the entry point and adds:
 
-## Installation & Build
+- `ui/` (minus `*.zip`, `logos`, `imagestream`, `localdata`),
+- `hallway.png` and `atlona.png`,
+- `licenses/` and `THIRD_PARTY_NOTICES.md` (the third-party licence texts and the notices that index them;
+  served at Settings > About > License). The build stops if they are missing.
 
-### Windows (.exe)
+It never packages a firmware folder, certificates, keys or credentials: the firmware folder is whatever the
+operator chooses in Settings, and runtime data lives in the application data folder at run time.
+`LumaSuite.spec` in the repository is stale and not used by any build.
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements-build-lock.txt
-   ```
-
-2. **Build the Windows executable:**
-   ```bash
-   python build_executable.py windows
-   ```
-
-   Or to build for the current platform:
-   ```bash
-   python build_executable.py
-   ```
-
-3. **Output:**
-   ```
-   dist/Windows/LumaSuite.exe
-   ```
-
-4. **Run the executable:**
-   - Double-click `LumaSuite.exe`
-   - A window will open
-   - The default browser will auto-launch with `http://127.0.0.1:8090` (or next available port)
-   - Click "Open Browser" to manually open the UI
-   - Click "Exit" to close the server and app
-
-### macOS (.app)
-
-**Important:** Builds include universal binary support (both Intel x86_64 and Apple Silicon ARM64).
-
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements-build-lock.txt
-   ```
-
-2. **Build the macOS app (universal):**
-   ```bash
-   python build_executable.py macos
-   ```
-
-3. **Output:**
-   ```
-   dist/macOS/LumaSuite.app
-   ```
-
-4. **Run the app:**
-   - Double-click `LumaSuite.app` or drag to Applications folder
-   - A window will open
-   - The default browser will auto-launch with `http://127.0.0.1:8090` (or next available port)
-   - Click "Open Browser" to manually open the UI
-   - Click "Exit" to close the server and app
-
-5. **Architecture Support:**
-   - The built `.app` runs on both Intel (x86_64) and Apple Silicon (ARM64) Macs
-   - First run may trigger Gatekeeper check; use Cmd+Space → type app name → Cmd+Enter to open
-
-6. **Custom Icon (Optional):**
-   - By default, the app uses the macOS generic application icon
-   - To use a custom icon, create `ui/LumaSuite.icns` (ICNS format only, PNG won't work)
-   - Convert from PNG: `convert ui/companylogo.png -define icon:auto-resize=256,128,96,64,48,32,16 ui/LumaSuite.icns`
-   - Or use an online converter: [cloudconvert.com](https://cloudconvert.com) (PNG to ICNS)
-   - Rebuild after adding the .icns file
-
-### Linux (binary)
-
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements-build-lock.txt
-   ```
-
-2. **Build the Linux binary:**
-   ```bash
-   python build_executable.py linux
-   ```
-
-3. **Output:**
-   ```
-   dist/Linux/LumaSuite
-   ```
-
-4. **Make executable (if needed):**
-   ```bash
-   chmod +x dist/Linux/LumaSuite
-   ```
-
-5. **Run the binary:**
-   ```bash
-   ./dist/Linux/LumaSuite
-   ```
-   
-   Or with GUI window (default):
-   ```bash
-   ./dist/Linux/LumaSuite
-   ```
-
-6. **Requirements:**
-   - X11/Wayland display server
-   - Python Tkinter (usually included in Linux distributions)
-   - For headless systems, redirect output and use SSH X11 forwarding if needed
-
-7. **Desktop launcher with icon (recommended on Ubuntu):**
-   ```bash
-   cd dist/Linux
-   chmod +x install-lumasuite-desktop.sh run-lumasuite.sh LumaSuite
-   ./install-lumasuite-desktop.sh
-   ```
-   This installs a trusted launcher in `~/.local/share/applications/lumasuite.desktop`
-   and registers the icon so you do not get the generic gear icon.
-
-## Features
-
-- **Standalone:** No Python installation required on end-user machines
-- **Portable:** Single executable file (Windows) or app bundle (macOS)
-- **Auto-Launch Browser:** Automatically opens the web UI in your default browser
-- **GUI Window:** Minimalist control window with status and manual browser open button
-- **Clean Exit:** Gracefully shuts down server when window is closed
-
-## Command-Line Arguments
-
-You can pass arguments to control host/port:
+After changing `requirements-build-lock.txt`, regenerate the notices and commit the result:
 
 ```bash
-# Windows
-LumaSuite.exe --host=0.0.0.0 --port=8080
-
-# macOS
-LumaSuite.app/Contents/MacOS/LumaSuite --host=0.0.0.0 --port=8080
-
-# Linux
-./LumaSuite --host=0.0.0.0 --port=8080
+python tools/collect_licenses.py          # rewrites licenses/ and THIRD_PARTY_NOTICES.md
+python tools/collect_licenses.py --check  # fails if they no longer match the installed packages
 ```
 
-## Troubleshooting
+Run it with the locked environment active. `tests/test_notices.py` fails if a locked package is neither listed
+as shipped nor as a build tool, or if a text is missing.
 
-### Windows
-- **"Windows protected your PC"** - This is a SmartScreen warning. Click "More info" → "Run anyway"
-- **Port already in use** - Use `--port=8080` to specify a different port
+## Windows
 
-### macOS
-- **"LumaServer cannot be opened"** - Right-click → Open (or lower security settings temporarily)
-- **"Developer cannot be verified"** - System Preferences → Security & Privacy → Open Anyway
-- **"bad CPU type in executable"** - Ensure you're running the correct architecture build (universal binary works on both Intel and Apple Silicon)
-- **Terminal window appears** - This is the control window (intentional); the browser should auto-launch. If not, use "Open Browser" button
-- **Generic application icon** - Add a custom icon by creating `ui/LumaSuite.icns`:
-  - From command line: `convert ui/companylogo.png -define icon:auto-resize=256,128,96,64,48,32,16 ui/LumaSuite.icns`
-  - Or use online tool: [cloudconvert.com](https://cloudconvert.com) (PNG to ICNS)
-  - Rebuild after creating the .icns file
+```bash
+pip install -r requirements-build-lock.txt
+python build_executable.py windows
+```
 
-### Linux
-- **No window appears / "bad display"** - Ensure X11 or Wayland is running. Use `DISPLAY=:0 ./LumaSuite` if running from SSH
-- **"ImportError" for pystray or Tkinter** - Install: `sudo apt-get install python3-tk python3-pystray libx11-dev libxkbcommon-x11-0`
-- **Terminal window appears instead of GUI** - Ensure you're running the correct build (use `python build_executable.py linux`)
+Output: `dist/Windows/LumaSuite.exe`, a single windowed executable (`--onefile --windowed`) carrying Windows
+version resources generated from the one authoritative version in `lumaserver.py`. Run it by double-click: a
+launcher window opens, LumaSuite starts on `http://127.0.0.1:8090` (or the next free port, or the fixed port
+chosen in Settings) and the default browser opens. *Open Browser* reopens it and *Exit* stops the server.
 
-## Distribution
+The executable is not code-signed: Windows SmartScreen shows "Windows protected your PC"; choose *More info*,
+then *Run anyway*.
 
-To distribute:
+## macOS
 
-1. **Windows:** Zip and distribute `dist/Windows/LumaSuite.exe`
-2. **macOS:** Create a DMG installer or distribute `dist/macOS/LumaSuite.app`
-3. **Linux:** Tar/zip and distribute `dist/Linux/LumaSuite`
+```bash
+pip install -r requirements-build-lock.txt
+python build_executable.py macos
+```
 
-## Building from Cross-Platform
+Output: `dist/macOS/LumaSuite.app` (`--onedir --windowed`, bundle identifier `com.lumasuite.app`). The build is
+for **one architecture**: that of the machine, or the value of `PYI_MACOS_ARCH` (`x86_64` or `arm64`). It is not a
+universal binary; the release builds an Intel app on `macos-26-intel` and an Apple Silicon app on `macos-26`.
+The app is not signed or notarised; Gatekeeper asks you to confirm (right-click, Open). The minimum macOS version
+has not been established. The icon is `ui/favicon.icns` (or `ui/LumaSuite.icns` if you add one).
 
-To build for a different platform, you need to run the build script on that platform. For example:
-- To build Windows .exe: Run the script on a Windows machine
-- To build macOS .app: Run the script on a Mac
+"Bad CPU type in executable" means the wrong architecture was downloaded.
 
-Alternatively, you can use CI/CD (GitHub Actions, etc.) to automate cross-platform builds.
+## Linux
 
-## GitHub Actions Cross-Platform Build
+```bash
+pip install -r requirements-build-lock.txt
+python build_executable.py linux
+```
 
-This repository includes `.github/workflows/build-cross-platform.yml`.
+Output in `dist/Linux/`: `LumaSuite` (`--onefile --windowed`), `LumaSuite.desktop`, `LumaSuite.png`,
+`run-lumasuite.sh` and `install-lumasuite-desktop.sh` (installs a launcher and icon for the current user). It is
+built on the Ubuntu runner only and needs X11 or Wayland; other distributions are untested. If no window appears
+over SSH, use `DISPLAY=:0 ./LumaSuite`.
 
-- Trigger manually from the Actions tab (`workflow_dispatch`), or
-- Push a tag like `v1.0.0` to trigger a release-style build.
+## Command-line arguments
 
-Artifacts produced:
+`--port=N` starts on port N for that run and is never saved; `--host=` is accepted for the server. The saved fixed
+port is set in Settings, not on the command line.
 
-- `LumaSuite-Windows` -> `dist/Windows/LumaSuite.exe`
-- `LumaSuite-macOS` -> `dist/macOS/*`
-- `LumaSuite-Linux` -> `dist/Linux/*`
+```bash
+LumaSuite.exe --port=8080
+LumaSuite.app/Contents/MacOS/LumaSuite --port=8080
+./LumaSuite --port=8080
+```
+
+A busy fixed port is never replaced silently: the launcher offers *Retry*, *Start on Alternate Port* (this session
+only), *Change Fixed Port* and *Exit*.
+
+## Verify the package (do not trust "build succeeded")
+
+"PyInstaller completed successfully" proves nothing runs. Start the artifact and ask it:
+
+```bash
+python tests/smoke_packaged.py dist/Windows/LumaSuite.exe
+```
+
+It starts the executable against a throwaway data folder, waits for its server and checks the version, pages,
+assets, the licence route and a bundled licence text, and the Remote Access defaults. It is run by hand and is not
+part of CI, so a release must have it run on the artifact that is actually going to be published.
+
+## GitHub Actions
+
+`.github/workflows/build-cross-platform.yml`:
+
+- **Triggers**: manual (`workflow_dispatch`), a push to `main`, and a tag matching `v*`.
+- **Per platform** (Windows, macOS Intel, macOS Apple Silicon, Linux): checkout, Python 3.12, locked
+  dependencies, `py_compile` of every server module, every Python suite, `node --check` and every Node suite, and
+  only then the build. Any failing step stops that platform's build.
+- **Artifacts**: `LumaSuite-Windows`, `LumaSuite-macOS-intel`, `LumaSuite-macOS-arm64`, `LumaSuite-Linux`
+  (the built application) plus a `warn-*` log and a `release-*` packaged archive:
+  `LumaSuite-<tag>-windows-x86_64.zip`, `LumaSuite-<tag>-macos-x86_64.zip`, `LumaSuite-<tag>-macos-arm64.zip` and
+  `LumaSuite-<tag>-linux-x86_64.tar.gz`. The update check chooses its download by these tails
+  (`-windows-x86_64.zip`, `-macos-x86_64.zip`, `-macos-arm64.zip`, `-linux-x86_64.tar.gz`), so renaming an archive means changing
+  `_platform_asset_suffix` in `lumaserver.py`; `tests/test_update_assets.py` ties the two together.
+- **Publishing**: only a `v*` tag push publishes a GitHub Release, from all four `release-*` artifacts. A manual run or
+  a push to `main` builds and uploads artifacts but publishes nothing. Tags are never created by the workflow, and a tag build stops at once unless the tag is `v` plus the version in `lumaserver.py` (the one authoritative version). The macOS build stamps that version into the bundle's `Info.plist`; the Windows build writes it into the executable's version resource.
+
+For a manual build of a release, tag the commit (for example `v1.1.0`) only when the release is approved.

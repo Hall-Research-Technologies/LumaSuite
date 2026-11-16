@@ -13,7 +13,6 @@ a = Analysis(
     ],
     hiddenimports=[
         'flask',
-        'flask_cors',
         'werkzeug',
         'requests',
         'requests.adapters',

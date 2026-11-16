@@ -1,5 +1,13 @@
 // matrix.js - Matrix Routing UI
 console.log('matrix.js loaded');
+// One escaping helper for this module, at module scope. Device-controlled strings
+// (hostnames, stream names) are data, never markup: a hostname containing a tag
+// must render as text.
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+  });
+}
 document.addEventListener('DOMContentLoaded', function() {
   // Store filter values globally
   let encFilterValue = '';
@@ -111,11 +119,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
   // Render matrix immediately from cache, then poll live and update
-  async function refreshAndRenderMatrix() {
+  async function refreshAndRenderMatrix(force) {
     // 1. Render immediately from cache
     await requestRenderMatrix();
-    // 2. Poll live device state in background, then re-render
-    fetch('/api/refresh_matrix_state', { method: 'POST' })
+    // 2. Poll live device state in background, then re-render. `force` (the Refresh button) asks
+    //    the host for a new read; the periodic poll shares whatever read is already in hand.
+    fetch('/api/refresh_matrix_state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(force === true ? { force: true } : {})
+    })
       .then(() => requestRenderMatrix())
       .catch(e => logDebug('Error refreshing matrix state', e));
   }
@@ -124,17 +137,21 @@ document.addEventListener('DOMContentLoaded', function() {
   // ...existing code...
   refreshAndRenderMatrix();
 
-  // Poll every 10 seconds to keep matrix in sync
+  // Poll every 10 seconds to keep matrix in sync -- while the page is on screen. A tab nobody is
+  // looking at asks no device anything; coming back to it reads once at once.
   setInterval(() => {
-    // ...existing code...
+    if (document.hidden) return;
     refreshAndRenderMatrix();
   }, 10000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshAndRenderMatrix();
+  });
 
   // Wire up refresh button to re-render matrix
   var refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async () => {
-      await refreshAndRenderMatrix();
+      await refreshAndRenderMatrix(true);
       toast('Matrix refreshed', true);
     });
   }
@@ -262,6 +279,26 @@ document.addEventListener('DOMContentLoaded', function() {
     return { streamname: enc.hostname || enc.ip, ip: enc.ip, port: null };
   }
 
+// One routing cell: the video ring and the audio dot inside it. A pure function of the two
+// units, so the four states (AV together, video only, audio only, breakaway) are testable.
+function routeCellHtml(dec, enc) {
+  let checked = '';
+  if (dec.dec && dec.dec.video && enc.enc && enc.enc.video) {
+    if (dec.dec.video.streamname === enc.enc.video.streamname) checked = 'checked';
+  }
+  const encType = (enc.type || enc.role || '');
+  const encModel = (enc.model || enc.modelname || '');
+  const decAudio = dec.dec && dec.dec.audio ? dec.dec.audio.streamname : '';
+  const encAudio = enc.enc && enc.enc.audio ? enc.enc.audio.streamname : '';
+  const audioOn = !!(decAudio && encAudio && decAudio === encAudio);
+  // The server says whether each unit is answering (one derivation for every page). A route
+  // needs both ends, so a cell with an offline end cannot be chosen; the server refuses it too.
+  const offline = dec.online === false || enc.online === false;
+  const dot = '<span class="dot' + (audioOn ? ' audio-on' : '') + '"' +
+    (audioOn ? ' role="img" aria-label="Audio comes from this source"' : ' aria-hidden="true"') + '></span>';
+  return `<td class="cell"><span class="radio-wrap"><input type="radio" name="route-${esc(dec.ip)}" class="route-radio" data-dec-ip="${esc(dec.ip)}" data-enc-ip="${esc(enc.ip)}" data-enc-type="${esc(encType)}" data-enc-model="${esc(encModel)}" ${checked}${offline ? ' disabled aria-disabled="true"' : ''}>${dot}</span></td>`;
+}
+
   async function renderMatrix() {
     // Hide and clear hover preview before rebuilding table
     const preview = document.getElementById('hover-preview');
@@ -341,7 +378,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${dev.hostname||dev.ip}</td><td>${dev.ip}</td><td>${stream}</td><td>${videoMulti}</td><td>${audioMulti}</td>`;
+        tr.innerHTML = `<td>${esc(dev.hostname||dev.ip)}</td><td>${esc(dev.ip)}</td><td>${esc(stream)}</td><td>${esc(videoMulti)}</td><td>${esc(audioMulti)}</td>`;
         tbody.appendChild(tr);
       });
       tbl.appendChild(tbody);
@@ -384,10 +421,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add master group checkbox in the first column
     trHead.innerHTML = `<th><input type="checkbox" id="group-master-checkbox"></th><th>Decoders \\ Encoders</th>` +
       encoders.map(e =>
-        `<th class="vertical-enc-header">
-          <a href="http://${e.ip}" target="_blank" style="color:inherit;text-decoration:underline;">
+        `<th class="vertical-enc-header${e.online === false ? ' offline-device' : ''}">
+          <a href="http://${esc(e.ip)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">
             <div style="writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;">
-              ${e.enc && e.enc.video && e.enc.video.streamname ? e.enc.video.streamname : '(no stream)'}<br><span style='font-size:11px;'>${e.ip}</span>
+              ${e.enc && e.enc.video && e.enc.video.streamname ? esc(e.enc.video.streamname) : '(no stream)'}<br><span style='font-size:11px;'>${esc(e.ip)}</span>
             </div>
           </a>
         </th>`
@@ -401,27 +438,21 @@ document.addEventListener('DOMContentLoaded', function() {
     decoders.forEach(dec => {
       const tr = document.createElement('tr');
       // Highlight offline decoders
-      if ((dec.status || '').toLowerCase() !== 'idle') {
+      const decOffline = dec.online === false || (dec.online === undefined && (dec.status || '').toLowerCase() !== 'idle');
+      if (decOffline) {
         tr.classList.add('offline-device');
+        window.selectedDecoders.delete(dec.ip);        // an offline display is never part of a group route
       }
       const checkedGroup = window.selectedDecoders.has(dec.ip) ? 'checked' : '';
-      tr.innerHTML = `<td><input type="checkbox" class="group-checkbox" data-dec-ip="${dec.ip}" ${checkedGroup}></td>` +
+      tr.innerHTML = `<td><input type="checkbox" class="group-checkbox" data-dec-ip="${esc(dec.ip)}" ${checkedGroup}${decOffline ? ' disabled aria-disabled="true"' : ''}></td>` +
         `<th>
-          <a href="http://${dec.ip}" target="_blank" style="color:inherit;text-decoration:underline;">
+          <a href="http://${esc(dec.ip)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">
             <div>
-              ${dec.hostname||dec.ip}<br><span style='font-size:11px;'>${dec.ip}</span>
+              ${esc(dec.hostname||dec.ip)}<br><span style='font-size:11px;'>${esc(dec.ip)}</span>
             </div>
           </a>
         </th>` +
-        encoders.map(enc => {
-          let checked = '';
-          if (dec.dec && dec.dec.video && enc.enc && enc.enc.video) {
-            if (dec.dec.video.streamname === enc.enc.video.streamname) checked = 'checked';
-          }
-          const encType = (enc.type || enc.role || '');
-          const encModel = (enc.model || enc.modelname || '');
-          return `<td><input type="radio" name="route-${dec.ip}" class="route-radio" data-dec-ip="${dec.ip}" data-enc-ip="${enc.ip}" data-enc-type="${encType}" data-enc-model="${encModel}" ${checked}></td>`;
-        }).join('');
+        encoders.map(enc => routeCellHtml(dec, enc)).join('');
       tbody.appendChild(tr);
       // Debug: log decoder row
       console.debug('[renderMatrix] Decoder row:', dec, tr.innerHTML);
@@ -441,7 +472,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle group checkbox changes
 
     // Handle group checkbox changes
-    const groupCheckboxes = Array.from(tbody.querySelectorAll('.group-checkbox'));
+    const groupCheckboxes = Array.from(tbody.querySelectorAll('.group-checkbox:not(:disabled)'));
     groupCheckboxes.forEach(cb => {
       cb.addEventListener('change', function(e) {
         const ip = cb.getAttribute('data-dec-ip');
@@ -472,7 +503,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Wire up routing for radio buttons
-    tbody.addEventListener('change', async function(e) {
+    const onRouteSelect = async function(e) {
       if (e.target.classList.contains('route-radio')) {
         console.log('route-radio clicked', e.target.getAttribute('data-dec-ip'), e.target.getAttribute('data-enc-ip'));
         const decIp = e.target.getAttribute('data-dec-ip');
@@ -491,7 +522,7 @@ document.addEventListener('DOMContentLoaded', function() {
             rowRadios.forEach(radio => { radio.checked = radio.getAttribute('data-enc-ip') === encoderIp; });
           });
         };
-        applyRouteSelection(targets, encIp);
+        if (routeMode !== 'audio') applyRouteSelection(targets, encIp);
         
         // Validate encoder profile for CS31 compatibility
         const getEncoderEncodeMode = (encUnit) => {
@@ -557,7 +588,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let allOk = true;
         let lastError = '';
         const sendRoute = async targetIp => {
-          const postData = { decoder_ip: targetIp, encoder_ip: encIp };
+          const postData = { decoder_ip: targetIp, encoder_ip: encIp, mode: routeMode };
           console.debug('[sendRoute] POST /api/route_matrix', postData);
           try {
             const resp = await fetch('/api/route_matrix', {
@@ -586,7 +617,11 @@ document.addEventListener('DOMContentLoaded', function() {
           
           if (!result.ok || status !== 200) {
             hasFailure = true;
-            toast(`Route Failed for ${decoderName}`, false);
+            // The server's own sentence says what happened, including a route it put back.
+            const why = result && result.error ? ` \u2014 ${result.error}` : '';
+            const undone = result && result.rollback === 'verified' ? ' The display was put back as it was.'
+              : (result && result.rollback === 'incomplete' ? ' The display could NOT be confirmed as restored.' : '');
+            toast(`Route failed for ${decoderName}${why}.${undone}`, false);
             // Uncheck the radio button if failed
             const radio = document.querySelector(`input.route-radio[data-dec-ip='${targetIp}'][data-enc-ip='${encIp}']`);
             if (radio) radio.checked = false;
@@ -595,8 +630,11 @@ document.addEventListener('DOMContentLoaded', function() {
           }
         }
         
-        // If any succeeded, poll once and batch-refresh UI
-        if (hasSuccess) {
+        // The grid is redrawn from the server's cache either way, so the video ring and
+        // the audio dot always show what the displays reported, not what was clicked.
+        if (routeMode === 'audio' || (hasFailure && !hasSuccess)) {
+          await requestRenderMatrix(true);
+        } else if (hasSuccess) {
           let confirmed = false;
           let attempts = 0;
           const maxAttempts = 5;
@@ -624,10 +662,24 @@ document.addEventListener('DOMContentLoaded', function() {
           }
           if (confirmed) {
             // Single backend refresh and single renderMatrix call
-            await fetch('/api/refresh_matrix_state', { method: 'POST' });
+            await fetch('/api/refresh_matrix_state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ force: true })
+            });
             await requestRenderMatrix(true);
           }
         }
+      }
+    };
+    tbody.addEventListener('change', onRouteSelect);
+    // Audio-only routing can name the source the video already comes from, and
+    // clicking an already-selected radio fires no change event, so audio mode
+    // listens for the click itself and keeps the video ring where the display has it.
+    tbody.addEventListener('click', function(e) {
+      if (routeMode === 'audio' && e.target.classList && e.target.classList.contains('route-radio')) {
+        e.preventDefault();
+        onRouteSelect(e);
       }
     });
   }
@@ -641,11 +693,13 @@ document.addEventListener('DOMContentLoaded', function() {
   function setMode(m){
     routeMode = m;
     document.querySelectorAll('.modebtn').forEach(b=>b.classList.toggle('active', b.dataset.mode===m));
+    document.querySelectorAll('.modebtn').forEach(b=>b.setAttribute('aria-pressed', b.dataset.mode===m ? 'true' : 'false'));
     const modeLabel = document.getElementById('mode_label');
     if(modeLabel){
-      const upper = (m||'').toUpperCase();
-      const label = upper==='AV' ? 'AV (Audio + Video)' : (upper==='VIDEO' ? 'Video Only' : 'Audio Only');
-      modeLabel.textContent = label;
+      // Say what a click does now. Ring = video, dot = audio.
+      modeLabel.textContent = m==='av' ? 'A click routes audio and video together (ring = video, dot = audio).'
+        : (m==='video' ? 'A click routes the video only; the audio stays as it is.'
+        : 'A click routes the audio only; the video stays as it is.');
     }
   }
   document.addEventListener('click', (e)=>{

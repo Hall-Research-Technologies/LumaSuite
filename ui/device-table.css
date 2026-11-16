@@ -1,0 +1,300 @@
+/*
+ * Device Manager table (shared with OmniSuite's Device Info): a locked command area, a sticky header row, frozen
+ * identity columns and a mirrored top scrollbar.
+ *
+ * WHY THIS FILE EXISTS
+ * --------------------
+ * The device table is both wide and long. Scrolled down, the operator lost the
+ * column headers and every control that acts on the table -- Scan, Clear Units,
+ * the firmware selector, Upgrade Selected -- so acting on a row meant scrolling
+ * back up to find the control and back down to see what it did. Scrolled right,
+ * a row became an anonymous line of values with nothing naming the device it
+ * belonged to.
+ *
+ * NO MAGIC NUMBERS
+ * ----------------
+ * Every `top` below is expressed in the measured heights published by the
+ * command-area module in ui/index.html and by ui/mirror-scroll.js, and every
+ * frozen `left` in the column widths published by ui/sticky-columns.js. A
+ * hardcoded 37px/91px/143px stack
+ * is correct in exactly one font size, one density template and one zoom level
+ * and silently wrong in all the others -- which is the defect this file exists
+ * to prevent. The only literal offset here is `top: 0`, and that is the anchor
+ * of the stack rather than a measurement of anything.
+ *
+ * COLOURS
+ * -------
+ * Sticky and frozen surfaces must be opaque, or the rows travelling behind them
+ * show through. They take the same semantic tokens the Configure page's frozen
+ * columns use (--surface-raised / --surface-elevated / --edge), so light mode
+ * gets a light plate and dark mode a dark one. A literal colour here would
+ * leave a dark strip across a light page.
+ */
+
+:root {
+  /* Measured at runtime by the command-area module. The fallbacks cover only
+     the first frame, before the first measurement lands. */
+  --shell-header-h: 0px;          /* logo, nav tabs, Settings gear */
+  --scan-bar-h: 0px;              /* adapters, Targets, Scan, Clear Units */
+  --firmware-bar-h: 0px;          /* firmware controls, counts, Upgrade Selected */
+  --table-mirror-h: 0px;          /* the mirrored scrollbar; published by
+                                     ui/mirror-scroll.js, 0 while it is hidden */
+  --table-scrollbar-h: 0px;       /* the platform's own horizontal scrollbar */
+  --table-head-h: 0px;            /* the sticky header row */
+  --shell-gutter: 0px;            /* page margin, used to plate the gaps between bars */
+  --table-viewport-reserve: 0px;  /* what must stay visible below the table */
+
+  /* Derived once, so every consumer of the stack agrees on it. */
+  --command-area-h: calc(var(--scan-bar-h) + var(--firmware-bar-h));
+  --command-stack-h: calc(var(--shell-header-h) + var(--command-area-h));
+  --table-viewport-top: calc(var(--command-stack-h) + var(--table-mirror-h));
+
+  /* An overlay-scrollbar platform reports a thickness of zero, which would make
+     the mirror a zero-height invisible strip. This is the floor it falls back
+     to: a scrollbar's own thickness, never a layout offset. */
+  --table-scrollbar-min: 10px;
+
+  /* The mirror is sized to the table viewport's own content box, because the
+     two must have identical scroll ranges. That is a measurement, not a
+     declaration: ui/mirror-scroll.js writes the strip's width and left
+     offset inline from the wrapper's rendered clientWidth and content edge,
+     which move with the vertical scrollbar and so cannot be stated here. */
+  --frozen-columns-w: 0px;  /* combined width of the three frozen columns */
+}
+
+/*
+ * Opaque, whatever the palette resolves to.
+ *
+ * --surface-raised and --surface-elevated are colour-mix() results in light
+ * mode, and a mix whose percentages sum to less than 100 carries that shortfall
+ * as alpha: --surface-elevated computes to 82% opaque. A translucent sticky
+ * cell lets the rows travel visibly through it, which is the whole defect the
+ * frozen columns exist to avoid. Compositing the semantic tone over the opaque
+ * page surface keeps the token and guarantees the result is opaque in both
+ * palettes -- so the longhands are used throughout rather than the `background`
+ * shorthand, which would drop the overlay.
+ */
+
+/* ------------------------------------------------- locked command area --- */
+/*
+ * The header and the two command bars stay put and the table scrolls beneath
+ * them. Only these compact command surfaces are pinned: the advisory banners
+ * live inside the table's scroll container and scroll away with the rows,
+ * because a permanently pinned advisory eats the height the operator came for.
+ */
+.header,
+#scan_bar,
+#firmware_bar {
+  position: sticky;
+  /* These bars carry vertical margins, and a sticky element's margin box is
+     transparent -- without this plate the rows show through the gaps between
+     the pinned bars. */
+  box-shadow: 0 0 0 var(--shell-gutter) var(--surface);
+}
+.header {
+  top: 0;
+  z-index: 40;
+  background: var(--surface);
+}
+#scan_bar {
+  top: var(--shell-header-h);
+  z-index: 39;
+}
+#firmware_bar {
+  top: calc(var(--shell-header-h) + var(--scan-bar-h));
+  z-index: 38;
+}
+
+/* ------------------------------------------------- the table viewport ---- */
+/*
+ * The table gets its own bounded scroll container so the header row can stick
+ * to the top of it. It has to be this way round: `overflow-x: auto` already
+ * makes this element the nearest scrollport, so a <thead> inside it can only
+ * ever stick relative to this box and never to the page. Bounding its height is
+ * what makes a sticky header meaningful at all.
+ *
+ * The container is itself sticky, so the table viewport starts immediately
+ * below the locked command area even when the page has residual scroll of its
+ * own.
+ */
+.table-wrapper {
+  position: sticky;
+  top: var(--table-viewport-top);
+  z-index: 0;
+  overflow: auto;
+  max-height: calc(100vh - var(--table-viewport-top) - var(--table-viewport-reserve));
+}
+
+/* --------------------------------------------------- sticky header row --- */
+/*
+ * `top: 0` is the top of the table viewport above, which is itself pinned
+ * directly below the command area, so the header row begins exactly there.
+ * It must be opaque or rows read through it as they pass underneath.
+ */
+table.device-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background-color: var(--surface);
+  background-image: linear-gradient(var(--surface-elevated), var(--surface-elevated));
+  /* A collapsed border does not travel with a sticky cell, so the rule under
+     the header is drawn as an inset shadow instead of bleeding by a pixel. */
+  box-shadow: inset 0 -1px 0 var(--edge);
+}
+
+/* ----------------------------------------------- frozen identity columns - */
+/*
+ * Selection checkbox, IP, Hostname. MAC and everything after it scrolls
+ * underneath them. The offsets are the *rendered* widths of the columns to
+ * their left, measured and published by ui/sticky-columns.js as
+ * --sticky-col2-offset / --sticky-col3-offset. A fixed pixel offset breaks the
+ * moment a column's width changes, which it does with density, content, zoom
+ * and the Device Details toggle.
+ */
+table.device-table td:nth-child(1),
+table.device-table td:nth-child(2),
+table.device-table td:nth-child(3) {
+  position: sticky;
+  background-color: var(--surface);
+  background-image: linear-gradient(var(--surface-raised), var(--surface-raised));
+  z-index: 2;
+}
+table.device-table th:nth-child(1),
+table.device-table td:nth-child(1) { left: 0; }
+table.device-table th:nth-child(2),
+table.device-table td:nth-child(2) { left: var(--sticky-col2-offset, 0px); }
+table.device-table th:nth-child(3),
+table.device-table td:nth-child(3) { left: var(--sticky-col3-offset, 0px); }
+
+/*
+ * The corner cells -- the sticky header row crossed with a frozen column --
+ * must outrank both, or a body cell scrolling up or a header cell scrolling
+ * across paints over them. Header 3, frozen body cell 2, corner 4.
+ */
+table.device-table thead th:nth-child(1),
+table.device-table thead th:nth-child(2),
+table.device-table thead th:nth-child(3) {
+  z-index: 4;
+  background-color: var(--surface);
+  background-image: linear-gradient(var(--surface-elevated), var(--surface-elevated));
+}
+
+/* The boundary sits on the last frozen column, so it is obvious the rest of the
+   row is sliding behind it rather than being clipped. */
+table.device-table th:nth-child(3),
+table.device-table td:nth-child(3) {
+  box-shadow: inset -1px 0 0 var(--edge), 6px 0 8px -8px rgba(0, 0, 0, .45);
+}
+table.device-table thead th:nth-child(3) {
+  box-shadow: inset -1px 0 0 var(--edge), inset 0 -1px 0 var(--edge),
+              6px 0 8px -8px rgba(0, 0, 0, .45);
+}
+html.light table.device-table td:nth-child(3),
+body.light table.device-table td:nth-child(3) {
+  box-shadow: inset -1px 0 0 var(--edge), 6px 0 8px -8px rgba(0, 0, 0, .18);
+}
+html.light table.device-table thead th:nth-child(3),
+body.light table.device-table thead th:nth-child(3) {
+  box-shadow: inset -1px 0 0 var(--edge), inset 0 -1px 0 var(--edge),
+              6px 0 8px -8px rgba(0, 0, 0, .18);
+}
+
+/* The row hover affordance is a translucent wash on <tr>, which an opaque
+   frozen cell hides. Restating it keeps the row readable across the freeze
+   line. */
+table.device-table tbody tr:hover td:nth-child(1),
+table.device-table tbody tr:hover td:nth-child(2),
+table.device-table tbody tr:hover td:nth-child(3) {
+  background-image: linear-gradient(var(--surface-elevated), var(--surface-elevated));
+}
+
+/* Freezing a cell must not disable what is inside it: the selection checkbox
+   and the address link stay clickable and keep their focus ring. */
+table.device-table td:nth-child(1) input,
+table.device-table td:nth-child(2) a.ip {
+  position: relative;
+  z-index: 1;
+}
+table.device-table td:nth-child(1) { white-space: nowrap; }
+/* The address is never truncated -- it is the row's identity. */
+table.device-table td:nth-child(2) { white-space: nowrap; }
+/* Hostname may ellipsis; its full value stays on the cell's title attribute. */
+table.device-table td:nth-child(3) {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Tabbing into the table must not park the focused control underneath the
+ * sticky header or behind the frozen columns -- a focus ring nobody can see is
+ * the same as no focus ring. The scroll that brings an element into view is
+ * told to leave the measured header height and the measured frozen width clear.
+ * Stated unconditionally rather than on :focus-visible, because the scroll
+ * happens as focus moves and must not depend on that state having settled.
+ */
+.table-wrapper a,
+.table-wrapper button,
+.table-wrapper input,
+.table-wrapper select,
+.table-wrapper [tabindex] {
+  scroll-margin-top: var(--table-head-h);
+  scroll-margin-bottom: var(--table-head-h);
+  scroll-margin-left: var(--frozen-columns-w);
+}
+
+/* The empty-state row spans the whole table and is not an identity column. */
+table.device-table tbody tr > td[colspan] {
+  position: static;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  max-width: none;
+  white-space: normal;
+}
+
+/* --------------------------------------------- mirrored top scrollbar ---- */
+/*
+ * A real scroll container rather than a facsimile, so the operator gets the
+ * platform's own scrollbar, keyboard behaviour and trackpad feel. Its track is
+ * sized to the table's actual scrollWidth by ui/mirror-scroll.js, and the
+ * whole strip is hidden whenever the table does not overflow -- an inert
+ * scrollbar is worse than no scrollbar.
+ */
+.table-scroll-mirror {
+  position: sticky;
+  top: var(--command-stack-h);
+  z-index: 37;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: max(var(--table-scrollbar-h), var(--table-scrollbar-min));
+  /* A groove, so the strip reads as a scrollbar rather than an unexplained gap
+     on a platform whose overlay scrollbar only paints its thumb on hover. The
+     native scrollbar paints over this where the platform draws one. */
+  background-color: var(--surface);
+  background-image: linear-gradient(var(--surface-elevated), var(--surface-elevated));
+  border-radius: 999px;
+  /* Width and left offset are written inline by ui/mirror-scroll.js from the
+     wrapper's measured client box. The wrapper loses width to its border and
+     to a vertical scrollbar when the rows overflow; a mirror that kept the
+     full body width would have a larger maximum scrollLeft, so dragging it to
+     its right-hand end would leave the table two to seventeen pixels short of
+     its own -- measured at 158 against 160. Nothing can be stated here,
+     because the vertical scrollbar comes and goes with the device count. */
+}
+.table-scroll-mirror[hidden] { display: none; }
+.table-scroll-mirror-track { height: 1px; }
+/* An overlay-scrollbar platform paints its thumb only while the pointer is over
+   it, which would leave this strip looking like an unexplained gap. The thumb is
+   given the same measured height as the strip so the two always agree, and a
+   token colour so it is visible in both palettes. */
+.table-scroll-mirror::-webkit-scrollbar {
+  height: max(var(--table-scrollbar-h), var(--table-scrollbar-min));
+  background: transparent;
+}
+.table-scroll-mirror::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 999px;
+}
+.table-scroll-mirror::-webkit-scrollbar-track { background: transparent; }

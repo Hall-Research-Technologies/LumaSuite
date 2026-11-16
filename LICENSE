@@ -1,0 +1,283 @@
+Hall Research Technologies Source-Available Software License
+Version 1.0
+
+Copyright © 2026 Hall Research Technologies LLC
+
+LumaSuite is source-available software. Its source code is published so that it
+can be read, inspected and adapted. It is not OSI Open Source, and it is not
+offered under the MIT, Apache, BSD, GPL, Creative Commons or PolyForm licenses.
+These are Hall Research Technologies LLC's own terms, and they are the only
+terms that govern LumaSuite.
+
+Please read this license before using LumaSuite. By using, copying, modifying
+or redistributing the software, you accept it.
+
+
+1. DEFINITIONS
+
+"LumaSuite" and "the Software" mean the LumaSuite software published by Hall
+Research Technologies LLC, including its source code, documentation and
+released builds.
+
+"Hall" means Hall Research Technologies LLC.
+
+"You" means the person or organization exercising the permissions in this
+license. If you accept it on behalf of an organization, "you" includes that
+organization.
+
+"Modified Version" means the Software with any addition, deletion or change to
+it, including a derivative work, a fork, a port, or the Software combined with
+other code so that the result is distributed as one product.
+
+"Distribute" means to give, publish, transfer, share or otherwise make the
+Software available to anyone outside your organization, by any means, including
+publishing it in a publicly accessible source repository or download.
+
+"Your organization" means you, and if you are acting for a company or other
+legal entity, that entity and the entities it controls, that control it, or
+that are under common control with it.
+
+"Third-Party Components" means software that Hall did not write and includes
+with, or links into, LumaSuite.
+
+
+2. OWNERSHIP
+
+Hall retains all copyright, ownership and other intellectual property rights in
+LumaSuite. This license grants permission to use the Software on the terms
+below. It does not transfer ownership of it, and it does not grant any right
+that is not stated in it.
+
+
+3. PERMISSION TO USE — FREE, INCLUDING IN BUSINESS
+
+Hall grants you permission, free of charge and without any license fee, to
+install and use LumaSuite for any purpose, including:
+
+  (a) personal use;
+  (b) internal use within your business or organization;
+  (c) commercial and business operations, including use of the Software as a
+      tool while you are earning money.
+
+This permission expressly includes use by audiovisual integrators, installers,
+consultants, contractors and service providers while performing paid work for
+their own customers.
+
+There is no restriction on using LumaSuite commercially. The restrictions in
+this license are on selling the Software and on distributing Modified Versions
+of it, not on using it.
+
+
+4. SOURCE CODE ACCESS
+
+You may view, read, inspect, study and analyze the source code of LumaSuite.
+
+
+5. MODIFICATION FOR PERSONAL AND INTERNAL USE
+
+You may modify LumaSuite, and use your Modified Version, for:
+
+  (a) your own personal use; and
+  (b) internal use within your own organization.
+
+You may share your Modified Version within your organization, and with
+contractors working on your behalf on your own systems, provided they are bound
+by this license. That is internal use, not distribution.
+
+You may not Distribute a Modified Version. See section 7.
+
+
+6. REDISTRIBUTION OF THE ORIGINAL, UNMODIFIED SOFTWARE
+
+You may Distribute the original, unmodified LumaSuite, provided that all of the
+following are true:
+
+  (a) you distribute it free of charge, and charge no fee of any kind for the
+      software, for a license to it, or for access to the copy;
+  (b) it is unmodified;
+  (c) you include this LICENSE file;
+  (d) you preserve Hall's copyright notice;
+  (e) you include the third-party notices distributed with the Software,
+      including THIRD_PARTY_NOTICES.md; and
+  (f) you preserve any other attribution included with the original
+      distribution.
+
+Simply pointing people to Hall's own published release is always permitted and
+is the preferred way to share LumaSuite.
+
+
+7. DISTRIBUTION OF MODIFIED VERSIONS IS PROHIBITED
+
+You may not, without Hall's prior written permission:
+
+  (a) Distribute a Modified Version;
+  (b) publish a Modified Version, including hosting it publicly as a fork
+      intended for others to obtain;
+  (c) sublicense a Modified Version;
+  (d) sell a Modified Version;
+  (e) transfer a Modified Version to any third party as a software product; or
+  (f) offer a Modified Version to third parties as a hosted or network service
+      in place of distributing it.
+
+Modifications you keep inside your own organization are permitted under section
+5. This section restricts sending them outward.
+
+
+8. SALE IS PROHIBITED
+
+You may not sell LumaSuite, and you may not charge any fee for:
+
+  (a) the Software itself;
+  (b) a license or right to use the Software;
+  (c) access to a copy of the Software you have redistributed; or
+  (d) LumaSuite offered commercially as a software product, whether on its own,
+      bundled with other software, or preloaded on hardware sold to a customer.
+
+LumaSuite is provided free of charge, and it must stay free of charge for
+everyone who receives it.
+
+
+9. PROFESSIONAL SERVICES MAY BE CHARGED FOR
+
+Nothing in section 8 prevents you from charging for your own professional
+services, even when you use LumaSuite to perform them. Charging for services
+such as audiovisual system design, installation, configuration, commissioning,
+programming, integration, training, maintenance, support or consulting is
+permitted.
+
+The distinction is what the customer is paying for. Payment for your work,
+time, expertise or equipment is permitted. Payment for LumaSuite itself, or for
+a license or right to use it, is not.
+
+You may install LumaSuite on a customer's systems as part of a paid engagement,
+provided you do so under section 6 and charge nothing for the software.
+
+
+10. NO REBRANDING
+
+You may not rename, rebrand or restyle LumaSuite and distribute it as your own
+or another software product, and you may not present it as originating from
+anyone other than Hall. You may not use the LumaSuite or Hall Research
+Technologies names, logos or trademarks to promote a Modified Version or to
+suggest that Hall endorses your product. This section does not prevent accurate,
+factual statements that you use LumaSuite.
+
+
+11. THIRD-PARTY COMPONENTS
+
+LumaSuite includes Third-Party Components. This license applies only to the
+LumaSuite code and content owned by Hall. It does not apply to, alter or
+supersede the license of any Third-Party Component.
+
+Each Third-Party Component remains governed by its own license and copyright,
+and your rights and obligations for that component come from that license, not
+from this one. Some of those licenses impose obligations that this license
+cannot waive on their authors' behalf. Hall claims no ownership of any
+Third-Party Component.
+
+The Third-Party Components distributed with LumaSuite, and their licenses, are
+listed in THIRD_PARTY_NOTICES.md. Where a Third-Party Component's license
+conflicts with this one, that component's license governs that component.
+
+11A. COMPONENTS LICENSED UNDER THE GNU LESSER GENERAL PUBLIC LICENSE
+
+Some Third-Party Components, identified in THIRD_PARTY_NOTICES.md, are
+licensed under the GNU Lesser General Public License version 3 (each, an
+"LGPL Component"). Each LGPL Component remains governed by its own LGPL
+license and not by this license. Notwithstanding any other provision of this
+license, but only to the extent necessary to preserve the rights that the LGPL
+grants you:
+
+  (a) nothing in this license prohibits you from modifying an LGPL Component
+      as the LGPL permits;
+
+  (b) nothing in this license prohibits you from reverse engineering the
+      Software to the extent the LGPL requires you to be permitted to do so
+      in order to debug such modifications; and
+
+  (c) you may replace an LGPL Component contained in the Software with a
+      modified, interface-compatible version, and rebuild or recombine the
+      Software with it using the source code and build instructions that Hall
+      publishes, for your own permitted use, as necessary to exercise those
+      rights.
+
+This section does not relicense, and grants no right in, the code and content
+of the Software that Hall owns beyond what sections 3 through 9 grant. Every
+other provision of this license, including sections 5, 7, 8 and 10, continues
+to apply to the Software as a whole, except to the extent necessary to
+preserve the rights described in this section. Nothing in this license
+modifies the text or terms of any LGPL.
+
+
+12. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NONINFRINGEMENT.
+
+HALL DOES NOT WARRANT THAT THE SOFTWARE WILL BE UNINTERRUPTED, ERROR-FREE OR
+FREE OF HARMFUL COMPONENTS, OR THAT IT WILL WORK CORRECTLY WITH ANY PARTICULAR
+DEVICE, NETWORK OR CONFIGURATION.
+
+LumaSuite reconfigures audiovisual and network hardware. You are responsible
+for deciding whether it is appropriate for your equipment, for the consequences
+of the changes you make with it, and for maintaining your own backups and
+recovery procedures.
+
+
+13. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, HALL SHALL NOT BE LIABLE FOR
+ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, PUNITIVE OR CONSEQUENTIAL
+DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, BUSINESS, GOODWILL, USE OR
+EQUIPMENT DOWNTIME, ARISING OUT OF OR RELATING TO THE SOFTWARE OR THIS LICENSE,
+UNDER ANY THEORY OF LIABILITY, EVEN IF HALL HAS BEEN ADVISED OF THE POSSIBILITY
+OF SUCH DAMAGES.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, HALL'S TOTAL AGGREGATE
+LIABILITY ARISING OUT OF OR RELATING TO THE SOFTWARE OR THIS LICENSE SHALL NOT
+EXCEED ONE HUNDRED US DOLLARS (US$100).
+
+The software is provided free of charge, and these limits reflect that. Some
+jurisdictions do not allow certain exclusions or limitations of liability; in
+those jurisdictions, Hall's liability is limited to the smallest extent
+permitted by law.
+
+
+14. TERMINATION
+
+Your rights under this license end automatically if you materially violate it.
+
+If the violation can be corrected, your rights are reinstated as of the date
+you correct it, provided you correct it within 30 days of becoming aware of the
+violation and Hall has not already notified you of it. If Hall notifies you of
+a material violation, your rights are reinstated only if you correct it within
+30 days of that notice.
+
+On termination you must stop using the Software and stop distributing it, and
+you must stop distributing any copy you made available to others. Sections 2,
+11, 11A, 12, 13 and 15 survive termination.
+
+
+15. GENERAL
+
+This license is the entire agreement between you and Hall concerning LumaSuite,
+and it replaces any earlier license under which you may have received it.
+
+If any provision of this license is held unenforceable, it shall be modified to
+the minimum extent necessary to make it enforceable, and the remaining
+provisions shall remain in full force.
+
+Hall's failure to enforce any provision is not a waiver of it.
+
+Hall may publish LumaSuite under different or additional terms, and may grant
+written permission for uses this license does not allow. Only a written grant
+signed by Hall does so; nothing else in Hall's documentation, marketing or
+correspondence modifies this license.
+
+For permissions beyond this license, contact Hall Research Technologies LLC at
+https://www.hallresearch.com.
+
+
+Copyright © 2026 Hall Research Technologies LLC. All rights reserved except as
+expressly granted above.

@@ -5,6 +5,7 @@ Run: python build_executable.py
 """
 
 import os
+import re
 import sys
 import subprocess
 import platform
@@ -16,6 +17,93 @@ PROJECT_DIR = Path(__file__).parent
 DIST_DIR = PROJECT_DIR / 'dist'
 BUILD_DIR = PROJECT_DIR / 'build'
 LAUNCHER = PROJECT_DIR / 'app_launcher.py'
+# Third-party licence texts and the notices that index them are packaged with every build
+# (served by /license and /licenses/<package>/<file>). tools/collect_licenses.py regenerates them.
+LICENSES_DIR = PROJECT_DIR / 'licenses'
+NOTICES_FILE = PROJECT_DIR / 'THIRD_PARTY_NOTICES.md'
+LICENSE_FILE = PROJECT_DIR / 'LICENSE'
+
+# Canonical application copyright wording, as already shown to operators in
+# ui/manual.html's About section and ui/settings.js's Application panel.
+# Not invented here -- reused verbatim so this is not a second, competing
+# source of the copyright string.
+APP_COMPANY_NAME = "Hall Research Technologies LLC"
+APP_LEGAL_COPYRIGHT = "Copyright (C) 2026 Hall Research Technologies LLC"
+
+
+def get_app_version() -> str:
+    """Read the single canonical application version straight out of
+    lumaserver.py's `__version__` (also the value app_launcher.py declares
+    and the value shown in the UI via /api/app_version). Uses a regex over
+    the source text rather than importing lumaserver, since importing it
+    would execute a Flask app module (route registration, logging setup,
+    etc.) as a side effect of a packaging script -- reading the literal is
+    sufficient and keeps this the same single source of truth other build
+    tooling reads, not a new one."""
+    src = (PROJECT_DIR / 'lumaserver.py').read_text(encoding='utf-8')
+    m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', src, re.MULTILINE)
+    if not m:
+        print("Error: could not find __version__ in lumaserver.py")
+        sys.exit(1)
+    return m.group(1)
+
+
+def _version_to_win_tuple(version_str: str):
+    """Normalize a user-facing version string like '1.0.8' into the 4-integer
+    tuple Windows FileVersion/ProductVersion resources require, without
+    changing the visible 'v1.0.8' formatting used anywhere else. Extra
+    components are truncated, missing ones are zero-padded; any non-numeric
+    trailing text (e.g. a future '1.0.8-beta') is dropped for the numeric
+    resource only."""
+    parts = re.findall(r'\d+', version_str)[:4]
+    nums = [int(p) for p in parts] + [0] * (4 - len(parts))
+    return tuple(nums[:4])
+
+
+def generate_windows_version_file(version_str: str, out_path: Path) -> Path:
+    """Write a PyInstaller version-info resource file (the format consumed by
+    --version-file) so the packaged LumaSuite.exe carries normal Windows
+    FileDescription/ProductName/FileVersion/ProductVersion/CompanyName/
+    OriginalFilename/InternalName/LegalCopyright metadata, all derived from
+    the single canonical version constant rather than a second, hand-typed
+    version."""
+    from PyInstaller.utils.win32.versioninfo import (
+        VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable,
+        StringStruct, VarFileInfo, VarStruct,
+    )
+
+    win_tuple = _version_to_win_tuple(version_str)
+    version_display = f"v{version_str}"
+
+    info = VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=win_tuple,
+            prodvers=win_tuple,
+            mask=0x3F,
+            flags=0x0,
+            OS=0x40004,   # VOS_NT_WINDOWS32
+            fileType=0x1,  # VFT_APP
+            subtype=0x0,
+            date=(0, 0),
+        ),
+        kids=[
+            StringFileInfo([
+                StringTable('040904B0', [
+                    StringStruct('CompanyName', APP_COMPANY_NAME),
+                    StringStruct('FileDescription', 'LumaSuite'),
+                    StringStruct('FileVersion', version_display),
+                    StringStruct('InternalName', 'LumaSuite'),
+                    StringStruct('LegalCopyright', APP_LEGAL_COPYRIGHT),
+                    StringStruct('OriginalFilename', 'LumaSuite.exe'),
+                    StringStruct('ProductName', 'LumaSuite'),
+                    StringStruct('ProductVersion', version_display),
+                ])
+            ]),
+            VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+        ]
+    )
+    out_path.write_text(str(info), encoding='utf-8')
+    return out_path
 
 
 def _remove_path(path: Path):
@@ -99,7 +187,17 @@ def build_windows():
     _remove_path(ui_temp)
     _remove_path(dist_target / 'LumaSuite.exe')
     _remove_path(build_target)
-    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*'))
+    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*', 'imagestream', 'imagestream/*', 'localdata', 'localdata/*'))
+
+    # Windows version-resource metadata (FileVersion/ProductVersion/
+    # CompanyName/etc.), generated from the single canonical __version__
+    # in lumaserver.py -- see generate_windows_version_file().
+    app_version = get_app_version()
+    print(f"Application version (from lumaserver.py __version__): {app_version}")
+    version_file_path = build_target / 'version_info.txt'
+    build_target.mkdir(parents=True, exist_ok=True)
+    generate_windows_version_file(app_version, version_file_path)
+    print(f"Generated Windows version-resource file: {version_file_path}")
 
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
@@ -107,15 +205,21 @@ def build_windows():
         '--onefile',
         '--windowed',
         '--name=LumaSuite',
+        '--version-file', str(version_file_path),
         '--add-data', f"{ui_temp}{add_data_sep}ui",
         '--add-data', f"{hallway_logo}{add_data_sep}.",
         '--add-data', f"{footer_logo}{add_data_sep}.",
+        '--add-data', f"{LICENSES_DIR}{add_data_sep}licenses",
+        '--add-data', f"{NOTICES_FILE}{add_data_sep}.",
+        '--add-data', f"{LICENSE_FILE}{add_data_sep}.",
         '--distpath=dist/Windows',
         '--workpath=build/Windows',
         '--specpath=build/Windows',
         '--hidden-import=flask',
         '--hidden-import=werkzeug',
-        '--hidden-import=flask_cors',
+        '--hidden-import=cryptography',
+        '--hidden-import=cryptography.hazmat.primitives.ciphers.aead',
+        '--collect-submodules=cryptography.hazmat',
         '--hidden-import=requests',
         '--hidden-import=PIL',
         '--hidden-import=PIL.Image',
@@ -129,18 +233,39 @@ def build_windows():
     ]
     if icon_arg:
         pyinstaller_cmd.insert(6, icon_arg)
-    
+
     # Remove empty strings
     pyinstaller_cmd = [c for c in pyinstaller_cmd if c]
-    
+
     run_command(pyinstaller_cmd)
-    
+
     # Clean up temp folder
     print("Cleaning up temporary UI folder...")
     _remove_path(ui_temp)
     
     print("[OK] Windows .exe built successfully")
     print(f"  Location: {PROJECT_DIR / 'dist' / 'Windows' / 'LumaSuite.exe'}")
+
+def stamp_macos_version(app_path: Path, version_str: str) -> bool:
+    """Write the application version into a macOS bundle's Info.plist.
+
+    PyInstaller's command line has no option for it, so a bundle otherwise reports 0.0.0 in Finder
+    and Get Info while the application itself says the real version. The value is the one
+    authoritative version read from lumaserver.py, reduced to the numeric form macOS accepts.
+    """
+    import plistlib
+    plist_path = Path(app_path) / 'Contents' / 'Info.plist'
+    if not plist_path.is_file():
+        return False
+    numeric = '.'.join(re.findall(r'\d+', version_str)[:3]) or '0'
+    with open(plist_path, 'rb') as handle:
+        info = plistlib.load(handle)
+    info['CFBundleShortVersionString'] = numeric
+    info['CFBundleVersion'] = numeric
+    with open(plist_path, 'wb') as handle:
+        plistlib.dump(info, handle)
+    return True
+
 
 def build_mac():
     """Build macOS .app for a specific architecture (arm64 or x86_64)."""
@@ -202,7 +327,7 @@ def build_mac():
     _remove_path(build_target)
     _remove_path(dist_target / 'LumaSuite.app')
     _remove_path(ui_temp)
-    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*'))
+    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*', 'imagestream', 'imagestream/*', 'localdata', 'localdata/*'))
 
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
@@ -215,12 +340,17 @@ def build_mac():
         '--add-data', f"{ui_temp}{add_data_sep}ui",
         '--add-data', f"{hallway_logo}{add_data_sep}.",
         '--add-data', f"{footer_logo}{add_data_sep}.",
+        '--add-data', f"{LICENSES_DIR}{add_data_sep}licenses",
+        '--add-data', f"{NOTICES_FILE}{add_data_sep}.",
+        '--add-data', f"{LICENSE_FILE}{add_data_sep}.",
         '--distpath=dist/macOS',
         '--workpath=build/macOS',
         '--specpath=build/macOS',
         '--hidden-import=flask',
         '--hidden-import=werkzeug',
-        '--hidden-import=flask_cors',
+        '--hidden-import=cryptography',
+        '--hidden-import=cryptography.hazmat.primitives.ciphers.aead',
+        '--collect-submodules=cryptography.hazmat',
         '--hidden-import=requests',
         '--hidden-import=PIL',
         '--hidden-import=PIL.Image',
@@ -237,6 +367,11 @@ def build_mac():
     
     run_command(pyinstaller_cmd)
     _remove_path(ui_temp)
+    if stamp_macos_version(dist_target / 'LumaSuite.app', get_app_version()):
+        print("Stamped the application version into Info.plist")
+    else:
+        print("Error: no Info.plist found to stamp with the version")
+        sys.exit(1)
     print(f"[OK] macOS .app built successfully ({target_arch})")
     print(f"  Location: {PROJECT_DIR / 'dist' / 'macOS' / 'LumaSuite.app'}")
 
@@ -274,7 +409,7 @@ def build_linux():
     _remove_path(build_target)
     _remove_path(dist_target / 'LumaSuite')
     _remove_path(ui_temp)
-    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*'))
+    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*', 'imagestream', 'imagestream/*', 'localdata', 'localdata/*'))
 
     pyinstaller_cmd = [
         sys.executable, '-m', 'PyInstaller',
@@ -285,12 +420,17 @@ def build_linux():
         '--add-data', f"{ui_temp}{add_data_sep}ui",
         '--add-data', f"{hallway_logo}{add_data_sep}.",
         '--add-data', f"{footer_logo}{add_data_sep}.",
+        '--add-data', f"{LICENSES_DIR}{add_data_sep}licenses",
+        '--add-data', f"{NOTICES_FILE}{add_data_sep}.",
+        '--add-data', f"{LICENSE_FILE}{add_data_sep}.",
         '--distpath=dist/Linux',
         '--workpath=build/Linux',
         '--specpath=build/Linux',
         '--hidden-import=flask',
         '--hidden-import=werkzeug',
-        '--hidden-import=flask_cors',
+        '--hidden-import=cryptography',
+        '--hidden-import=cryptography.hazmat.primitives.ciphers.aead',
+        '--collect-submodules=cryptography.hazmat',
         '--hidden-import=requests',
         '--hidden-import=PIL',
         '--hidden-import=PIL.Image',
@@ -393,6 +533,13 @@ def main():
     print("\nChecking dependencies...")
     ui_src = PROJECT_DIR / 'ui'
     install_build_dependencies()
+
+    if not LICENSE_FILE.is_file():
+        print("Error: LICENSE is missing")
+        sys.exit(1)
+    if not (LICENSES_DIR / 'MANIFEST.json').is_file() or not NOTICES_FILE.is_file():
+        print("Error: licenses/MANIFEST.json or THIRD_PARTY_NOTICES.md is missing; run tools/collect_licenses.py")
+        sys.exit(1)
     
     if not ui_src.exists():
         print(f"Error: UI folder not found at {ui_src}")

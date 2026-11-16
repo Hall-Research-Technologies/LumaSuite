@@ -22,14 +22,16 @@ body{margin:16px;background:var(--bg);color:var(--text);font-family:Calibri,syst
 #sticky_headers_label { position: relative; display: inline-flex; align-items: center; }
 #sticky_switch { pointer-events: none; }
 .gear-btn{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid var(--border);background:var(--panel-2);cursor:pointer;font-size:18px;color:var(--text)}
-.gear-btn:hover{filter:brightness(1.1)}
 .top{ background:var(--card); padding:10px 12px; border:1px solid var(--border); border-radius:10px; }
 .row{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .btn, button{ padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--accent); color:var(--text); cursor:pointer; }
-.btn:hover, button:hover{ filter:brightness(1.1); }
-.mode .modebtn.active{ background: var(--accent); color:white; border-color: var(--accent); }
-.mode .modebtn{ background:transparent; color:var(--text); }
-.mode .modebtn.active{ box-shadow:0 0 0 1px var(--accent); }
+/* A selected mode is filled, not outlined: the same treatment as a selected tab. */
+.mode { display:inline-flex; gap:4px; }
+.mode .modebtn.active, .mode .modebtn[aria-pressed="true"] {
+  background-color: var(--selected-fill) !important; color: var(--text) !important;
+  border-color: var(--selected-edge); box-shadow: inset 0 -2px 0 0 var(--action-primary);
+}
+.matrix td { position:relative; }
 .divider{ width:2px; height:24px; background:#ccc; margin:0 6px; }
 .legend{ display:flex; gap:16px; padding:6px 2px; font-size:13px; align-items:center; }
 .legend-item{ display:flex; align-items:center; gap:8px; }
@@ -37,8 +39,9 @@ body{margin:16px;background:var(--bg);color:var(--text);font-family:Calibri,syst
 .legend-audio-inner{ width:10px; height:10px; border-radius:50%; background:var(--audio); display:inline-block; }
 .legend-both{ width:18px; height:18px; border:2px solid var(--video); border-radius:50%; position:relative; display:inline-block; }
 .legend-both::after{ content:""; position:absolute; width:10px; height:10px; border-radius:50%; background:var(--audio); left:50%; top:50%; transform:translate(-50%,-50%); }
-.matrix-area{ padding:10px 12px; }
-.matrix-wrap{ width:max-content; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:8px; overflow:auto; max-width:96vw; max-height:70vh; }
+.matrix-area{ padding:10px 12px; display:flex; flex-direction:column; align-items:center; }
+.matrix-area .matrix-filters{ display:flex; gap:24px; margin:18px 0 8px 0; align-items:center; justify-content:center; flex-wrap:wrap; }
+.matrix-wrap{ width:max-content; margin:0 auto; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:8px; overflow:auto; max-width:100%; box-sizing:border-box; max-height:70vh; }
 .matrix{ border-collapse:collapse; }
 .matrix th, .matrix td{ border:1px solid var(--border); padding:4px 4px; text-align:center; background:var(--table); }
 .matrix th{ white-space:nowrap; font-size:12px; }
@@ -52,7 +55,8 @@ body{margin:16px;background:var(--bg);color:var(--text);font-family:Calibri,syst
 .radio-wrap input{ appearance:none; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:18px; height:18px; border-radius:50%; border:2px solid var(--ring); background:transparent; margin:0; padding:0; }
 .radio-wrap input:checked{ border-color:var(--video); box-shadow:0 0 0 2px rgba(59,130,246,.25) inset; }
 .radio-wrap .dot{ position:absolute; width:6px; height:6px; border-radius:50%; left:50%; top:50%; transform:translate(-50%,-50%); background:transparent; }
-.radio-wrap .dot.audio-on{ background:var(--audio); }
+.radio-wrap .dot{ pointer-events:none; }
+.radio-wrap .dot.audio-on{ background:var(--audio); box-shadow:0 0 0 1px rgba(255,255,255,.6); }
 h3{ margin:16px 12px 6px; }
 .collapsible{ margin:0 12px 16px; }
 .collapsible .header{ display:flex; align-items:center; justify-content:flex-start; gap:8px; cursor:pointer; user-select:none; margin-bottom:8px; width:fit-content; }
@@ -77,3 +81,7 @@ h3{ margin:16px 12px 6px; }
 	max-width:50vw; max-height:50vh; overflow:hidden;
 }
 .hover-preview img{ max-width:50vw; max-height:50vh; display:block; }
+
+/* A route needs both ends answering: a cell with an offline end is visibly unavailable. */
+.route-radio:disabled { opacity: .35; cursor: not-allowed; }
+.group-checkbox:disabled { cursor: not-allowed; }

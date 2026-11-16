@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script src="/ui/theme-boot.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
+  <meta charset="utf-8"/>
+  <title>Remote Access - LumaSuite</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
+  <link rel="stylesheet" href="/ui/matrix.css">
+  <style>
+    .assign-toggle { padding: 2px 8px; font-size: 12px; }
+    .assign-detail { margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+    .page { padding: 16px; max-width: 1180px; }
+    .tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--edge); margin-bottom: 14px; }
+    .tabs button { background: transparent !important; color: var(--text-muted) !important;
+                   border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; }
+    .tabs button[aria-selected="true"] { color: var(--text) !important;
+        background: var(--selected-tint-strong, var(--state-selection)) !important;
+        border-color: var(--selected-edge, var(--action-primary)); }
+    .card { background: var(--surface-raised); border: 1px solid var(--edge);
+            border-radius: var(--panel-radius); padding: 14px; margin-bottom: 14px; }
+    .card h2 { margin: 0 0 6px; font-size: 15px; }
+    .card p.note { margin: 0 0 10px; color: var(--text-muted); font-size: 13px; }
+    table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.grid th, table.grid td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--edge);
+                                   vertical-align: middle; }
+    table.grid th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+    td.actions { white-space: nowrap; text-align: right; }
+    td.actions button { margin-left: 6px; }
+    .pill { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+            border: 1px solid var(--edge); }
+    .pill.on { border-color: var(--state-success); color: var(--state-success-text); }
+    .pill.off { border-color: var(--state-warning); color: var(--state-warning-text); }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    .toolbar input[type=text] { min-width: 220px; }
+    .assign { border: 1px solid var(--edge); border-radius: 8px; background: var(--surface); margin-bottom: 10px; }
+    .assign h4 { margin: 0; padding: 8px 10px; font-size: 12px; color: var(--text-muted);
+                 display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--edge); }
+    .assign h4 .count { margin-left: auto; font-weight: 400; }
+    .assign .search { margin: 6px 10px; width: calc(100% - 20px); box-sizing: border-box; }
+    .assign ul { list-style: none; margin: 0; padding: 4px 10px 8px; max-height: 190px; overflow: auto; }
+    .assign li { padding: 3px 0; }
+    .assign label { display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px; }
+    .assign .sub { color: var(--text-muted); font-size: 11px; }
+    .modal.wide { width: min(96vw, 640px); max-height: 92vh; overflow: auto; }
+    .linkbox { display: flex; gap: 6px; margin: 6px 0; }
+    .linkbox input { flex: 1; font-family: monospace; }
+    .warnline { font-size: 12px; color: var(--state-warning-text); margin: 6px 0; }
+    .muted { color: var(--text-muted); }
+    /* inputs from the family tokens, so every preset and both themes apply */
+    .page input[type=text], .page input[type=password], .modal input[type=text],
+    .modal input[type=password], .modal select, .toolbar select {
+      background: var(--surface); color: var(--text); border: 1px solid var(--edge);
+      border-radius: 6px; padding: 6px 8px; box-sizing: border-box; }
+    .inline-error { color: var(--state-error-text); font-size: 12px; min-height: 1.2em; }
+    .activity-row { display: grid; grid-template-columns: 150px 140px 1fr; gap: 10px;
+                    padding: 6px 4px; border-bottom: 1px solid var(--edge); font-size: 13px; }
+    .activity-row.bad { color: var(--state-warning-text); }
+  </style>
+</head>
+<body>
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
+  <div class="row header" style="justify-content:space-between;align-items:center;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
+      <h1 class="title" style="margin:0;">LumaSuite Remote Access</h1>
+    </div>
+    <div class="right" style="display:flex;align-items:center;gap:16px;">
+      <div class="nav-tabs">
+        <a class="nav-tab" href="/ui/index.html">
+          <span>Device Manager</span></a>
+        <a class="nav-tab" href="/ui/matrix.html">
+          <span>Matrix Routing</span></a>
+        <a class="nav-tab" href="/ui/producer.html">
+          <span>Production Studio</span></a>
+        <a class="nav-tab" href="/ui/wall.html">
+          <span>Video Wall</span></a>
+      </div>
+      <button id="header_gear" class="gear-btn" title="Settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="tabs" role="tablist" id="admin_tabs">
+      <button type="button" role="tab" id="tab_accounts" aria-selected="true" data-panel="panel_accounts">Accounts</button>
+      <button type="button" role="tab" id="tab_devices" aria-selected="false" data-panel="panel_devices">Device names</button>
+      <button type="button" role="tab" id="tab_groups" aria-selected="false" data-panel="panel_groups">Display groups</button>
+      <button type="button" role="tab" id="tab_activity" aria-selected="false" data-panel="panel_activity">Activity</button>
+    </div>
+
+    <!-- Accounts -->
+    <section id="panel_accounts" role="tabpanel">
+      <div class="card">
+        <h2>Accounts</h2>
+        <p class="note">Administrators use the normal LumaSuite pages. Users see only the sources, displays
+          and display groups you assign them, on a simple routing page.</p>
+        <div class="toolbar"><button id="user_new" type="button">New account</button></div>
+        <table class="grid" id="user_table">
+          <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Can route</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="user_empty" class="muted" hidden>No accounts yet.</p>
+      </div>
+    </section>
+
+    <!-- Device names -->
+    <section id="panel_devices" role="tabpanel" hidden>
+      <div class="card">
+        <h2>Names people see</h2>
+        <p class="note">A friendly name is only a label. It is never used to decide who may route what, and
+          nothing is written to the device. Changing a device's address does not lose its name.</p>
+        <div class="toolbar">
+          <input type="text" id="device_filter" placeholder="Filter devices" aria-label="Filter devices">
+          <button id="device_save" type="button">Save names</button>
+          <span id="device_dupes" class="warnline" hidden></span>
+        </div>
+        <table class="grid" id="device_table">
+          <thead><tr><th>Type</th><th>Friendly name</th><th>Device name</th><th>Location</th><th>Assignments</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Known devices</h2>
+        <p class="note">While Remote Access is on, Clear Units removes only the units that no user, display
+          group or saved video wall uses; assigned units are kept. With Remote Access off, it clears every
+          unit and removes it from every account&rsquo;s sources and displays, from display groups and from
+          this list of names. Scan again to find units that were cleared.</p>
+        <button id="clear_open" type="button" class="danger">Clear Units</button>
+      </div>
+    </section>
+
+    <!-- Display groups -->
+    <section id="panel_groups" role="tabpanel" hidden>
+      <div class="card">
+        <h2>Display groups</h2>
+        <p class="note">A group is a named set of displays that all receive the same source, one after
+          another. It has no layout: each display shows the whole picture. Granting a group to a user does not
+          give them the individual displays in it.</p>
+        <div class="toolbar"><button id="group_new" type="button">New group</button></div>
+        <table class="grid" id="group_table">
+          <thead><tr><th>Name</th><th>Displays</th><th>Given to</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="group_empty" class="muted" hidden>No display groups yet.</p>
+      </div>
+    </section>
+
+    <!-- Activity -->
+    <section id="panel_activity" role="tabpanel" hidden>
+      <div class="card">
+        <h2>Activity</h2>
+        <div class="toolbar">
+          <input type="text" id="audit_q" placeholder="Search" aria-label="Search activity">
+          <select id="audit_event" aria-label="Filter by event"><option value="">All activity</option></select>
+          <select id="audit_actor" aria-label="Filter by account"><option value="">All accounts</option></select>
+          <button id="audit_refresh" type="button" class="secondary">Refresh</button>
+        </div>
+        <div id="audit_list"></div>
+        <p id="audit_empty" class="muted" hidden>Nothing recorded yet.</p>
+      </div>
+      <div class="card">
+        <h2>How long activity is kept</h2>
+        <p class="note">Entries older than the number of days are removed, and the oldest are removed
+          first if the log would grow past its size limit. Both limits always apply. The defaults are
+          30 days and 4 MB.</p>
+        <div class="toolbar">
+          <label for="ret_days">Keep for</label>
+          <input type="number" id="ret_days" min="1" max="365" step="1" style="width:90px" aria-label="Days to keep activity">
+          <span>days</span>
+          <label for="ret_mb">Up to</label>
+          <input type="number" id="ret_mb" min="1" max="64" step="1" style="width:90px" aria-label="Maximum activity size in megabytes">
+          <span>MB</span>
+          <button id="ret_save" type="button">Save</button>
+          <span id="ret_status" class="muted"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Account editor -->
+  <div class="modal-backdrop" id="user_modal" role="dialog" aria-modal="true" aria-labelledby="user_modal_title">
+    <div class="modal wide">
+      <h3 id="user_modal_title">Account</h3>
+      <div class="modal-row"><label for="u_role">Role</label>
+        <select id="u_role"><option value="user">User &mdash; restricted routing page</option><option value="admin">Administrator &mdash; the full LumaSuite interface</option></select></div>
+      <div class="modal-row"><label for="u_name">Username</label><input type="text" id="u_name" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+      <div class="modal-row"><label for="u_password" id="u_password_label">Password</label>
+        <input type="password" id="u_password" autocomplete="new-password"></div>
+
+      <div id="direct_section" class="assign" hidden>
+        <h4>Direct access</h4>
+        <div style="padding:8px 10px;">
+          <p class="muted" style="margin:0 0 8px;">A link that opens this person&rsquo;s controls without asking for a
+            password &mdash; for a tablet on a lectern or a phone in a classroom. Off unless you turn it on.</p>
+          <label class="assign-toggle" style="display:flex;gap:8px;align-items:center;font-size:13px;">
+            <input type="checkbox" id="direct_enabled"> Allow passwordless direct link</label>
+          <div id="direct_link_box" hidden>
+            <p class="warnline"><strong>Anyone with this link can use the controls assigned to this account.</strong>
+              Treat the link like a password.</p>
+            <div class="linkbox"><input type="text" id="direct_link" readonly aria-label="Direct access link">
+              <button type="button" id="direct_copy">Copy link</button>
+              <button type="button" id="direct_regen" class="secondary">Regenerate</button></div>
+            <p class="muted" id="direct_note"></p>
+          </div>
+        </div>
+      </div>
+
+      <div id="user_only">
+        <fieldset class="routing-interfaces" id="routing_interfaces">
+          <legend>Routing interface</legend>
+          <label class="check"><input type="checkbox" id="u_standard" checked> Standard routing</label>
+          <label class="check"><input type="checkbox" id="u_matrix"> Matrix routing</label>
+          <p class="muted">Standard is the source and display cards, with drag and drop. Matrix is a grid of the sources and displays this account may use. Choose at least one.</p>
+        </fieldset>
+        <div class="assign" id="assign_sources"><h4>Sources they may route <span class="count"></span>
+          <button type="button" class="secondary" data-all>All</button><button type="button" class="secondary" data-none>None</button></h4>
+          <input class="search" type="text" placeholder="Filter" aria-label="Filter sources"><ul></ul></div>
+        <div class="assign" id="assign_displays"><h4>Displays they may route to <span class="count"></span>
+          <button type="button" class="secondary" data-all>All</button><button type="button" class="secondary" data-none>None</button></h4>
+          <input class="search" type="text" placeholder="Filter" aria-label="Filter displays"><ul></ul></div>
+        <div class="assign" id="assign_groups"><h4>Display groups they may route to <span class="count"></span>
+          <button type="button" class="secondary" data-all>All</button><button type="button" class="secondary" data-none>None</button></h4>
+          <input class="search" type="text" placeholder="Filter" aria-label="Filter groups"><ul></ul></div>
+        <div class="assign" id="assign_walls"><h4>Saved video walls they may route to <span class="count"></span>
+          <button type="button" class="secondary" data-all>All</button><button type="button" class="secondary" data-none>None</button></h4>
+          <input class="search" type="text" placeholder="Filter" aria-label="Filter saved video walls"><ul></ul></div>
+      </div>
+      <div id="u_error" class="inline-error" role="alert"></div>
+      <div class="modal-buttons"><button type="button" class="secondary" id="u_cancel">Cancel</button><button type="button" id="u_save">Save</button></div>
+    </div>
+  </div>
+
+  <!-- Group editor -->
+  <div class="modal-backdrop" id="group_modal" role="dialog" aria-modal="true" aria-labelledby="group_modal_title">
+    <div class="modal wide">
+      <h3 id="group_modal_title">Display group</h3>
+      <div class="modal-row"><label for="g_name">Name</label><input type="text" id="g_name" autocomplete="off" maxlength="60"></div>
+      <div class="assign" id="assign_members"><h4>Displays in this group <span class="count"></span>
+        <button type="button" class="secondary" data-all>All</button><button type="button" class="secondary" data-none>None</button></h4>
+        <input class="search" type="text" placeholder="Filter" aria-label="Filter displays"><ul></ul></div>
+      <div id="g_error" class="inline-error" role="alert"></div>
+      <div class="modal-buttons"><button type="button" class="secondary" id="g_cancel">Cancel</button><button type="button" id="g_save">Save</button></div>
+    </div>
+  </div>
+
+  <script src="/ui/csrf.js"></script>
+  <script src="/ui/dialogs.js"></script>
+  <script src="/ui/clear_units.js"></script>
+  <script src="/ui/settings.js"></script>
+  <script src="/ui/adminnav.js"></script>
+  <script src="/ui/admin_users.js"></script>
+</body>
+</html>

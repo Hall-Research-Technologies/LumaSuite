@@ -1,23 +1,58 @@
 <!doctype html>
 <html>
 <head>
+  <script src="/ui/theme-boot.js"></script>
+  <script src="/ui/csrf.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
+  <link rel="stylesheet" href="/ui/device-table.css?v=20261030-devicetable">
   <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
   <meta charset="utf-8"/>
-  <title>LumaSuite Device Manager</title>
+  <title>Device Manager - LumaSuite</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
     :root{--bg:#1d232a;--card:#222a33;--panel-2:#262f39;--fg:#e9eef5;--muted:#9aa7b4;--accent:#1e90ff;--accent-strong:#1f2937;--border:rgba(255,255,255,0.08);--table:#0f172a;--spinner:#9ca3af;--danger:#e5534b}
     .light{--bg:#f7f8fb;--card:#fff;--panel-2:#f2f5f8;--fg:#0d1117;--muted:#5a6b7a;--border:rgba(0,0,0,.08);--table:#fff;--accent:#1e90ff;--accent-strong:#f2f5f8;--spinner:#6b7280}
-    body { font-family: Calibri, system-ui, Segoe UI, Roboto, sans-serif; margin:16px; background:var(--bg); color:var(--fg); min-width:1000px; }
+    body { font-family: Calibri, system-ui, Segoe UI, Roboto, sans-serif; font-size:14px; line-height:1.4; margin:16px; background:var(--bg); color:var(--fg); min-width:1000px; }
     h1 { margin:0 0 14px; font-size:22px; font-weight:600; }
     .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     .row-between { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
     .box { border:1px solid var(--border); background:var(--card); border-radius:10px; padding:12px; margin:4px 0; }
     table { width:100%; border-collapse:collapse; background:var(--table); }
-    th, td { padding:6px 8px; border-bottom:1px solid var(--border); text-align:left; }
-    th.sortable { cursor:pointer; user-select:none; }
-    th.sortable .caret { opacity:.6; margin-left:6px; }
-    a.ip { color:#93c5fd; text-decoration: underline; cursor:pointer; }
+    th, td { padding:6px 8px; border-bottom:1px solid var(--border); text-align:left; font-size:14px; }
+    th { font-weight:600; background:var(--table); white-space:nowrap; vertical-align:middle; }
+    td.version_cell { white-space:nowrap; }
+    /* Sorting reads the way Device Info's does: the sorted column is full strength with an arrow,
+       the others are dimmed. The arrow's slot is reserved so a header never changes width. */
+    /* Dimmed by colour, never by opacity: opacity on a sticky header cell makes the whole cell, background
+       included, translucent, and the cells travelling underneath show through it. */
+    th.sortable { cursor:pointer; user-select:none; color:var(--text-muted); }
+    th.sortable.sorted { color:var(--text); }
+    th.sortable:focus-visible { outline:2px solid var(--focus-ring); outline-offset:-2px; }
+    th .sort-ind { display:inline-block; min-width:1em; margin-left:4px; }
+    .table-wrapper { box-sizing:border-box; border:1px solid var(--border); border-radius:8px; background:var(--table); }
+    .table-wrapper > .box { margin:8px; position:sticky; left:0; z-index:1; }
+    .footer-bar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap; }
+    .footer-bar .left { display:flex; gap:8px; flex-wrap:wrap; }
+    .unit-counts { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .unit-count-pill { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); background:var(--panel-2); border-radius:999px; padding:3px 9px; font-size:12px; color:var(--fg); }
+    .unit-count-pill strong { font-size:13px; color:color-mix(in srgb, var(--accent) 55%, var(--fg) 45%); }
+    .linkspeed_cell { white-space:nowrap; }
+    .lldp-popup { position:fixed; z-index:10001; display:none; border:1px solid var(--border); background:var(--card); color:var(--fg);
+      padding:10px 12px; border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.35); width:360px; max-width:45vw; font-size:12px; line-height:1.35; pointer-events:none; }
+    .lldp-popup h4 { margin:0 0 8px; font-size:13px; }
+    .lldp-grid { display:grid; grid-template-columns:110px 1fr; gap:4px 10px; }
+    .lldp-label { color:var(--muted); }
+    .lldp-value { white-space:pre-wrap; overflow-wrap:anywhere; }
+    .mac-lldp { cursor:help; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:2px; }
+    .mac-lldp:focus-visible { outline:2px solid var(--focus-ring); outline-offset:-2px; }
+    .link-ok { color:var(--state-success-text); }
+    .link-slow { color:var(--state-error-text); }
+    .link-unknown { color:var(--text-muted); }
+    .clearable-input { position:relative; display:inline-flex; align-items:center; }
+    /* A class that sets display beats the hidden attribute, so it is restated here. */
+    [hidden] { display:none !important; }
+    #scan_status:empty { display:none; }
+    a.ip { color:color-mix(in srgb, var(--accent) 55%, var(--fg) 45%); text-decoration: underline; cursor:pointer; }
     .status { padding:2px 8px; border-radius:999px; font-size:12px; display:inline-flex; align-items:center; gap:6px; }
     .s-sending { background:#854d0e; color:#fde68a; }
     .s-updating { background:#4338ca; color:#c7d2fe; }
@@ -28,8 +63,9 @@
     .s-idle-unchanged { background:#374151; color:#e5e7eb; }
     .s-unknown { background:#4b5563; color:#d1d5db; }
     .s-offline { background:#7f1d1d; color:#fecaca; }
-    .btn { padding:3px 8px; border-radius:8px; border:1px solid var(--border); cursor:pointer; background:var(--accent); color:var(--fg); }
-    .btn:hover { filter: brightness(1.1); }
+    .btn { padding:3px 8px; border-radius:8px; border:1px solid var(--border); cursor:pointer; background:var(--action-primary,var(--accent)); color:var(--on-accent,var(--fg)); }
+    /* hover comes from the shared veil in family.css, which reads as hover on a light
+       control and a dark one alike; filter:brightness() does not */
     select, input, button { font-size:14px; color:var(--fg); background:var(--card); border:1px solid var(--border); padding:6px 8px; border-radius:6px; }
     .small { font-size:12px; color:var(--muted); }
     .w80 { width:80px; } .w120 { width:120px; } .w160 { width:160px; } .w240 { width:240px; }
@@ -43,8 +79,14 @@
     .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--spinner); border-top-color:transparent; border-radius:50%; animation: spin .8s linear infinite; vertical-align:-2px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .err { color:#fca5a5; }
-    .btn-blink { padding:4px 8px; border-radius:50%; border:1px solid var(--border); cursor:pointer; background:var(--card); font-size:16px; line-height:1; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; }
-    .btn-blink:hover { background:var(--accent); transform:scale(1.05); }
+    /* The Blink control is OmniSuite's .action-btn, state for state: a bare 32px round bulb,
+       the accent on hover, a pressed veil, a keyboard ring and a dimmed disabled state. */
+    .btn-blink { background:transparent; color:var(--fg); border:none; cursor:pointer; font-size:16px; padding:0; display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:50%; line-height:1; transition:background-color .15s ease, box-shadow .15s ease; }
+    .btn-blink:hover:not(:disabled) { background:var(--accent); transform:scale(1.05); }
+    .btn-blink:active:not(:disabled) { background-image:linear-gradient(var(--control-press-veil), var(--control-press-veil)); box-shadow:inset 0 1px 2px rgba(0,0,0,.35); }
+    .btn-blink:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; }
+    .btn-blink:disabled { opacity:var(--control-disabled-opacity); cursor:not-allowed; }
+    .btn-blink.is-on { background:color-mix(in srgb, var(--state-error) 22%, transparent); }
     /* Custom tooltip styling */
     .tooltip-info { position:relative; display:inline-block; }
     .tooltip-info:hover::after {
@@ -76,18 +118,35 @@
     max-width:50vw; max-height:50vh; overflow:hidden;
   }
   .hover-preview img{ max-width:50vw; max-height:50vh; display:block; }
+  td.preview-cell{ text-align:center; }
+  td.preview-cell .preview-checkbox{ display:block; margin:0 auto 4px; }
+  .action-link{ color:var(--state-info-text); cursor:pointer; text-decoration:underline; }
+  .action-link:hover{ opacity:.8; }
 </style>
 <div id="hover_preview" class="hover-preview"><img id="hover_preview_img" alt="preview"/></div>
+<div id="lldp_popup" class="lldp-popup" role="tooltip"></div>
 
 <style>
-  /* Option 1b: Classic Tabs with Icons */
-  .nav-tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); }
-  .nav-tab { padding:6px 14px; text-decoration:none; color:var(--fg); border-radius:6px 6px 0 0; transition:all 0.2s; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; }
-  .nav-tab:hover { background:rgba(30,144,255,0.1); }
-  .nav-tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
+  /* .nav-tabs/.nav-tab/.nav-tab.active/.nav-tab:hover moved to
+     /ui/family.css (shell-consistency pass, 2026-09-19) -- this page's
+     copy was byte-for-byte identical to the other three pages' (modulo a
+     missing hover colour, now picked up from the shared rule) so it was
+     pure drift risk to keep duplicating it here. */
 
-  /* Header layout */
-  .header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  /* Header layout. position:sticky/border-bottom/padding-bottom added
+     (shell-consistency pass, 2026-09-19) to match matrix.css's header
+     treatment that Matrix Routing/Video Wall already had -- those two
+     pages' header was previously 9px taller (pinned + bordered) than
+     this one and Production Studio's, shifting where page content starts
+     by that same 9px. Matched by adding the same treatment here rather
+     than removing it from the other two, since a pinned header while
+     scrolling a long device table is a reasonable behavior to gain
+     everywhere, not something to take away. */
+  .header {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border);
+    position:sticky; top:0; z-index:100; background:var(--bg);
+  }
   .header .right { display:flex; align-items:center; gap:8px; }
 </style>
 </head>
@@ -110,11 +169,11 @@
 </style>
 </head>
 <body>
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
   <script src="/ui/dialogs.js?v=2"></script>
-  <!-- Connection Status Banner -->
-  <div id="connection_banner" style="display:none; position:fixed; top:0; left:0; right:0; background:#d32f2f; color:white; padding:12px 20px; font-weight:bold; text-align:center; z-index:10000; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-    ⚠️ Connection lost, check application.
-  </div>
+  <script src="/ui/clear_units.js"></script>
+  <script src="/ui/settings.js?v=1"></script>
+  <script src="/ui/adminnav.js"></script>
 <script>
   // Apply theme immediately to prevent flash
   (function(){
@@ -122,69 +181,68 @@
     document.body.classList.toggle("light", !dark);
   })();
 </script>
-  <div class="row header">
+  <div class="row header" id="app_header">
     <div style="display:flex;align-items:center;gap:12px;">
       <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
       <h1 class="title" style="margin:0;">LumaSuite Device Manager</h1>
     </div>
-    <div class="right">
+    <div class="right" style="display:flex;align-items:center;gap:16px;">
         <div class="nav-tabs" style="margin-bottom:0;">
           <span class="nav-tab active">
-            <span>📊</span>
-            <span>Device Manager</span>
+          <span>Device Manager</span>
           </span>
           <a class="nav-tab" href="/ui/matrix.html">
-            <span>🔀</span>
-            <span>Matrix Routing</span>
+          <span>Matrix Routing</span>
           </a>
           <a class="nav-tab" href="/ui/producer.html">
-            <span>🎬</span>
-            <span>Production Studio</span>
+          <span>Production Studio</span>
           </a>
-          <a class="nav-tab" href="/ui/wall.html">
-            <span>🧱</span>
-            <span>Video Wall</span>
+          <a class="nav-tab" href="/ui/wall.html" style="position:relative;">
+          <span>Video Wall</span>
+            <!-- Unobtrusive site-discovery notification (see PROJECT.md,
+                 "Video Wall: site discovery"): a small count badge, never a
+                 browser alert, never forcing Video Wall open. Populated by
+                 refreshVideoWallBadge() from the read-only, cached
+                 /api/video_wall/candidates_summary endpoint. -->
+            <span id="vwBadge" class="vw-nav-badge" style="display:none;" title="Video Wall configurations found on discovered decoders that haven't been reviewed yet"></span>
           </a>
         </div>
+        <!-- Moved here from inside the Scan box below (shell-consistency
+             pass, 2026-09-19): Settings is application-shell content, not
+             Device Manager page content, and every other page already
+             places it in the header row beside the nav tabs. The Scan
+             box's own status/adapter/target controls remain page content,
+             unchanged, directly below. -->
+        <button id="header_gear" class="gear-btn" title="Settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
       </div>
   </div>
 
-  <div class="box" style="position:relative;">
-    <button id="header_gear" class="gear-btn" title="Settings" style="position:absolute; top:8px; right:8px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
+  <div class="box" id="scan_bar">
     <div class="row" style="gap:16px;">
       <div>
         <label for="adapters" class="small">Adapters</label>
         <select id="adapters" class="w240"><option value="">(loading adapters...)</option></select>
       </div>
       <div>
-        <div style="position:relative; display:inline-block;">
-          <input id="targets" class="w240" placeholder="e.g. 10.1.1.1-254 or 10.1.1.1/24" style="padding-right:28px;"/>
+        <label for="targets" class="small"><span class="tooltip-info" style="cursor:help;" data-tooltip="Scanned together with the adapter's own network. Use it to reach routed networks: a CIDR such as 198.51.100.0/24, a range such as 10.1.1.1-254, or a comma-separated list.">Targets</span></label>
+        <div class="clearable-input">
+          <input id="targets" class="w240" placeholder="e.g. 198.51.100.0/24" style="padding-right:28px;"/>
           <button id="clear_targets" style="position:absolute; right:4px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:16px; padding:4px; line-height:1; display:none;" title="Clear">×</button>
         </div>
       </div>
-      <button class="btn" id="scan">Scan</button>
-      <button class="btn" id="stop_scan" style="background:#2196F3; display:none;">Stop Scan</button>
-      <button class="btn" id="clear_units">Clear Units</button>
+      <button class="btn" id="scan">🔍 Scan</button>
+      <button class="btn secondary" id="stop_scan" style="display:none;">Stop Scan</button>
+      <button class="btn danger" id="clear_units">🗑️ Clear Units</button>
       <span id="scan_status" class="small pill"></span>
     </div>
   </div>
 
-  <div class="box">
-    <div class="row-between">
-      <div class="row" style="gap:20px;">
-        <span class="small">Device Date/Time: <strong id="dashboard_datetime">(loading)</strong></span>
-        <span class="small">Device Timezone: <strong id="dashboard_timezone">(loading)</strong></span>
-        <span class="small">NTP Server: <strong id="dashboard_ntp_server">(loading)</strong></span>
-      </div>
-    </div>
-    <div id="ntp_status" class="small" style="margin-top:6px;min-height:16px;"></div>
-  </div>
-
-  <div class="box">
+  <div class="box" id="firmware_bar">
     <div class="row-between">
       <div class="row">
         <div style="display:flex; align-items:center; gap:4px;">
-          <button class="btn" id="refresh_files" style="color:#1e90ff; background:transparent; border:none; font-size:20px; padding:4px 8px; cursor:pointer;" title="Refresh firmware list">🔄</button>
+          <button class="btn icon-only" id="refresh_files" aria-label="Refresh firmware list" title="Refresh firmware list">🔄</button>
+          <button class="btn icon-only" id="open_firmware_folder_btn" aria-label="Open firmware folder" title="Open firmware folder">📁</button>
           <div>
             <select id="files" class="w240"></select>
           </div>
@@ -193,8 +251,13 @@
           <input id="reset_after" name="reset_after" type="checkbox" style="width:16px;height:16px; accent-color:#10b981;"/>
           <span>Factory reset after upgrade</span>
         </label>
-        <button class="btn" id="upgrade_sel">Upgrade Selected</button>
+        <button class="btn" id="upgrade_sel">⚡ Upgrade Selected</button>
         <span id="up_status" class="small"></span>
+        <div class="unit-counts" aria-label="Discovered unit counts">
+          <span class="unit-count-pill">Encoders <strong id="encoder_count">0</strong></span>
+          <span class="unit-count-pill">Decoders <strong id="decoder_count">0</strong></span>
+          <span class="unit-count-pill" id="switcher_count_pill" hidden>Switchers <strong id="switcher_count">0</strong></span>
+        </div>
       </div>
       <div class="row" style="justify-content:center; gap:16px;">
         <label class="toggle" for="poll_units_toggle">
@@ -204,6 +267,26 @@
         </label>
       </div>
     </div>
+  </div>
+
+  <!-- The table is its own scroll container so the header row can stick; a mirrored scrollbar
+       rides under the locked command area. Behaviour is ui/mirror-scroll.js, shared with OmniSuite. -->
+  <div id="table_scroll_mirror" class="table-scroll-mirror" hidden>
+    <div id="table_scroll_mirror_track" class="table-scroll-mirror-track"></div>
+  </div>
+  <div class="table-wrapper" id="units_table_wrapper"
+       data-mirror-scroll
+       data-mirror-strip="table_scroll_mirror"
+       data-mirror-height-var="--table-mirror-h">
+  <div class="box">
+    <div class="row-between">
+      <div class="row" style="gap:20px;">
+        <span class="small">Device Date/Time: <strong id="dashboard_datetime">(loading)</strong></span>
+        <span class="small">Device Timezone: <strong id="dashboard_timezone">(loading)</strong></span>
+        <span class="small">NTP Server: <strong id="dashboard_ntp_server">(loading)</strong></span>
+      </div>
+    </div>
+    <div id="ntp_status" class="small" style="margin-top:6px;min-height:16px;"></div>
   </div>
 
   <div class="box">
@@ -228,123 +311,46 @@
     </div>
   </div>
 
-  <div class="box">
-    <table id="tbl">
+    <table id="tbl" class="device-table" data-sticky-cols="3">
       <thead>
         <tr>
           <th><label for="chk_all" style="cursor:pointer;"><input type="checkbox" id="chk_all"/></label></th>
-          <th class="sortable" data-key="ip">IP <span class="caret">▾</span></th>
-          <th class="sortable" data-key="mac">MAC <span class="caret">▾</span></th>
-          <th class="sortable" data-key="hostname">Hostname <span class="caret">▾</span></th>
-          <th class="col-ntp">Timezone</th>
+          <th class="sortable" data-key="ip">IP <span class="sort-ind" aria-hidden="true"></span></th>
+          <th class="sortable" data-key="hostname">Hostname <span class="sort-ind" aria-hidden="true"></span></th>
+          <th class="sortable" data-key="mac">MAC <span class="sort-ind" aria-hidden="true"></span></th>
+          <th class="sortable" data-key="linkspeed">Link Speed <span class="sort-ind" aria-hidden="true"></span></th>
+                              <th class="col-ntp">Timezone</th>
           <th class="col-ntp">NTP Server</th>
-          <th class="sortable" data-key="streamname">Streamname <span class="caret">▾</span></th>
+          <th class="sortable" data-key="streamname">Streamname <span class="sort-ind" aria-hidden="true"></span></th>
           <th class="col-dante"><span class="tooltip-info" style="cursor:help;" data-tooltip="Only applicable for encoders">Dante</span></th>
           <th class="col-dante-name"><span class="tooltip-info" style="cursor:help;" data-tooltip="Only applicable for encoders">Dante name</span></th>
           <th class="col-dante-ip"><span class="tooltip-info" style="cursor:help;" data-tooltip="Only applicable for encoders">Dante ip</span></th>
           <th class="col-edid-resolution"><span class="tooltip-info" style="cursor:help;" data-tooltip="Encoder: EDID mode (4K60/1080P/720P/User). Decoder: current output timing.">EDID/Resolution</span></th>
-          <th class="sortable" data-key="type">Type <span class="caret">▾</span></th>
-          <th class="sortable col-model" data-key="model">Model <span class="caret">▾</span></th>
-          <th class="sortable" data-key="version">Version <span class="caret">▾</span></th>
+          <th class="sortable" data-key="type">Type <span class="sort-ind" aria-hidden="true"></span></th>
+          <th class="sortable col-model" data-key="model">Model <span class="sort-ind" aria-hidden="true"></span></th>
+          <th class="sortable" data-key="version">Version <span class="sort-ind" aria-hidden="true"></span></th>
           <th><span class="tooltip-info" style="cursor:help;" data-tooltip="Encoder: NONE, HDCP1.4, HDCP2.2 | Decoder: HDCP2.2, INPUT, HDCP1.4">HDCP</span></th>
+          <th><span class="tooltip-info" style="cursor:help;" data-tooltip="Which configured credential last authenticated successfully to this device: Primary or Fallback. Unknown until a call succeeds.">Password</span></th>
           <th>Status</th>
-          <th><span class="tooltip-info" style="color:#3b82f6;cursor:help;" data-tooltip="LumaStream Devices will Blink for 30 seconds, the CS31 will blink till you disable the function.">Blink</span></th>
+          <th style="width:40px;"><span class="tooltip-info" style="cursor:help;" data-tooltip="LumaStream Devices will Blink for 30 seconds, the CS31 will blink till you disable the function.">Blink</span></th>
           <th>Preview</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
-    <div class="row" style="justify-content:space-between; margin-top:8px;">
-      <div style="display:flex; gap:8px;">
-        <button class="btn" id="reboot_sel">Reboot Selected</button>
-        <button class="btn" id="remove_sel" style="background:#991b1b;">Remove Selected</button>
-        <button class="btn" id="password_sync_btn" style="background:#0066cc;">Password Sync</button>
-        <button class="btn" id="ntp_sync_btn" style="background:#0f766e;">Set NTP</button>
-        <button class="btn" id="slate_manager_btn" style="background:#475569;">Slate Manager</button>
-      </div>
-      <button class="btn" id="export_units">Inventory</button>
-    </div>
   </div>
-
-<!-- Configuration modal (index page) -->
-<div id="cfg_backdrop" class="modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:20000;">
-  <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:520px;max-width:95%;color:var(--fg);">
-    <h3 style="margin:0 0 8px 0;">Configuration</h3>
-    <form autocomplete="off">
-      <div class="row" style="margin-bottom:8px; align-items:center; justify-content:space-between; gap:8px;">
-        <span class="small">App Version</span>
-        <span id="cfg_app_version" class="code small" style="user-select:text;">v?.?.?</span>
+    <div class="footer-bar">
+      <div class="left">
+        <button class="btn danger" id="reboot_sel">Reboot Selected</button>
+        <button class="btn danger" id="remove_sel">Remove Selected</button>
+        <button class="btn secondary" id="password_sync_btn">Password Sync</button>
+        <button class="btn secondary" id="ntp_sync_btn">Set NTP</button>
+        <button class="btn secondary" id="slate_manager_btn">Slate Manager</button>
       </div>
-      <div class="row" style="margin-bottom:8px; align-items:center; justify-content:space-between; gap:8px;">
-        <span class="small">Dark Mode</span>
-        <button id="dark_switch" class="switch on" type="button" aria-label="Toggle dark mode"><span class="knob"></span></button>
-      </div>
-      <div class="row" style="margin-bottom:8px; align-items:center; gap:8px;">
-        <label for="cfg_password" class="small">Password</label>
-        <input id="cfg_password" type="password" style="width:160px;" autocomplete="current-password" />
-        <button id="cfg_pw_toggle" class="btn small" type="button" title="Show/Hide">👁️</button>
-      </div>
-      <div class="row" style="margin-bottom:8px; align-items:center; gap:8px;">
-        <span class="small">Password Hash:</span>
-        <span id="cfg_password_hash" class="code small" style="user-select:text;">(loading)</span>
-        <span id="cfg_password_default" class="badge" style="display:none;">Default</span>
-      </div>
-    <div class="row" style="margin-bottom:8px;">
-      <label for="cfg_ws_port" class="small">WS PORT</label>
-      <select id="cfg_ws_port" style="width:140px;">
-        <option value="80" selected>80 (ws/http)</option>
-        <option value="443">443 (wss/https)</option>
-      </select>
+      <button class="btn secondary" id="export_units">Inventory</button>
     </div>
-    <div class="row" style="margin-bottom:8px;">
-      <label for="cfg_concurrency" class="small">Parallel uploads</label>
-      <select id="cfg_concurrency" style="width:80px;">
-        <option>1</option><option>2</option><option>4</option><option selected>6</option><option>8</option><option>12</option>
-      </select>
-    </div>
-    <div class="row" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">
-      <label for="cfg_firmware_path" class="small">Firmware path</label>
-      <input id="cfg_firmware_path" type="text" placeholder="e.g. c:\" style="flex:1;" />
-      <button id="cfg_firmware_browse" class="btn" type="button">Browse</button>
-    </div>
-    <div class="row" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">
-      <label for="cfg_imagestream_path" class="small">Static image path</label>
-      <input id="cfg_imagestream_path" type="text" placeholder="e.g. c:\" style="flex:1;" />
-      <button id="cfg_imagestream_browse" class="btn" type="button">Browse</button>
-    </div>
-    <div class="row" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">
-      <label for="cfg_logos_path" class="small">Logo path</label>
-      <input id="cfg_logos_path" type="text" placeholder="e.g. c:\" style="flex:1;" />
-      <button id="cfg_logos_browse" class="btn" type="button">Browse</button>
-    </div>
-    <div id="browse_hint" class="small" style="display:none;color:var(--muted);margin-top:6px;">
-      If you cannot browse to the file locations, copy and paste the absolute path into the field.
-    </div>
-    <div class="row" style="margin-top:8px;">
-      <a href="/ui/manual.html" target="_blank" rel="noopener" style="color:#7cc4ff;">Open LumaSuite Manual</a>
-    </div>
-    <div id="cfg_error" class="row" style="color:var(--danger);display:none;margin-top:6px;"></div>
-    <div class="row" style="justify-content:flex-end;gap:8px;">
-      <button id="cfg_close" class="btn" type="button">Cancel</button>
-      <button id="cfg_save" class="btn" type="button">Save</button>
-    </div>
-    </form>
-  </div>
-</div>
-
-<!-- Server-side folder browser modal -->
-<div id="cfg_browser_backdrop" class="modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:20001;">
-  <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:640px;max-width:96%;color:var(--fg);">
-    <h3 style="margin:0 0 8px 0;">Select Folder</h3>
-    <div class="row" style="gap:8px;align-items:center;margin-bottom:8px;">
-      <button id="cfg_browser_up" class="btn small">Up</button>
-      <input id="cfg_browser_path" type="text" style="flex:1" readonly />
-      <button id="cfg_browser_select" class="btn">Select</button>
-      <button id="cfg_browser_cancel" class="btn">Cancel</button>
-    </div>
-    <div id="cfg_browser_list" style="max-height:320px;overflow:auto;border:1px solid var(--border);padding:8px;background:var(--panel-2);border-radius:8px;"></div>
-  </div>
-</div>
+<!-- Configuration modal: injected by ui/settings.js (shared across all
+     pages -- Hall family spec Part 2). -->
 
 <!-- Password Sync Modal -->
 <div id="pw_sync_backdrop" class="modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:20000;">
@@ -355,14 +361,14 @@
         <label for="pw_sync_current" style="font-size:12px;color:var(--muted);">Current Password</label>
         <div style="display:flex;gap:8px;align-items:center;">
           <input id="pw_sync_current" type="password" placeholder="current password" autocomplete="off" style="flex:1;" />
-          <button id="pw_sync_current_toggle" class="btn small" type="button" title="Show/Hide">👁️</button>
+          <button id="pw_sync_current_toggle" class="btn small secondary" type="button" aria-label="Show or hide the current password" title="Show/Hide">👁️</button>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;">
         <label for="pw_sync_new" style="font-size:12px;color:var(--muted);">New Password</label>
         <div style="display:flex;gap:8px;align-items:center;">
           <input id="pw_sync_new" type="password" placeholder="new password" autocomplete="off" style="flex:1;" />
-          <button id="pw_sync_new_toggle" class="btn small" type="button" title="Show/Hide">👁️</button>
+          <button id="pw_sync_new_toggle" class="btn small secondary" type="button" aria-label="Show or hide the new password" title="Show/Hide">👁️</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
@@ -371,7 +377,7 @@
       </div>
       <div id="pw_sync_status" style="color:var(--muted);font-size:12px;min-height:16px;"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button id="pw_sync_cancel" class="btn" type="button">Cancel</button>
+        <button id="pw_sync_cancel" class="btn secondary" type="button">Cancel</button>
         <button id="pw_sync_submit" class="btn" type="button">Set Password</button>
       </div>
     </form>
@@ -397,7 +403,7 @@
       </label>
       <div id="ntp_modal_status" class="small" style="min-height:16px;"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button id="ntp_cancel" class="btn" type="button">Cancel</button>
+        <button id="ntp_cancel" class="btn secondary" type="button">Cancel</button>
         <button id="ntp_submit" class="btn" type="button">Sync Time</button>
       </div>
     </form>
@@ -435,248 +441,41 @@
           <h4>Current Image</h4>
           <img id="slate_active_preview" class="slate-thumb" alt="Current slate preview" />
           <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button id="slate_save_default_btn" class="btn" type="button" style="background:#0f766e;">Load Default and Save</button>
+            <button id="slate_save_default_btn" class="btn" type="button">Load Default and Save</button>
           </div>
         </div>
       </div>
       <div id="slate_manager_status" class="slate-manager-status"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button id="slate_manager_close" class="btn" type="button">Close</button>
+        <button id="slate_manager_close" class="btn secondary" type="button">Close</button>
       </div>
     </form>
   </div>
 </div>
 
 <script>
-function wirePasswordToggle(buttonId, inputId, revealCallback){
-  const btn = document.getElementById(buttonId);
-  const input = document.getElementById(inputId);
-  if(!btn || !input) return;
-  btn.addEventListener('click', async (e)=>{
-    e.preventDefault();
-    const show = input.type === 'password';
-    input.type = show ? 'text' : 'password';
-    btn.textContent = show ? '🙈' : '👁️';
-    if(show && typeof revealCallback === 'function'){
-      try{ await revealCallback(input); }catch(_e){}
-    }
-  });
-}
-
-function isAllowedPassword(value){
-  const str = String(value || '');
-  return str.length >= 6 && /^[A-Za-z0-9!@#$%^&*]+$/.test(str);
-}
-
-// Configuration modal logic (index page)
-(function initCfg(){
-  const PASSWORD_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
-
-  async function updateConfigVersion(){
-    const el = document.getElementById('cfg_app_version');
-    if(!el) return;
-    try{
-      const d = await fetch('/api/app_version', {cache:'no-store'}).then(r=>r.json());
-      el.textContent = d && d.ok && d.version ? ('v' + d.version) : 'v?.?.?';
-    }catch(e){
-      el.textContent = 'v?.?.?';
-    }
-  }
-
-  function openCfg(){
-    const d = document.getElementById('cfg_backdrop');
-    if(!d) return;
-    d.style.display='flex';
-    applyTheme();
-    updateConfigVersion();
-    document.getElementById('cfg_password').value = '';
-    const err = document.getElementById('cfg_error');
-    if(err){ err.style.display='none'; err.textContent=''; }
-    const hint = document.getElementById('browse_hint');
-    if(hint) hint.style.display = 'block';
-    const pwInput = document.getElementById('cfg_password');
-    const pwToggle = document.getElementById('cfg_pw_toggle');
-    if(pwInput) pwInput.type = 'password';
-    if(pwToggle) pwToggle.textContent = '👁️';
-    fetch('/api/config').then(r=>r.json()).then(cfg=>{
-      if(cfg){
-        const inp = document.getElementById('cfg_password'); if(inp) inp.value = PASSWORD_MASK;
-        const hashEl = document.getElementById('cfg_password_hash');
-        if(hashEl) hashEl.textContent = (cfg.password_hash || '(unavailable)');
-        if(cfg.ws_port) document.getElementById('cfg_ws_port').value = String(cfg.ws_port);
-        if(cfg.concurrency) document.getElementById('cfg_concurrency').value = String(cfg.concurrency);
-        if(cfg.logos_path) document.getElementById('cfg_logos_path').value = cfg.logos_path;
-        if(cfg.firmware_path) document.getElementById('cfg_firmware_path').value = cfg.firmware_path;
-        if(cfg.imagestream_path) document.getElementById('cfg_imagestream_path').value = cfg.imagestream_path;
-      }
-    }).catch(()=>{
-      const hashEl = document.getElementById('cfg_password_hash');
-      if(hashEl) hashEl.textContent = '(unavailable)';
-    });
-  }
-
-  wirePasswordToggle('cfg_pw_toggle', 'cfg_password', async (inp)=>{
-    const cfg2 = await (await fetch('/api/config?include_password=1',{cache:'no-store'})).json();
-    if(cfg2 && typeof cfg2.password === 'string') inp.value = cfg2.password;
-  });
-  wirePasswordToggle('pw_sync_current_toggle', 'pw_sync_current');
-  wirePasswordToggle('pw_sync_new_toggle', 'pw_sync_new');
-
-  const g = document.getElementById('header_gear');
-  if(g) g.addEventListener('click', openCfg);
-
-  const closeBtn = document.getElementById('cfg_close');
-  if(closeBtn) closeBtn.addEventListener('click', ()=>{
-    document.getElementById('cfg_backdrop').style.display='none';
-    const h=document.getElementById('browse_hint');
-    if(h) h.style.display='none';
-  });
-
-  const back = document.getElementById('cfg_backdrop');
-  if(back) back.addEventListener('click', function(e){
-    if(e.target===this){
-      this.style.display='none';
-      const h=document.getElementById('browse_hint');
-      if(h) h.style.display='none';
-    }
-  });
-
-  const saveBtn = document.getElementById('cfg_save');
-  if(saveBtn) saveBtn.addEventListener('click', function(){
-    const passwordValue = document.getElementById('cfg_password').value;
-    const passwordChanged = passwordValue && passwordValue !== PASSWORD_MASK;
-    if(passwordChanged && !isAllowedPassword(passwordValue)){
-      const errDiv = document.getElementById('cfg_error');
-      if(errDiv){
-        errDiv.textContent = 'Password must be at least 6 characters and may only include A-Z, a-z, 0-9, and !@#$%^&*';
-        errDiv.style.display = 'block';
-      }
-      return;
-    }
-
-    const payload = {
-      username:'admin',
-      ws_port: parseInt(document.getElementById('cfg_ws_port').value || '80', 10),
-      concurrency: parseInt(document.getElementById('cfg_concurrency').value || '6', 10),
-      logos_path: document.getElementById('cfg_logos_path').value,
-      firmware_path: document.getElementById('cfg_firmware_path').value,
-      imagestream_path: document.getElementById('cfg_imagestream_path').value
-    };
-    if(passwordChanged) payload.password = passwordValue;
-    const errDiv = document.getElementById('cfg_error');
-    if(errDiv){ errDiv.style.display='none'; errDiv.textContent=''; }
-    fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-      .then(async r=>{
-        if(!r.ok){
-          let j = null;
-          try{ j = await r.json(); }catch(e){}
-          if(errDiv){
-            if(j && j.error === 'invalid_paths' && Array.isArray(j.details)){
-              errDiv.textContent = 'Invalid paths: ' + j.details.map(d=>d.key+': '+d.path).join('; ');
-            }else if(j && j.error){
-              errDiv.textContent = 'Error: ' + (j.error || JSON.stringify(j));
-            }else{
-              errDiv.textContent = 'Save failed';
-            }
-            errDiv.style.display = 'block';
-          }else{
-            alert('Save failed');
-          }
-          return;
-        }
-        try{ await r.json(); }catch(e){}
-        // Update appConfig with saved values
-        if(passwordChanged) appConfig.password = payload.password;
-        appConfig.ws_port = payload.ws_port;
-        appConfig.concurrency = payload.concurrency;
-        const b=document.getElementById('cfg_backdrop');
-        if(b) b.style.display='none';
-        const h=document.getElementById('browse_hint');
-        if(h) h.style.display='none';
-      }).catch(e=>{
-        if(errDiv){ errDiv.textContent = 'Network error: ' + (e && e.message ? e.message : String(e)); errDiv.style.display='block'; }
-      });
-  });
-
-  function openServerFolderBrowser(startPath, targetSelector){
-    const backdrop = document.getElementById('cfg_browser_backdrop');
-    const list = document.getElementById('cfg_browser_list');
-    const pathInput = document.getElementById('cfg_browser_path');
-    const selectBtn = document.getElementById('cfg_browser_select');
-    const upBtn = document.getElementById('cfg_browser_up');
-    if(!backdrop||!list||!pathInput) return;
-    let current = startPath && startPath.trim() ? startPath : '';
-    async function load(p){
-      const url = '/api/list_dir' + (p ? ('?path=' + encodeURIComponent(p)) : '');
-      list.innerHTML = 'Loading...';
-      try{
-        const r = await fetch(url);
-        const j = await r.json();
-        if(!j.ok){ list.innerHTML = '<div class="small">Error: '+(j.error||'')+'</div>'; return; }
-        current = j.path || p || '';
-        pathInput.value = current;
-        list.innerHTML = '';
-        (j.entries||[]).forEach(ent=>{
-          if(!ent.is_dir) return;
-          const row = document.createElement('div');
-          row.className = 'row';
-          row.style.justifyContent = 'space-between';
-          row.style.padding = '6px 8px';
-          row.style.cursor = 'pointer';
-          row.textContent = ent.name;
-          row.onclick = ()=>{
-            let base = current || '';
-            base = base.replace(/\\\\/g, '/');
-            const next = base.endsWith('/') || base === '' ? (base + ent.name) : (base + '/' + ent.name);
-            load(next);
-          };
-          list.appendChild(row);
-        });
-      }catch(e){ list.innerHTML = '<div class="small">Error: '+String(e)+'</div>'; }
-    }
-    upBtn.onclick = ()=>{
-      try{
-        if(!current) return;
-        let tmp = String(current).replace(/\\\\/g, '/');
-        if(tmp === '/' || tmp === '') return;
-        const parts = tmp.split('/').filter(p=>p.length>0);
-        if(parts.length <= 1){
-          load('/');
-          return;
-        }
-        parts.pop();
-        const parent = '/' + parts.join('/');
-        load(parent);
-      }catch(e){}
-    };
-    document.getElementById('cfg_browser_cancel').onclick = ()=>{ backdrop.style.display='none'; };
-    selectBtn.onclick = ()=>{
-      const target = document.querySelector(targetSelector);
-      if(target){ target.value = pathInput.value; }
-      backdrop.style.display='none';
-    };
-    backdrop.style.display='flex';
-    load(current || '');
-  }
-
-  const fbtn = document.getElementById('cfg_firmware_browse');
-  if(fbtn) fbtn.addEventListener('click', ()=> openServerFolderBrowser(document.getElementById('cfg_firmware_path').value, '#cfg_firmware_path'));
-  const ibtn = document.getElementById('cfg_imagestream_browse');
-  if(ibtn) ibtn.addEventListener('click', ()=> openServerFolderBrowser(document.getElementById('cfg_imagestream_path').value, '#cfg_imagestream_path'));
-  const lbtn = document.getElementById('cfg_logos_browse');
-  if(lbtn) lbtn.addEventListener('click', ()=> openServerFolderBrowser(document.getElementById('cfg_logos_path').value, '#cfg_logos_path'));
-})();
+// Password Sync modal reveal toggles. wirePasswordToggle/isAllowedPassword
+// are provided globally by ui/settings.js. All other Configuration-modal
+// logic (openCfg/saveCfg/folder browser) now lives entirely in
+// ui/settings.js -- see Hall family spec Part 2.
+wirePasswordToggle("pw_sync_current_toggle", "pw_sync_current");
+wirePasswordToggle("pw_sync_new_toggle", "pw_sync_new");
 </script>
 
 <script>
 const $ = sel => document.querySelector(sel);
-const api = (p, opt={}) => fetch(p, opt).then(r => r.json());
-function lumaConfirm(options) {
-  if (window.lumaDialog && typeof window.lumaDialog.confirm === "function") {
-    return window.lumaDialog.confirm(options);
-  }
-  return Promise.resolve(window.confirm(options?.message || "Continue?"));
+// One escaping helper for this module, at module scope. Device-controlled strings
+// (hostnames, stream names) are data, never markup: a hostname containing a tag
+// must render as text.
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+  });
 }
+const api = (p, opt={}) => fetch(p, opt).then(r => r.json());
+// lumaConfirm is provided globally by ui/dialogs.js (loaded above). No
+// local wrapper here: a same-named local declaration would shadow/replace
+// the shared window.lumaConfirm for every other script on this page.
 const producerRpc = (ip, method, params={}) => fetch('/api/producer/jsonrpc', {
   method: 'POST',
   headers: {'Content-Type': 'application/json'},
@@ -874,6 +673,38 @@ function ipToNum(ip){
   return ((parts[0]<<24)>>>0) + (parts[1]<<16) + (parts[2]<<8) + parts[3];
 }
 
+// Link speed arrives as a number or as text such as 1000, 1000M, 1G or 1 Gbps. It is read once, here,
+// into Mbps; anything that does not parse is unknown and is never a failure.
+function normalizeLinkSpeed(raw){
+  if(raw===undefined || raw===null || raw==='') return null;
+  if(typeof raw==='number') return (Number.isFinite(raw) && raw>0) ? raw : null;
+  const m=/^\s*(\d+(?:\.\d+)?)\s*([a-z/]*)/i.exec(String(raw));
+  if(!m) return null;
+  const n=parseFloat(m[1]), unit=m[2].toLowerCase();
+  if(!(n>0)) return null;
+  if(unit==='' || unit.startsWith('m')) return n;
+  if(unit.startsWith('g')) return n*1000;
+  return null;
+}
+// The link speed a unit reports for its AV LAN: the scan's own read first, then any plain field.
+function unitLinkSpeed(u){
+  const net = u && u.net;
+  if(net && net.linkspeed_mbps !== undefined && net.linkspeed_mbps !== null) return net.linkspeed_mbps;
+  if(net && net.linkspeed_raw) return net.linkspeed_raw;
+  return u ? u.linkspeed : undefined;
+}
+function renderLinkSpeedCell(td,raw){
+  const mbps=normalizeLinkSpeed(raw);
+  td.dataset.linkspeed = mbps===null ? '' : String(mbps);
+  td.textContent = mbps===null ? '\u2014' : `${mbps} Mbps`;
+  td.className = 'linkspeed_cell ' + (mbps===null ? 'link-unknown' : (mbps===1000 ? 'link-ok' : 'link-slow'));
+}
+// Dotted numeric compare for 1.0.2 / V1.0.2.3 style versions; falls back to text.
+function compareVersions(a,b){
+  const pa=(String(a||'').match(/\d+/g)||[]).map(Number), pb=(String(b||'').match(/\d+/g)||[]).map(Number);
+  for(let i=0;i<Math.max(pa.length,pb.length);i++){ const d=(pa[i]||0)-(pb[i]||0); if(d) return d; }
+  return String(a||'').localeCompare(String(b||''));
+}
 function getDisplayList(){
   let list = (units||[]).map(u => ({...u, typeLabel: classifyRole(u)}));
   list = applyFirmwareRoleFilter(list);
@@ -887,11 +718,70 @@ function getDisplayList(){
       case "hostname": av=(a.hostname||"").toLowerCase(); bv=(b.hostname||"").toLowerCase(); if(av!==bv) return av<bv?-1*dir:1*dir; break;
       case "type": av=(a.typeLabel||""); bv=(b.typeLabel||""); if(av!==bv) return av<bv?-1*dir:1*dir; break;
       case "model": av=(a.model||"").toLowerCase(); bv=(b.model||"").toLowerCase(); if(av!==bv) return av<bv?-1*dir:1*dir; break;
-      case "version": av=(a.version||"").toLowerCase(); bv=(b.version||"").toLowerCase(); if(av!==bv) return av<bv?-1*dir:1*dir; break;
+      case "version": { const c=compareVersions(a.version,b.version); if(c) return c*dir; break; }
+      case "linkspeed": { av=normalizeLinkSpeed(unitLinkSpeed(a)); bv=normalizeLinkSpeed(unitLinkSpeed(b));
+        if(av===null && bv!==null) return 1; if(bv===null && av!==null) return -1;   /* unknown sorts last either way */
+        if(av!==bv) return (av-bv)*dir; break; }
     }
     return (ipToNum(a.ip)-ipToNum(b.ip))*dir;
   });
   return list;
+}
+
+// The switch a unit is plugged into, from the neighbour its scan stored. Nothing is requested on hover,
+// and every value is device text, so it is only ever assigned as text.
+function lldpFacts(u){
+  const net = u && u.net;
+  if(!net) return {state:'unavailable', message:'LLDP unavailable: this unit has not reported its network status.'};
+  if(net.link_up === false) return {state:'unavailable', message:'LLDP unavailable: the AV LAN has no link.'};
+  const l = net.lldp;
+  if(!l || typeof l !== 'object') return {state:'none', message:'No LLDP neighbors reported.'};
+  const port = l.PortDescr && l.PortID && l.PortDescr !== l.PortID ? `${l.PortDescr} (${l.PortID})` : (l.PortDescr || l.PortID || '');
+  const rows = [['Interface','AV LAN'], ['Switch', l.SysName], ['Mgmt IP', l.MgmtIP], ['Chassis ID', l.ChassisID], ['Port', port],
+    ['TTL', typeof l.TTL === 'number' ? `${l.TTL} s` : ''], ['Capabilities', Array.isArray(l.Capabilities) ? l.Capabilities.join(', ') : ''], ['Description', l.SysDescr]]
+    .filter(r => r[1]);
+  return {state:'neighbor', rows};
+}
+function renderLldpPopup(box,u){
+  box.textContent='';
+  const h=document.createElement('h4'); h.textContent='Connected switch'; box.appendChild(h);
+  const facts=lldpFacts(u);
+  if(facts.state !== 'neighbor'){
+    const p=document.createElement('div'); p.className='lldp-value'; p.textContent=facts.message; box.appendChild(p); return;
+  }
+  const grid=document.createElement('div'); grid.className='lldp-grid';
+  facts.rows.forEach(([label,value])=>{
+    const k=document.createElement('div'); k.className='lldp-label'; k.textContent=label;
+    const v=document.createElement('div'); v.className='lldp-value'; v.textContent=String(value);
+    grid.appendChild(k); grid.appendChild(v);
+  });
+  box.appendChild(grid);
+}
+function showLldpPopup(cell){
+  const box=document.getElementById('lldp_popup'); if(!box) return;
+  const u=unitMap.get(cell.dataset.ip); if(!u) return;
+  renderLldpPopup(box,u);
+  box.style.display='block';
+  const r=cell.getBoundingClientRect(), w=box.offsetWidth, h=box.offsetHeight;
+  const left=Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  const below=r.bottom + 6, top = below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : below;
+  box.style.left=left+'px'; box.style.top=top+'px';
+}
+function hideLldpPopup(){ const box=document.getElementById('lldp_popup'); if(box) box.style.display='none'; }
+document.addEventListener('mouseover', e=>{ const c=e.target.closest && e.target.closest('td.mac-lldp'); if(c) showLldpPopup(c); });
+document.addEventListener('mouseout', e=>{ const c=e.target.closest && e.target.closest('td.mac-lldp'); if(c) hideLldpPopup(); });
+document.addEventListener('focusin', e=>{ const c=e.target.closest && e.target.closest('td.mac-lldp'); if(c) showLldpPopup(c); });
+document.addEventListener('focusout', e=>{ const c=e.target.closest && e.target.closest('td.mac-lldp'); if(c) hideLldpPopup(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') hideLldpPopup(); });
+window.addEventListener('scroll', hideLldpPopup, true);
+
+function paintSortIndicators(){
+  document.querySelectorAll('th.sortable').forEach(th=>{
+    const on = th.dataset.key===sortKey;
+    th.classList.toggle('sorted', on);
+    th.setAttribute('aria-sort', on ? (sortDir==='asc' ? 'ascending' : 'descending') : 'none');
+    const ind=th.querySelector('.sort-ind'); if(ind) ind.textContent = on ? (sortDir==='asc' ? '\u2191' : '\u2193') : '';
+  });
 }
 
 function statusBadge(text, cls, spin=false){
@@ -936,7 +826,8 @@ function renderRows(list){
     a.addEventListener('click',(e)=>{e.preventDefault(); const port=appConfig.ws_port; const scheme=(port===443)?'https':'http'; window.open(`${scheme}://${u.ip}/#/info`,'_blank');});
     tdIP.appendChild(a);
 
-    const tdMAC=document.createElement('td'); tdMAC.textContent=u.mac||"";
+    const tdMAC=document.createElement('td'); tdMAC.textContent=u.mac||""; tdMAC.className='mac-lldp'; tdMAC.tabIndex=0; tdMAC.dataset.ip=u.ip||'';
+    const tdLink=document.createElement('td'); tdLink.className='linkspeed_cell'; renderLinkSpeedCell(tdLink,unitLinkSpeed(u));
     const tdHost=document.createElement('td');
     const roleLbl = classifyRole(u) || '';
     const isEncoder = /^enc/i.test(roleLbl) || ((u.model||'').toLowerCase().startsWith('at-luma-e') || (u.model||'').toLowerCase().startsWith('at-omni-e'));
@@ -957,7 +848,7 @@ function renderRows(list){
       if (newHostname === oldHostname) return; // No change
       
       if (!newHostname) {
-        alert('Hostname cannot be empty');
+        window.toast('Hostname cannot be empty', 'error');
         e.target.value = oldHostname;
         return;
       }
@@ -967,7 +858,7 @@ function renderRows(list){
       try {
         const result = await setHostname(u.ip, newHostname);
         if (!result.ok) {
-          alert('Failed to set hostname: ' + result.error);
+          window.toast('Failed to set hostname: ' + result.error, 'error');
           clearPendingUnitFields(u.ip, ["hostname"]);
           updateUnitFields(u.ip, { hostname: oldHostname });
           e.target.value = oldHostname;
@@ -978,7 +869,7 @@ function renderRows(list){
           await refreshAfterSetting([u.ip]);
         }
       } catch (err) {
-        alert('Error setting hostname: ' + err.message);
+        window.toast('Error setting hostname: ' + err.message, 'error');
         clearPendingUnitFields(u.ip, ["hostname"]);
         updateUnitFields(u.ip, { hostname: oldHostname });
         e.target.value = oldHostname;
@@ -1013,7 +904,7 @@ function renderRows(list){
         if (newStreamname === oldStreamname) return; // No change
         
         if (!newStreamname) {
-          alert('Streamname cannot be empty');
+          window.toast('Streamname cannot be empty', 'error');
           e.target.value = oldStreamname;
           return;
         }
@@ -1029,7 +920,7 @@ function renderRows(list){
         try {
           const result = await setStreamname(u.ip, newStreamname);
           if (!result.ok) {
-            alert('Failed to set streamname: ' + result.error);
+            window.toast('Failed to set streamname: ' + result.error, 'error');
             clearPendingUnitFields(u.ip, ["enc.video.streamname", "enc.audio.streamname"]);
             updateUnitFields(u.ip, {
               "enc.video.streamname": oldStreamname,
@@ -1049,7 +940,7 @@ function renderRows(list){
             await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
-          alert('Error setting streamname: ' + err.message);
+          window.toast('Error setting streamname: ' + err.message, 'error');
           clearPendingUnitFields(u.ip, ["enc.video.streamname", "enc.audio.streamname"]);
           updateUnitFields(u.ip, {
             "enc.video.streamname": oldStreamname,
@@ -1092,7 +983,7 @@ function renderRows(list){
           });
           const j = await res.json();
           if (!j.ok) {
-            alert('Failed to set Dante power: ' + (j.error || ''));
+            window.toast('Failed to set Dante power: ' + (j.error || ''), 'error');
             clearPendingUnitFields(u.ip, ["dante_enabled"]);
             updateUnitFields(u.ip, { dante_enabled: !enabled });
             e.target.checked = !enabled;
@@ -1103,7 +994,7 @@ function renderRows(list){
             await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
-          alert('Error setting Dante power: ' + err.message);
+          window.toast('Error setting Dante power: ' + err.message, 'error');
           clearPendingUnitFields(u.ip, ["dante_enabled"]);
           updateUnitFields(u.ip, { dante_enabled: !enabled });
           e.target.checked = !enabled;
@@ -1159,7 +1050,7 @@ function renderRows(list){
           const source = (u.edid_source && String(u.edid_source).trim()) ? String(u.edid_source) : 'hdmiin';
           const resp = await producerRpc(u.ip, 'EdidInput.Set', { source, edidmode: newMode });
           if (!resp || resp.error || !resp.result) {
-            alert('Failed to set EDID mode: ' + (resp?.error?.message || 'Unknown error'));
+            window.toast('Failed to set EDID mode: ' + (resp?.error?.message || 'Unknown error'), 'error');
             clearPendingUnitFields(u.ip, ["edid_mode", "edid_source", "edid_resolution"]);
             updateUnitFields(u.ip, {
               edid_mode: prevMode,
@@ -1184,7 +1075,7 @@ function renderRows(list){
           });
           await refreshAfterSetting([u.ip]);
         } catch (err) {
-          alert('Error setting EDID mode: ' + err.message);
+          window.toast('Error setting EDID mode: ' + err.message, 'error');
           clearPendingUnitFields(u.ip, ["edid_mode", "edid_source", "edid_resolution"]);
           updateUnitFields(u.ip, {
             edid_mode: prevMode,
@@ -1258,7 +1149,7 @@ function renderRows(list){
         try {
           const resp = await producerRpc(u.ip, 'VideoOutTiming.Set', { timing: newTiming });
           if (!resp || resp.error || !resp.result) {
-            alert('Failed to set decoder output timing: ' + (resp?.error?.message || 'Unknown error'));
+            window.toast('Failed to set decoder output timing: ' + (resp?.error?.message || 'Unknown error'), 'error');
             clearPendingUnitFields(u.ip, ["video_out_timing", "edid_resolution"]);
             updateUnitFields(u.ip, {
               video_out_timing: prevTiming,
@@ -1280,7 +1171,7 @@ function renderRows(list){
           timingSelect.dataset.lastValue = appliedTiming;
           await refreshAfterSetting([u.ip]);
         } catch (err) {
-          alert('Error setting decoder output timing: ' + err.message);
+          window.toast('Error setting decoder output timing: ' + err.message, 'error');
           clearPendingUnitFields(u.ip, ["video_out_timing", "edid_resolution"]);
           updateUnitFields(u.ip, {
             video_out_timing: prevTiming,
@@ -1329,7 +1220,7 @@ function renderRows(list){
           });
           const j = await res.json();
           if (!j.ok) {
-            alert('Failed to set HDCP: ' + (j.error || ''));
+            window.toast('Failed to set HDCP: ' + (j.error || ''), 'error');
             clearPendingUnitFields(u.ip, ["hdcp"]);
             updateUnitFields(u.ip, { hdcp: prevHdcp });
             e.target.value = prevHdcp;
@@ -1341,7 +1232,7 @@ function renderRows(list){
             await refreshAfterSetting([u.ip]);
           }
         } catch (err) {
-          alert('Error setting HDCP: ' + err.message);
+          window.toast('Error setting HDCP: ' + err.message, 'error');
           clearPendingUnitFields(u.ip, ["hdcp"]);
           updateUnitFields(u.ip, { hdcp: prevHdcp });
           e.target.value = prevHdcp;
@@ -1355,40 +1246,55 @@ function renderRows(list){
     const tdModel=document.createElement('td'); 
     tdModel.className = 'col-model';
     tdModel.textContent=u.model||"";
-    const tdVer=document.createElement('td'); tdVer.textContent=u.version||u.firmware||"";
+    const tdVer=document.createElement('td'); tdVer.className='version_cell'; tdVer.textContent=u.version||u.firmware||"";
+    const tdPassword=document.createElement('td');
+    (function renderPasswordPill(source){
+      const pill = document.createElement('span');
+      pill.className = 'pwd-pill';
+      if(source === 'primary'){ pill.classList.add('pwd-primary'); pill.textContent = 'Primary'; }
+      else if(source === 'fallback'){ pill.classList.add('pwd-fallback'); pill.textContent = 'Fallback'; }
+      else if(source === 'failed'){ pill.classList.add('pwd-failed'); pill.textContent = 'Auth Failed'; }
+      else { pill.classList.add('pwd-unknown'); pill.textContent = 'Unknown'; }
+      tdPassword.appendChild(pill);
+    })(u.password_source);
     const tdStatus=document.createElement('td');
     // Blink button
     const tdBlink=document.createElement('td');
     const blinkBtn=document.createElement('button');
     blinkBtn.textContent='💡';
     blinkBtn.className='btn-blink';
-    blinkBtn.title='Blink front panel LED';
+    blinkBtn.title='Blink front panel LED'; blinkBtn.setAttribute('aria-label','Blink front panel LED');
     blinkBtn.dataset.ip=u.ip||'';
     blinkBtn.dataset.model=(u.model||'').toLowerCase();
     tdBlink.appendChild(blinkBtn);
-    // Preview column (no per-element handlers; we use delegated listeners)
+    // Preview column, laid out as OmniSuite's Device Info lays it out: the checkbox (the unit's own
+    // thumbnail switch) centred, the word "Preview" beneath it. The word opens the unit's picture in
+    // a window of its own, and resting the pointer on it shows the picture beside the pointer.
+    // Delegated listeners (ui/unit-preview.js) do the work.
     const tdPreview = document.createElement('td');
-    const enc = /^enc/i.test(roleLbl) || ((u.model||'').toLowerCase().startsWith('at-luma-e') || (u.model||'').toLowerCase().startsWith('at-omni-e'));
+    tdPreview.className = 'preview-cell';
     const isSwitcher = isSwitcherUnit(u) || roleLbl === 'Switcher';
     if (!isSwitcher) {
-      const previewLink = document.createElement('a');
-      const url = enc ? (`http://${u.ip}/stream?resolution=320x180&fps=15&bitrate=128`) : (`http://${u.ip}/thumbnail/thumbnail1.jpg`);
-      previewLink.href = url;
-      previewLink.className = 'ip preview-link';
-      previewLink.textContent = 'Preview';
-      previewLink.dataset.ip = u.ip||'';
-      previewLink.dataset.role = roleLbl;
-      previewLink.dataset.model = u.model||'';
-      previewLink.dataset.typeLabel = roleLbl;
-      tdPreview.appendChild(previewLink);
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'preview-checkbox';
+      cb.dataset.ip = u.ip || ''; cb.dataset.mac = u.mac || '';
+      cb.setAttribute('aria-label', 'Thumbnail enabled on ' + (u.hostname || u.ip || 'unit'));
+      if (typeof u.thumbnail_enabled === 'boolean') cb.checked = u.thumbnail_enabled; else cb.indeterminate = true;
+      tdPreview.dataset.ip = u.ip || '';
+      tdPreview.appendChild(cb);
+      const pv = document.createElement('a');
+      pv.className = 'action-link preview-link'; pv.textContent = 'Preview';
+      pv.setAttribute('role', 'button'); pv.tabIndex = 0;
+      pv.setAttribute('aria-label', 'Preview ' + (u.hostname || u.ip || 'unit'));
+      tdPreview.appendChild(pv);
     }
      tdStatus.innerHTML='<span class="status s-idle-unchanged">idle</span>';
 
-    const row=[tdSel,tdIP,tdMAC,tdHost,tdTimezone,tdNtpServer,tdStreamname,tdDanteCheck,tdDanteName,tdDanteIp,tdEdidResolution,tdType,tdModel,tdVer,tdHdcp,tdStatus,tdBlink,tdPreview];
+    const row=[tdSel,tdIP,tdHost,tdMAC,tdLink,tdTimezone,tdNtpServer,tdStreamname,tdDanteCheck,tdDanteName,tdDanteIp,tdEdidResolution,tdType,tdModel,tdVer,tdHdcp,tdPassword,tdStatus,tdBlink,tdPreview];
     const trFrag=document.createDocumentFragment(); row.forEach(td=>trFrag.appendChild(td));
     tr.appendChild(trFrag); tb.appendChild(tr);
 
-    unitMap.set(u.ip,{...u,statusCell:tdStatus,versionCell:tdVer,hostCell:tdHost,streamnameCell:tdStreamname,macCell:tdMAC,streamLed:streamLed,danteCheckCell:tdDanteCheck,hdcpCell:tdHdcp});
+    unitMap.set(u.ip,{...u,statusCell:tdStatus,versionCell:tdVer,hostCell:tdHost,streamnameCell:tdStreamname,macCell:tdMAC,linkCell:tdLink,streamLed:streamLed,danteCheckCell:tdDanteCheck,hdcpCell:tdHdcp});
   });
   applyPersistedStatuses();
 }
@@ -1402,8 +1308,9 @@ function updateTotals(){
     else if(u.typeLabel==="Decoder") dec++; 
     else if(u.typeLabel==="Switcher") swt++;
   }
-  const el=$("#scan_status"); 
-  if(el) el.textContent=`Units discovered: ${list.length} — Encoders: ${enc}, Decoders: ${dec}, Switchers: ${swt}`;
+  const put=(id,n)=>{ const e=$(id); if(e) e.textContent=String(n); };
+  put('#encoder_count',enc); put('#decoder_count',dec); put('#switcher_count',swt);
+  const pill=$('#switcher_count_pill'); if(pill) pill.hidden = !swt;
 }
 
 // Poll encoder RTMP status
@@ -1587,11 +1494,74 @@ function endScanQuietMode(state){
   }
 }
 
+// Unobtrusive Video Wall site-discovery notification (see PROJECT.md,
+// "Video Wall: site discovery" -- read-only, no device writes). Reuses the
+// same short-TTL server-side cache /api/video_wall/detect shares, so this
+// call costs nothing extra if the Video Wall page already warmed it, and
+// never triggers a fresh per-decoder poll on its own within the cache
+// window. Called once on load and once after a manual scan completes --
+// deliberately not on a timer, to avoid adding a third steady-state poll
+// site alongside Video Wall's own refresh/detect calls.
+async function refreshVideoWallBadge(){
+  const badge = document.getElementById("vwBadge");
+  if (!badge) return;
+  try {
+    const resp = await fetch('/api/video_wall/candidates_summary');
+    const data = await resp.json().catch(() => ({}));
+    const count = (data && data.ok && Number.isFinite(data.review_count)) ? data.review_count : 0;
+    if (count > 0) {
+      const attention = data.by_status && (data.by_status.CONFLICT || data.by_status.AMBIGUOUS);
+      badge.textContent = `Video Wall · ${count}`;
+      badge.classList.toggle("attention", !!attention);
+      badge.style.display = "inline-flex";
+    } else {
+      badge.style.display = "none";
+    }
+  } catch (e) {
+    // Best-effort only -- a failed badge fetch must never disrupt Device
+    // Manager's own scan/table functionality.
+    badge.style.display = "none";
+  }
+}
+
+// The adapter's own network and any additional (routed) networks are ONE search
+// space: both are scanned, once each, in one request. The additional ranges are
+// remembered by the server so a restart does not make the operator retype them.
+function composeScanTargets(){
+  const extra=($("#targets").value||"").split(/[,\s;]+/).filter(Boolean);
+  const chosen=($("#adapters").value||"").trim();
+  const seen=new Set(); const out=[];
+  (chosen?[chosen]:[]).concat(extra).forEach(t=>{ if(!seen.has(t)){ seen.add(t); out.push(t); } });
+  return out.join(",");
+}
+let savedScanRanges="";
+async function saveScanRanges(){
+  const text=($("#targets").value||"").trim();
+  if(text===savedScanRanges) return true;
+  try{
+    const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scan_ranges:text})});
+    const body=await r.json().catch(()=>({}));
+    if(!r.ok){ return body.error || "Those networks cannot be scanned."; }
+    savedScanRanges=text; return true;
+  }catch(e){ return true; }   // not being able to remember them must not stop a scan
+}
+async function loadScanRanges(){
+  try{
+    const r=await fetch('/api/config'); const c=await r.json();
+    const text=(c.scan_ranges||[]).join(", ");
+    savedScanRanges=text;
+    const input=$("#targets");
+    if(input && !input.value){ input.value=text; input.dispatchEvent(new Event("input")); }
+  }catch(e){ /* optional */ }
+}
+
 async function scan(){
-  const text=$("#targets").value||"".trim();
-  const chosen=$("#adapters").value||"".trim();
-  const targets=text||chosen;
+  const targets=composeScanTargets();
   const el=$("#scan_status");
+  if(targets){
+    const saved=await saveScanRanges();
+    if(saved!==true){ if(el) el.textContent=saved; return; }
+  }
   console.log("[SCAN] Starting scan with targets:", targets);
   if(!targets){ if(el) el.textContent="no targets"; return; }
   
@@ -1603,7 +1573,6 @@ async function scan(){
   el.innerHTML=`scanning <span class="spinner"></span>`;
   $("#scan").disabled = true;
   $("#stop_scan").style.display = "inline-block";
-  $("#stop_scan").style.background = "#f44336"; // Red while scanning
   stopRtmpPolling(); // Clear any previous polling interval
   console.log("[SCAN] Sending POST to /api/scan...");
   try{
@@ -1628,7 +1597,8 @@ async function scan(){
     rerenderFiltered();
     updateTotals();
     startRtmpPolling(); // Start polling for encoder RTMP status
-    
+    refreshHallFirmwareStatus(); // pick up published-firmware status for any newly discovered devices (no new Hall request -- server-side cache)
+
     let statusMsg = `Scan done: ${rows.length} — duration ${data.duration||0}s`;
     
     // Check for units with missing critical fields (likely auth failures)
@@ -1657,15 +1627,16 @@ async function scan(){
       const totalErrors = errors.length + unitsWithMissingData.length;
       statusMsg += ` (${totalErrors} auth failures)`;
       // Display explicit auth errors
-      const errorList = errors.map(e => `<div style="color:#f44336; margin-top:4px;">⚠️ ${e.ip}: ${e.error}</div>`).join('');
+      const errorList = errors.map(e => `<div style="color:#f44336; margin-top:4px;">⚠️ ${esc(e.ip)}: ${esc(e.error)}</div>`).join('');
       // Display units with missing data (implicit auth failures) 
       const missingDataList = unitsWithMissingData.map(u => {
-        return `<div style="color:#ff9800; margin-top:4px;">⚠️ ${u.ip}: Check Password</div>`;
+        return `<div style="color:#ff9800; margin-top:4px;">⚠️ ${esc(u.ip)}: Check Password</div>`;
       }).join('');
       el.innerHTML = statusMsg + errorList + missingDataList;
     } else {
       el.textContent = statusMsg;
     }
+    refreshVideoWallBadge();
   }catch(e){
     console.error("[SCAN] Error:", e);
     if(e.name === 'AbortError'){
@@ -1676,7 +1647,6 @@ async function scan(){
   }finally{
     $("#scan").disabled = false;
     $("#stop_scan").style.display = "none";
-    $("#stop_scan").style.background = "#2196F3"; // Reset to blue
     scanAbortController = null;
     endScanQuietMode(quietState);
     console.log("[SCAN] Scan complete");
@@ -1705,11 +1675,17 @@ async function loadAdapters(){
       o.textContent = `${cleanAdapterName(labelRaw)}` + (a.scan?` — ${a.scan}`:"");
       sel.appendChild(o);
     });
+    // Scan only the additional networks (for example a routed network, with no
+    // interest in the adapter's own).
+    const none=document.createElement("option");
+    none.value=""; none.textContent="No adapter — additional networks only";
+    sel.appendChild(none);
     const saved = localStorage.getItem("lumasuite_selected_adapter");
     if(saved){
       const savedOption = Array.from(sel.options).find(o => o.value === saved);
-      const savedLabel = (savedOption?.textContent || "").toLowerCase();
-      if(savedOption && !/(virtual|vethernet|vmware|hyper-v|loopback|bluetooth)/.test(savedLabel)) sel.value = saved;
+      // An explicit choice is honoured whatever kind of adapter it is: the
+      // server's ordering (physical Ethernet first) only decides the DEFAULT.
+      if(savedOption) sel.value = saved;
       else localStorage.removeItem("lumasuite_selected_adapter");
     }
     sel.addEventListener("change", ()=> localStorage.setItem("lumasuite_selected_adapter", sel.value));
@@ -2092,21 +2068,10 @@ const HEARTBEAT_INTERVAL_MS = 5000; // 5 seconds
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 3000;
 const HEARTBEAT_FAILURE_LIMIT = 3;
 
-function showConnectionBanner() {
-  const banner = $("#connection_banner");
-  if(banner && banner.style.display === 'none') {
-    banner.style.display = 'block';
-    document.body.style.paddingTop = '50px'; // Make room for banner
-  }
-}
-
-function hideConnectionBanner() {
-  const banner = $("#connection_banner");
-  if(banner && banner.style.display === 'block') {
-    banner.style.display = 'none';
-    document.body.style.paddingTop = '0';
-  }
-}
+// The persistent "connection lost" banner is gone. The heartbeat still records reachability in
+// window.__lumaConnection for diagnostics; an operation that really fails reports its own error.
+function showConnectionBanner() { window.__lumaConnection = {reachable:false, since:Date.now()}; }
+function hideConnectionBanner() { window.__lumaConnection = {reachable:true, since:Date.now()}; }
 
 function startConnectionMonitoring() {
   if(heartbeatInterval) return; // Already started
@@ -2547,13 +2512,86 @@ function getSelectedIPs(){
     .map(r=>r.dataset.ip);
 }
 
+// Non-destructive firmware currency check (family spec Part 3.4). Never
+// starts an upgrade; only compares each device's last-known reported
+// version against locally available firmware filenames for its model.
+// Automatic Hall Research published-firmware status (optional internet
+// enrichment -- see GET /api/firmware_status). Independent of, and rendered
+// alongside, the manual local-file check above: this answers "has Hall
+// published something newer than what's installed", not "do I have a file
+// for it locally". If Hall's site is unreachable this renders nothing at
+// all -- no "Unknown", no warning, no toast -- the Version cell just shows
+// the plain installed version exactly as it always has.
+let _hallFwRetriesLeft = 3;
+function renderHallFirmwareBadge(ip, result){
+  const u = unitMap.get(ip);
+  const cell = u && u.versionCell;
+  if(!cell) return;
+  let badge = cell.querySelector(".hall-fw-badge");
+  if(!result){
+    // Nothing to say about this device yet (a model Hall's catalogue here does
+    // not cover, or the first check has not answered).
+    if(badge) badge.remove();
+    return;
+  }
+  if(!badge){
+    badge = document.createElement("span");
+    badge.className = "hall-fw-badge badge";
+    badge.style.marginLeft = "6px";
+    cell.appendChild(badge);
+  }
+  badge.classList.remove("ok","warn");
+  const asOf = result.checked_at ? (" Last checked " + new Date(result.checked_at * 1000).toLocaleDateString() + ".") : "";
+  const staleNote = result.stale ? (" Hall Research could not be reached just now; this is the last answer received." + asOf) : asOf;
+  if(result.state === "update_available"){
+    badge.classList.add("warn");
+    badge.textContent = "Available";
+    badge.title = "Hall Research has published v" + result.published_version +
+      (result.published_release_date ? (" (" + result.published_release_date + ")") : "") +
+      " for this product." + staleNote;
+  } else if(result.state === "up_to_date"){
+    badge.classList.add("ok");
+    badge.textContent = "Up to Date";
+    badge.title = "Hall Research's published version is v" + result.published_version + "." + staleNote;
+  } else {
+    // A real unknown: say so, and say why in plain words.
+    badge.textContent = "Unknown";
+    badge.title = result.reason === "installed_version_unreadable"
+      ? "This device's firmware version could not be read."
+      : "Hall Research's published version could not be retrieved yet. It is checked again automatically.";
+  }
+}
+
+async function refreshHallFirmwareStatus(){
+  try{
+    const data = await api("/api/firmware_status");
+    if(!data || !data.ok) return;
+    const results = data.results || {};
+    for(const ip of unitMap.keys()){
+      renderHallFirmwareBadge(ip, results[ip]);
+    }
+    // Case B (background result arrives after scan/initial load): the Hall
+    // lookup may still be running the first time this is called. Retry a
+    // few times, spaced out, then stop -- never an indefinite/aggressive
+    // poll, and never anything the operator sees either way.
+    if(data.hall_lookup && data.hall_lookup.state === "pending" && _hallFwRetriesLeft > 0){
+      _hallFwRetriesLeft--;
+      setTimeout(refreshHallFirmwareStatus, 4000);
+    }
+  }catch(e){
+    // Optional enrichment only -- a failed call here must never surface to
+    // the operator (no toast/banner/console-visible error path beyond the
+    // normal dev console).
+  }
+}
+
 async function upgradeSelected(){
   console.log("[ui] upgradeSelected CALLED at", new Date().toISOString());
   console.warn("UPGRADE BUTTON CLICKED - CHECK CONSOLE FILTER");
   const file=$("#files").value;
-  if(!file || file==="Select Firmware"){ $("#up_status").textContent="select a .tar.gz"; return; }
-  if(!file.toLowerCase().endsWith(".tar.gz")){ $("#up_status").textContent="firmware must be .tar.gz"; return; }
-  let ips=getSelectedIPs(); if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
+  if(!file || file==="Select Firmware"){ $("#up_status").textContent="select a .tar.gz"; window.toast && window.toast("Select a firmware file first.", "error"); return; }
+  if(!file.toLowerCase().endsWith(".tar.gz")){ $("#up_status").textContent="firmware must be .tar.gz"; window.toast && window.toast("Select a firmware file first.", "error"); return; }
+  let ips=getSelectedIPs(); if(!ips.length){ $("#up_status").textContent="select at least one unit"; window.toast && window.toast("Select at least one device first.", "error"); return; }
 
   const wantRole = roleFromFirmwareName(file);
   if(wantRole){
@@ -2694,54 +2732,53 @@ async function upgradeSelected(){
   }
 }
 
+async function reloadUnitsFromServer(){
+  const payload = await api("/api/cache");
+  units = mergeByIP([], tolerantRows(payload));
+  saveLocal(units);
+  rerenderFiltered();
+  updateTotals();
+}
+
 async function removeSelected(){
   const ips = getSelectedIPs();
   if(!ips.length){ $("#up_status").textContent="select at least one unit"; return; }
-
-  const ok = await lumaConfirm({
-    title: "Remove Selected Devices",
-    message: `You are about to PERMANENTLY REMOVE ${ips.length} device(s) from all storage.\n\nThis will delete the device(s) from cache and all files.\n\nProceed?`,
-    confirmText: "Remove",
-    destructive: true
+  // The question, the assignments view and the request live in clear_units.js. The server
+  // decides which selected units go and which Remote Access keeps; this page only redraws.
+  if(!window.lumaClearUnits){ $("#up_status").textContent="Remove Selected is not available."; return; }
+  let reload = false;
+  await window.lumaClearUnits.removeSelected({
+    ips: ips,
+    api: (path, options) => {
+      const init = Object.assign({credentials: "same-origin"}, options || {});
+      if (options && options.body !== undefined) {
+        init.headers = {"Content-Type": "application/json"};
+        init.body = JSON.stringify(options.body);
+      }
+      return fetch(path, init).then(res => res.json().catch(() => ({}))
+        .then(body => ({ok: res.ok && body.ok !== false, body})));
+    },
+    onError: (text) => { $("#up_status").textContent = `Error: ${text}`; },
+    onDone: (data) => {
+      $("#up_status").textContent = window.lumaClearUnits.describeRemoval(data);
+      reload = true;
+    }
   });
-  if (!ok) return;
-
-  $("#up_status").textContent="removing selected devices...";
+  if(!reload) return;
   unitDataEpoch += 1;
   stopRtmpPolling();
   enableHeartbeat(false);
-  
+  document.querySelectorAll("#tbody .sel").forEach(c => c.checked = false);
+  $("#chk_all").checked = false;
   try{
-    const response = await fetch('/api/remove_units', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ips: ips })
-    });
-    const data = await response.json();
-    
-    if(data.ok){
-      $("#up_status").textContent = `Removed ${ips.length} device(s)`;
-      // Clear selections and refresh
-      document.querySelectorAll("#tbody .sel").forEach(c => c.checked = false);
-      $("#chk_all").checked = false;
-      // Reload cache to show updated list
-      try{
-        const payload = await api("/api/cache");
-        const serverRows = tolerantRows(payload);
-        units = mergeByIP([], serverRows);
-        saveLocal(units);
-      }catch(e){
-        console.error("[removeSelected] Error reloading cache:", e);
-      }
-      rerenderFiltered();
-      updateTotals();
-    }else{
-      $("#up_status").textContent = `Error: ${data.error || 'removal failed'}`;
-    }
+    const payload = await api("/api/cache");
+    units = mergeByIP([], tolerantRows(payload));
+    saveLocal(units);
   }catch(e){
-    console.error("Remove error:", e);
-    $("#up_status").textContent = `Error: ${e.message}`;
+    console.error("[removeSelected] Error reloading cache:", e);
   }
+  rerenderFiltered();
+  updateTotals();
 }
 
 async function rebootSelected(){
@@ -2975,43 +3012,54 @@ async function submitPasswordSync(){
         appConfig.is_default_password = !!cfg.is_default_password;
       }
     }catch(e){}
-    
-    const darkSwitch = $("#dark_switch");
-    if(darkSwitch) darkSwitch.addEventListener("click", ()=>{ toggleDark(); });
+
+    // Dark-mode switch click handling now lives entirely in ui/settings.js
+    // (the shared Appearance section owns #dark_switch).
     $("#scan").addEventListener("click", scan);
     $("#stop_scan").addEventListener("click", stopScan);
+    refreshVideoWallBadge();
   $("#clear_units").addEventListener("click", async()=>{
-    const clearOk = await lumaConfirm({
-      title: "Clear Units",
-      message: "Clear all units from cache?\n\nThis will remove all device data.",
-      confirmText: "Clear Units",
-      destructive: true
-    });
-    if (!clearOk) {
+    const statusEl = $("#scan_status");
+    // The question, the assignments view and the request live in clear_units.js, shared with
+    // the Remote Access page. The server decides what is removed; this page only redraws.
+    if (!window.lumaClearUnits) {
+      if (statusEl) statusEl.textContent = "Clear Units is not available.";
       return;
     }
-    const statusEl = $("#scan_status");
-    if (statusEl) statusEl.textContent = "Clearing units...";
-    unitDataEpoch += 1;
-    stopRtmpPolling();
-    enableHeartbeat(false);
-    try {
-      const response = await api("/api/clear_units", {method:"POST"});
-      if (response && response.ok) {
-        units = [];
-        unitMap.clear();
-        selectedUnitIPs.clear();
-        saveLocal([]);
-        StatusStore.clearAll();
-        renderRows([]);
-        if (statusEl) statusEl.textContent = "Units cleared successfully";
-      } else {
-        if (statusEl) statusEl.textContent = "Failed to clear units on server";
+    await window.lumaClearUnits.run({
+      api: (path, options) => {
+        const init = Object.assign({credentials: "same-origin"}, options || {});
+        if (options && options.body !== undefined) {
+          init.headers = {"Content-Type": "application/json"};
+          init.body = JSON.stringify(options.body);
+        }
+        return fetch(path, init).then(res => res.json().catch(() => ({}))
+          .then(body => ({ok: res.ok && body.ok !== false, body})));
+      },
+      onError: (text) => { if (statusEl) statusEl.textContent = text; },
+      onDone: async (result) => {
+        if (statusEl) statusEl.textContent = "Clearing units...";
+        const heartbeatWasOn = !!pollTimer;
+        unitDataEpoch += 1;
+        stopRtmpPolling();
+        enableHeartbeat(false);
+        if (result && result.scope === "unassigned" && result.kept) {
+          // Assigned units stay in the server's inventory: reload what it holds rather than
+          // assuming nothing remains.
+          selectedUnitIPs.clear();
+          try { await reloadUnitsFromServer(); } catch (e) { console.error("Reload after clear:", e); }
+          if (heartbeatWasOn) enableHeartbeat(true);
+        } else {
+          units = [];
+          unitMap.clear();
+          selectedUnitIPs.clear();
+          saveLocal([]);
+          StatusStore.clearAll();
+          renderRows([]);
+        }
+        if (statusEl) statusEl.textContent = window.lumaClearUnits.describe(result);
       }
-    } catch(e) {
-      console.error("Clear units error:", e);
-      if (statusEl) statusEl.textContent = "Error clearing units: " + e.message;
-    }
+    });
   });
   
   // Targets input clear button
@@ -3029,6 +3077,14 @@ async function submitPasswordSync(){
   }
   
   $("#refresh_files").addEventListener("click", refreshFiles);
+  $("#open_firmware_folder_btn").addEventListener("click", async ()=>{
+    try{
+      const response = await fetch("/api/open_firmware_folder", {method:"POST"});
+      const data = await response.json().catch(()=>({}));
+      if(data.ok) window.toast("Firmware folder opened: " + data.path, "success");
+      else window.toast("Could not open the firmware folder: " + (data.error || "unknown error"), "error");
+    }catch(e){ window.toast("Could not open the firmware folder: " + e.message, "error"); }
+  });
   $("#upgrade_sel").addEventListener("click", upgradeSelected);
   $("#reboot_sel").addEventListener("click", rebootSelected);
   $("#remove_sel").addEventListener("click", removeSelected);
@@ -3151,13 +3207,15 @@ async function submitPasswordSync(){
       if(sortKey === key){ sortDir = (sortDir === "asc") ? "desc" : "asc"; }
       else { sortKey = key; sortDir = "asc"; }
       rerenderFiltered();
-      document.querySelectorAll("th.sortable .caret").forEach(c=> c.textContent="▾");
-      th.querySelector(".caret").textContent = (sortDir==="asc") ? "▴" : "▾";
+      paintSortIndicators();
     });
+    th.tabIndex = 0;
+    th.addEventListener("keydown", (e)=>{ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); th.click(); } });
   });
+  paintSortIndicators();
 
   applyTheme();
-  await Promise.allSettled([loadAdapters(), refreshFiles()]);
+  await Promise.allSettled([loadAdapters(), refreshFiles(), loadScanRanges()]);
   loadNtpProfile();
 
   const local = loadLocal();
@@ -3171,53 +3229,17 @@ async function submitPasswordSync(){
     rerenderFiltered();
     updateTotals();
 
-    const CLEAR_UNITS_PROMPT_SESSION_KEY = "clear_units_prompt_seen_v1";
-    const hasSeenClearPrompt = sessionStorage.getItem(CLEAR_UNITS_PROMPT_SESSION_KEY) === "1";
-    const shouldPromptClearUnits = serverRows.length > 0 && !hasSeenClearPrompt;
-
-    if (shouldPromptClearUnits) {
-      // Mark that we've shown the prompt (don't show again this session)
-      sessionStorage.setItem(CLEAR_UNITS_PROMPT_SESSION_KEY, "1");
-      
-      const shouldClearUnits = await lumaConfirm({
-        title: "Clear Units For Optimal Performance",
-        message: "Clear cached units before scanning for the most reliable results?",
-        confirmText: "Clear Units"
-      });
-      if (shouldClearUnits) {
-        try {
-          unitDataEpoch += 1;
-          stopRtmpPolling();
-          enableHeartbeat(false);
-          const clearResp = await api("/api/clear_units", { method: "POST" });
-          if (clearResp && clearResp.ok) {
-            units = [];
-            unitMap.clear();
-            saveLocal([]);
-            StatusStore.clearAll();
-            rerenderFiltered();
-            updateTotals();
-          } else {
-            // Clear failed; still keep flag so prompt doesn't repeat
-            rerenderFiltered();
-            updateTotals();
-          }
-        } catch {
-          // Clear error; still keep flag so prompt doesn't repeat
-          rerenderFiltered();
-          updateTotals();
-        }
-      } else {
-        // User declined; still keep flag so prompt only shows once per session
-        rerenderFiltered();
-        updateTotals();
-      }
-    } else {
-      rerenderFiltered();
-      updateTotals();
-    }
+    // Nothing is asked here. Clear Units is an intentional action behind its own
+    // button (and its own confirmation); opening the page never interrupts the
+    // operator, and never covers the Settings gear with a question about it.
     startRtmpPolling(); // Start polling for encoder RTMP status
   }catch(e){}
+
+  // Optional internet enrichment (Hall Research published-firmware status) --
+  // fire-and-forget, never awaited, never blocks the page. See
+  // refreshHallFirmwareStatus() for the bounded one-shot retry that handles
+  // the Hall lookup finishing after this initial call returns.
+  refreshHallFirmwareStatus();
 
   setPollSlider(loadSavedPollState());
   if(isSliderOn()){
@@ -3290,20 +3312,22 @@ async function submitPasswordSync(){
         // Update button to reflect state
         if(newState){
           btn.textContent = '🔴'; // red circle for ON
-          btn.style.background = 'rgba(239, 68, 68, 0.2)';
+          btn.classList.add('is-on');
         } else {
           btn.textContent = '💡'; // bulb for OFF
-          btn.style.background = '';
+          btn.classList.remove('is-on');
         }
         btn.disabled = false;
       }catch(e){
         console.error('CS31 Blink error:', e);
         btn.textContent = '❌';
-        setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; btn.style.background = ''; }, 3000);
+        setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; btn.classList.remove('is-on'); }, 3000);
       }
     } else {
-      // Encoder: 30-second blink command
+      // Encoder/decoder: 30-second blink command. The unit has no way to report whether it is blinking, so
+      // the tick means the command was sent, as in OmniSuite, and the control says so.
       const originalText = btn.textContent;
+      const originalTitle = btn.title;
       btn.disabled = true;
       btn.textContent = '⏳';
       try{
@@ -3316,11 +3340,14 @@ async function submitPasswordSync(){
         const result = await resp.json();
         if(!resp.ok || result.error) throw new Error(result.error?.message || result.error || 'Blink failed');
         btn.textContent = '✔';
-        setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; }, 30000);
+        btn.title = 'Blink command sent';
+        btn.setAttribute('aria-label', 'Blink command sent');
+        setTimeout(()=>{ btn.textContent = originalText; btn.title = originalTitle; btn.removeAttribute('aria-label'); btn.disabled = false; }, 10000);
       }catch(e){
         console.error('Blink error:', e);
         btn.textContent = '❌';
-        setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; }, 30000);
+        btn.title = 'Blink command failed';
+        setTimeout(()=>{ btn.textContent = originalText; btn.title = originalTitle; btn.disabled = false; }, 3000);
       }
     }
   });
@@ -3372,122 +3399,30 @@ async function submitPasswordSync(){
 
 <script>
 (function(){
-  // Utility: compute encoder/decoder and URLs from link or dataset
-  function isEncFrom(el){
-    if(!el) return false;
-    const role = (el.dataset.role||''); if(/^enc/i.test(role)) return true;
-    const mdl = (el.dataset.model||'').toLowerCase();
-    if(mdl.startsWith('at-luma-e') || mdl.startsWith('at-omni-e')) return true;
-    if(mdl.includes('at-ome-cs31') || mdl.includes('cs31')) return true; // switcher stream endpoint
-    // treat plain /stream (without query) also as stream source
-    const href = (el.href||'');
-    return href.includes('/stream');
-  }
-  function encoderURL(ip, isSwitcher){
-    if(isSwitcher) return `http://${ip}/stream?t=${Math.random()}`;
-    return `http://${ip}/stream?resolution=320x180&fps=15&bitrate=512`;
-  }
-  function decoderURL(ip){ return `http://${ip}/thumbnail/thumbnail1.jpg`; }
+  // Preview: the hover card and the popup window live in ui/unit-preview.js. This block owns the checkbox.
+  function hideHover(){ const h = window.lumaUnitPreview && window.lumaUnitPreview.hover; if(h) h.hide(); }
 
-  // Hover preview plumbing (defaults to LEFT of cursor)
-  let hoverTimer=null;
-  function ensureHover(){
-    if(document.getElementById('hover_preview')) return;
-    const box=document.createElement('div'); box.id='hover_preview'; box.className='hover-preview';
-    const img=document.createElement('img'); img.id='hover_preview_img'; img.alt='preview';
-    box.appendChild(img); document.body.appendChild(box);
-  }
-  function showHover(e, link){
-    ensureHover();
-    const box=document.getElementById('hover_preview');
-    const img=document.getElementById('hover_preview_img');
-    if(!box||!img) return;
-    if(hoverTimer){ clearInterval(hoverTimer); hoverTimer=null; }
-    const ip = link.dataset.ip;
-    const enc = isEncFrom(link);
-    if(enc){
-      const typeLabel = (link.dataset.typeLabel||'').toLowerCase();
-      const model = (link.dataset.model||'').toLowerCase();
-      const role = (link.dataset.role||'').toLowerCase();
-      const isSwitcher = typeLabel === 'switcher' || role.includes('switcher') || model.includes('at-ome-cs31') || model.includes('cs31');
-      img.src = encoderURL(ip, isSwitcher);
-    }else{
-      const bump=()=>{ img.src = decoderURL(ip) + '?t=' + Date.now(); };
-      bump(); hoverTimer = setInterval(bump, 2000);
-    }
-    moveHover(e);
-    box.style.display='block';
-  }
-  function moveHover(e){
-    const box=document.getElementById('hover_preview'); if(!box || box.style.display!=='block') return;
-    const pad=16; 
-    // Default: place to the left of cursor
-    let x=e.clientX - box.offsetWidth - pad; 
-    let y=e.clientY + pad;
-    const vw=window.innerWidth, vh=window.innerHeight, w=box.offsetWidth, h=box.offsetHeight;
-    // Only move to right if it goes off left edge
-    if(x<0) x = e.clientX + pad;
-    // Adjust vertical if too low
-    if(y+h>vh) y = e.clientY - h - pad;
-    // Final boundary checks
-    if(x+w>vw) x = vw - w - 4;
-    if(y+h>vh) y = vh - h - 4;
-    if(y<0) y = 4;
-    box.style.left = x + 'px'; box.style.top = y + 'px';
-  }
-  function hideHover(){
-    const box=document.getElementById('hover_preview'), img=document.getElementById('hover_preview_img');
-    if(!box||!img) return;
-    box.style.display='none'; img.src='';
-    if(hoverTimer){ clearInterval(hoverTimer); hoverTimer=null; }
-  }
-
-  // Delegated events
-  document.addEventListener('mouseover', (e)=>{
-    const a = e.target.closest('a.preview-link'); if(!a) return;
-    showHover(e, a);
-  });
-  document.addEventListener('mousemove', (e)=>{
-    const a = e.target.closest('a.preview-link'); if(!a) return;
-    moveHover(e);
-  });
-  document.addEventListener('mouseout', (e)=>{
-    if(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('a.preview-link')) return;
-    // If leaving the link, hide
-    if(e.target.closest && e.target.closest('a.preview-link')) hideHover();
-  });
-
-  // Delegated click -> popup
-  document.addEventListener('click', (e)=>{
-    const a = e.target.closest('a.preview-link'); if(!a) return;
+  // The checkbox changes only once the unit has confirmed the new state by reading it back.
+  document.addEventListener('click', async (e)=>{
+    const cb = e.target && e.target.closest ? e.target.closest('input.preview-checkbox') : null;
+    if(!cb) return;
     e.preventDefault();
-    const ip = a.dataset.ip;
-    const enc = isEncFrom(a);
-    const typeLabel = (a.dataset.typeLabel||'').toLowerCase();
-    const model = (a.dataset.model||'').toLowerCase();
-    const role = (a.dataset.role||'').toLowerCase();
-    const isSwitcher = typeLabel === 'switcher' || role.includes('switcher') || model.includes('at-ome-cs31') || model.includes('cs31');
-    const base = enc ? encoderURL(ip, isSwitcher) : decoderURL(ip);
-    const url  = enc ? base : (base + '?t=' + Date.now());
-    const win = window.open('about:blank', 'preview_'+ip, 'popup=1,width=420,height=280,menubar=0,toolbar=0,location=0,status=0,resizable=1,scrollbars=0');
-    if(!win) return;
-    const htmlDoc = `<!doctype html>
-<html><head><meta charset="utf-8"><title>Preview ${ip||''}</title></head>
-<body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;">
-  <img id="p" src="${url}" style="display:block;max-width:100vw;max-height:100vh"/>
-  <script>
-    (function(){
-      var enc=${enc ? 'true' : 'false'};
-      var base=${JSON.stringify(base)};
-      var img=document.getElementById('p');
-      function fit(){ try{ var w=img.naturalWidth||320, h=img.naturalHeight||180; window.resizeTo(w+20,h+60);}catch(e){} }
-      img.addEventListener('load',fit);
-      if(!enc){ setInterval(function(){ img.src=base+'?t='+Date.now(); },2000); }
-    })();
-  <\/script>
-
-  `; // end htmlDoc template
-    win.document.open(); win.document.write(htmlDoc); win.document.close();
+    if(cb.disabled) return;
+    // A click has already flipped the box by the time this runs, so the box holds the state being
+    // asked for; preventDefault above puts it back until the unit confirms.
+    const want = cb.checked;
+    cb.disabled = true; hideHover();
+    let confirmed = null, message = '';
+    try{
+      const r = await fetch('/api/thumbnail', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ip: cb.dataset.ip, mac: cb.dataset.mac, enable: want})});
+      const j = await r.json().catch(()=>({}));
+      if(r.ok && j.ok && typeof j.enabled==='boolean') confirmed = j.enabled;
+      else { message = j.error || 'The unit did not confirm the change.'; if(typeof j.enabled==='boolean') confirmed = j.enabled; }
+    }catch(err){ message = 'The unit could not be reached.'; }
+    cb.disabled = false;
+    if(confirmed !== null){ cb.indeterminate=false; cb.checked = confirmed; const m = (typeof unitMap!=='undefined') && unitMap.get(cb.dataset.ip); if(m) m.thumbnail_enabled = confirmed; }
+    if(message && window.toast) window.toast('Thumbnail: ' + message, 'error');
   });
 })();
 </script>
@@ -3519,5 +3454,9 @@ async function submitPasswordSync(){
         });
     })();
   </script>
-  </body>
+  <script src="/ui/unit-preview.js?v=1"></script>
+  <script src="/ui/sticky-columns.js?v=20261030-sticky"></script>
+<script src="/ui/mirror-scroll.js?v=20261030-mirror"></script>
+<script src="/ui/device-table-chrome.js?v=20261030-chrome"></script>
+</body>
 </html>

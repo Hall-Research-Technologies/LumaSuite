@@ -1,129 +1,303 @@
-(function(){
+/*
+ * Shared LumaSuite / Hall Research family dialog module.
+ *
+ * Exposes:
+ *   window.lumaConfirm(options) -> Promise<boolean>   (the family API)
+ *   window.lumaDialog = { alert(message, title), confirm(options) }
+ *                                                     (back-compat wrapper)
+ *   window.toast(message, type)                       ("ok" | "error" | "info")
+ *
+ * Production UI must never call the native alert()/confirm()/prompt() --
+ * enforced by tests/no_native_dialogs.test.js, which greps ui/*.html and
+ * ui/*.js for those call sites. This module is the one place window.alert
+ * is legitimately assigned, and the one place a native dialog name may
+ * appear in a comment describing what NOT to do.
+ */
+(function () {
   "use strict";
 
-  function ensureStyles() {
-    if (document.getElementById("lumaDialogStyles")) return;
-    const style = document.createElement("style");
-    style.id = "lumaDialogStyles";
-    style.textContent = `
-      .luma-dialog-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 100000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-        background: rgba(2, 6, 23, .66);
-        backdrop-filter: blur(3px);
-      }
-      .luma-dialog {
-        width: min(460px, 100%);
-        color: var(--text, #f8fafc);
-        background: var(--card, #1f2933);
-        border: 1px solid var(--border, #334155);
-        border-radius: 8px;
-        box-shadow: 0 18px 60px rgba(0,0,0,.42);
-        overflow: hidden;
-      }
-      .luma-dialog-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 16px 18px 10px;
-        font-weight: 700;
-        font-size: 16px;
-      }
-      .luma-dialog-body {
-        padding: 0 18px 16px;
-        color: var(--muted, #cbd5e1);
-        line-height: 1.45;
-        white-space: pre-wrap;
-      }
-      .luma-dialog-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        padding: 12px 18px 16px;
-        border-top: 1px solid var(--border, #334155);
-      }
-      .luma-dialog button {
-        border: 1px solid var(--border, #334155);
-        border-radius: 6px;
-        padding: 7px 12px;
-        color: #fff;
-        background: var(--panel-2, #26323d);
-        cursor: pointer;
-      }
-      .luma-dialog button.primary {
-        background: var(--accent, #1e90ff);
-        border-color: var(--accent, #1e90ff);
-      }
-      .luma-dialog button.danger {
-        background: #b91c1c;
-        border-color: #b91c1c;
-      }
-    `;
-    document.head.appendChild(style);
+  function escapeAttr(value) {
+    return String(value == null ? "" : value);
   }
 
-  function closeWith(backdrop, resolver, value) {
-    backdrop.remove();
-    resolver(value);
+  // ---- Confirm dialog -------------------------------------------------
+
+  var CONFIRM_BACKDROP_ID = "lumaConfirmBackdrop";
+
+  function ensureConfirmMarkup() {
+    var existing = document.getElementById(CONFIRM_BACKDROP_ID);
+    if (existing) return existing;
+    var backdrop = document.createElement("div");
+    backdrop.id = CONFIRM_BACKDROP_ID;
+    backdrop.className = "confirm-backdrop hidden";
+    backdrop.innerHTML =
+      '<div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="lumaConfirmTitle">' +
+        '<h3 id="lumaConfirmTitle" class="confirm-title"></h3>' +
+        '<div class="confirm-message"></div>' +
+        '<div class="confirm-summary" hidden></div>' +
+        '<label class="confirm-field" hidden>' +
+          '<span class="confirm-field-label"></span>' +
+          '<input class="confirm-field-input" type="password" autocomplete="new-password" spellcheck="false">' +
+          '<span class="confirm-field-help" hidden></span>' +
+        "</label>" +
+        '<label class="confirm-suppress" hidden>' +
+          '<input type="checkbox" class="confirm-suppress-box">' +
+          '<span class="confirm-suppress-label"></span>' +
+        "</label>" +
+        '<div class="confirm-actions">' +
+          '<button type="button" class="btn secondary confirm-cancel">Cancel</button>' +
+          '<button type="button" class="btn secondary confirm-extra" hidden></button>' +
+          '<button type="button" class="btn confirm-ok">Continue</button>' +
+        "</div>" +
+      "</div>";
+    document.body.appendChild(backdrop);
+    return backdrop;
   }
 
-  function show(options) {
-    ensureStyles();
-    return new Promise(resolve => {
-      const backdrop = document.createElement("div");
-      backdrop.className = "luma-dialog-backdrop";
-      const title = options.title || "LumaSuite";
-      const message = options.message || "";
-      const confirmText = options.confirmText || "OK";
-      const cancelText = options.cancelText || "Cancel";
-      const destructive = !!options.destructive;
-      backdrop.innerHTML = `
-        <div class="luma-dialog" role="dialog" aria-modal="true" aria-labelledby="lumaDialogTitle">
-          <div class="luma-dialog-head" id="lumaDialogTitle">${escapeHtml(title)}</div>
-          <div class="luma-dialog-body">${escapeHtml(message)}</div>
-          <div class="luma-dialog-actions">
-            ${options.cancel === false ? "" : `<button type="button" data-action="cancel">${escapeHtml(cancelText)}</button>`}
-            <button type="button" class="${destructive ? "danger" : "primary"}" data-action="confirm">${escapeHtml(confirmText)}</button>
-          </div>
-        </div>
-      `;
-      backdrop.addEventListener("click", event => {
-        if (event.target === backdrop && options.cancel !== false) closeWith(backdrop, resolve, false);
-      });
-      backdrop.querySelector("[data-action='confirm']").addEventListener("click", () => closeWith(backdrop, resolve, true));
-      const cancel = backdrop.querySelector("[data-action='cancel']");
-      if (cancel) cancel.addEventListener("click", () => closeWith(backdrop, resolve, false));
-      document.body.appendChild(backdrop);
-      backdrop.querySelector("[data-action='confirm']").focus();
+  function setSummaryRows(container, rows) {
+    container.innerHTML = "";
+    if (!rows || !rows.length) {
+      container.hidden = true;
+      return;
+    }
+    container.hidden = false;
+    rows.forEach(function (row) {
+      var line = document.createElement("div");
+      line.className = "confirm-summary-row";
+      var label = document.createElement("span");
+      label.textContent = row.label == null ? "" : String(row.label);
+      var value = document.createElement("span");
+      value.textContent = row.value == null ? "" : String(row.value);
+      line.appendChild(label);
+      line.appendChild(value);
+      container.appendChild(line);
     });
   }
 
-  function escapeHtml(value) {
-    return String(value == null ? "" : value).replace(/[&<>"']/g, ch => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    }[ch]));
-  }
+  /**
+   * window.lumaConfirm(options) -> Promise<boolean>
+   *   options.title           string
+   *   options.message         string
+   *   options.summary         [{label, value}, ...]  what will actually happen
+   *   options.confirmText     default "Continue"
+   *   options.cancelText      default "Cancel"
+   *   options.danger          boolean -- destructive/device-mutating action;
+   *                            focuses Cancel by default (cost-following focus)
+   *   options.cancelOnEscape  default true
+   *   options.suppressKey     localStorage key for a "do not show again"
+   *                            checkbox, scoped to options.appVersion
+   *   options.appVersion      the running app version; a stored suppression
+   *                            is honoured only when it matches this version
+   *   options.suppressLabel   checkbox label text
+   *   options.secondary       {text, value} -- a third action between Cancel and the primary one.
+   *                            The promise resolves to `value` (a string) when it is chosen, so
+   *                            it is never mistaken for Cancel (false) or the primary action
+   *                            (true). Only a caller that passes this ever receives a string.
+   *   options.field           {type, label, placeholder, value, help, onValue} -- one input in the dialog (a
+   *                            passphrase). Its value goes to onValue only when the operator
+   *                            confirms, and is cleared from the box either way.
+   */
+  window.lumaConfirm = function (options) {
+    options = options || {};
+    var appVersion = options.appVersion || (window.__lumaAppVersion || "");
+
+    if (options.suppressKey && appVersion) {
+      var storedVersion = null;
+      try { storedVersion = localStorage.getItem(options.suppressKey); } catch (e) { storedVersion = null; }
+      if (storedVersion === String(appVersion)) {
+        return Promise.resolve(true);
+      }
+    }
+
+    var backdrop = ensureConfirmMarkup();
+    var card = backdrop.querySelector(".confirm-card");
+    var titleEl = backdrop.querySelector(".confirm-title");
+    var msgEl = backdrop.querySelector(".confirm-message");
+    var summaryEl = backdrop.querySelector(".confirm-summary");
+    var suppressWrap = backdrop.querySelector(".confirm-suppress");
+    var suppressBox = backdrop.querySelector(".confirm-suppress-box");
+    var suppressLabel = backdrop.querySelector(".confirm-suppress-label");
+    var cancelBtn = backdrop.querySelector(".confirm-cancel");
+    var okBtn = backdrop.querySelector(".confirm-ok");
+    var extraBtn = backdrop.querySelector(".confirm-extra");
+    var fieldWrap = backdrop.querySelector(".confirm-field");
+    var fieldInput = backdrop.querySelector(".confirm-field-input");
+    var fieldLabel = backdrop.querySelector(".confirm-field-label");
+    var fieldHelp = backdrop.querySelector(".confirm-field-help");
+    var field = options.field;
+    if (field) {
+      fieldLabel.textContent = field.label || "";
+      fieldInput.type = field.type || "text";
+      fieldInput.placeholder = field.placeholder || "";
+      // A pre-filled value (a port number the operator is offered) is optional and never a secret.
+      fieldInput.value = field.value == null ? "" : String(field.value);
+      if (fieldHelp) {
+        fieldHelp.textContent = field.help || "";
+        fieldHelp.hidden = !field.help;
+      }
+      fieldWrap.hidden = false;
+    } else {
+      fieldWrap.hidden = true;
+    }
+
+    var isDanger = !!(options.danger || options.destructive);
+    var noCancel = options.cancel === false || options.cancelText === null;
+
+    titleEl.textContent = options.title || "Confirm";
+    msgEl.textContent = options.message || "";
+    setSummaryRows(summaryEl, options.summary);
+
+    okBtn.textContent = options.confirmText || "Continue";
+    cancelBtn.textContent = options.cancelText || "Cancel";
+    cancelBtn.hidden = noCancel;
+    var secondary = options.secondary && options.secondary.text ? options.secondary : null;
+    extraBtn.hidden = !secondary;
+    extraBtn.textContent = secondary ? String(secondary.text) : "";
+    okBtn.classList.toggle("danger", isDanger);
+
+    if (options.suppressKey) {
+      suppressWrap.hidden = false;
+      suppressBox.checked = false;
+      suppressLabel.textContent = options.suppressLabel || "Don't show this again";
+    } else {
+      suppressWrap.hidden = true;
+    }
+
+    var previouslyFocused = document.activeElement;
+    backdrop.classList.remove("hidden");
+
+    return new Promise(function (resolve) {
+      var settled = false;
+
+      function finish(result) {
+        if (settled) return;
+        settled = true;
+        backdrop.classList.add("hidden");
+        document.removeEventListener("keydown", onKeydown, true);
+        okBtn.removeEventListener("click", onOk);
+        cancelBtn.removeEventListener("click", onCancel);
+        extraBtn.removeEventListener("click", onExtra);
+        backdrop.removeEventListener("click", onBackdropClick);
+        // The field's value goes to the caller on the way out and is wiped either way.
+        if (field) {
+          if (result === true && typeof field.onValue === "function") field.onValue(fieldInput.value);
+          fieldInput.value = "";
+        }
+        if (result === true && options.suppressKey && suppressBox.checked && appVersion) {
+          try { localStorage.setItem(options.suppressKey, String(appVersion)); } catch (e) {}
+        }
+        if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+          try { previouslyFocused.focus(); } catch (e) {}
+        }
+        resolve(result);
+      }
+
+      var dismissResolvesTrue = noCancel;
+
+      function onOk() { finish(true); }
+      function onCancel() { finish(false); }
+      function onExtra() { finish(String(secondary.value)); }
+      function onBackdropClick(event) {
+        if (event.target === backdrop && options.cancelOnEscape !== false) finish(dismissResolvesTrue);
+      }
+      function onKeydown(event) {
+        // Enter in the field is the answer, which is what anybody typing a passphrase expects.
+        if (event.key === "Enter" && field && event.target === fieldInput) {
+          event.preventDefault();
+          finish(true);
+          return;
+        }
+        if (event.key === "Escape" && options.cancelOnEscape !== false) {
+          event.preventDefault();
+          finish(dismissResolvesTrue);
+        }
+      }
+
+      okBtn.addEventListener("click", onOk);
+      cancelBtn.addEventListener("click", onCancel);
+      extraBtn.addEventListener("click", onExtra);
+      backdrop.addEventListener("click", onBackdropClick);
+      document.addEventListener("keydown", onKeydown, true);
+
+      // Focus follows the cost: a dangerous action defaults focus to
+      // Cancel; everything else defaults to Continue. The keyboard default
+      // and the visual default must agree.
+      var toFocus = field ? fieldInput : ((isDanger && !noCancel) ? cancelBtn : okBtn);
+      window.setTimeout(function () {
+        try { toFocus.focus(); } catch (e) {}
+      }, 0);
+    });
+  };
+
+  // ---- alert() replacement --------------------------------------------
 
   window.lumaDialog = {
-    alert(message, title = "LumaSuite") {
-      return show({ title, message, cancel: false, confirmText: "OK" });
+    alert: function (message, title) {
+      return window.lumaConfirm({
+        title: title || "LumaSuite",
+        message: String(message == null ? "" : message),
+        cancelText: null,
+        confirmText: "OK",
+        cancelOnEscape: true
+      }).then(function () {});
     },
-    confirm(options) {
-      return show(options || {});
+    confirm: function (options) {
+      return window.lumaConfirm(options || {});
     }
   };
 
-  window.alert = function(message) {
+  // Production UI must never call the native alert(); this is the one
+  // legitimate reassignment of it, applied globally so any remaining call
+  // site (there should be none -- see the enforcement test) still degrades
+  // to the styled dialog rather than a browser-native alert box.
+  window.alert = function (message) {
     window.lumaDialog.alert(message);
+  };
+
+  // ---- Toast ------------------------------------------------------------
+
+  var TOAST_ID = "lumaFamilyToast";
+  var toastHideTimer = null;
+  var toastRemoveTimer = null;
+
+  function ensureToastEl() {
+    var el = document.getElementById(TOAST_ID);
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = TOAST_ID;
+    el.className = "family-toast";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+    return el;
+  }
+
+  /**
+   * window.toast(message, type) -- transient feedback. One live toast at a
+   * time: a second call replaces the first rather than stacking.
+   *   type: "ok" | "error" | "info" (default)
+   */
+  window.toast = function (message, type) {
+    var el = ensureToastEl();
+    if (toastHideTimer) window.clearTimeout(toastHideTimer);
+    if (toastRemoveTimer) window.clearTimeout(toastRemoveTimer);
+
+    el.textContent = String(message == null ? "" : message);
+    el.className = "family-toast" + (type === "ok" ? " ok" : type === "error" ? " error" : "");
+    el.setAttribute("role", type === "error" ? "alert" : "status");
+    el.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+
+    // Reflow before adding .show so the transition runs even when a toast
+    // was already visible.
+    el.classList.remove("show");
+    void el.offsetHeight;
+    el.classList.add("show");
+
+    toastHideTimer = window.setTimeout(function () {
+      el.classList.remove("show");
+    }, 2600);
+    toastRemoveTimer = window.setTimeout(function () {
+      el.textContent = "";
+    }, 3000);
   };
 })();

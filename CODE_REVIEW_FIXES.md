@@ -1,5 +1,13 @@
 # Code Review Fixes - LumaSuite
 
+> **Historical record.** This describes a code review made before v1.1.0 and the three fixes it led to
+> (they are still in place). It is not a current status report. Of the "Future Improvements" below, the
+> following is still open: DOMPurify (not used) and a Content-Security-Policy header (not sent); server-side
+> validation of RTMP URLs and ticker text length is not implemented. Since then v1.1.0 added the access gate,
+> output escaping of hostnames and stream names, `X-Content-Type-Options: nosniff` on the sign-in surface and
+> `Referrer-Policy: no-referrer` where a link carries a token; see `PROJECT.md` section 36 and `CHANGELOG.md`.
+> Line numbers and line counts quoted below are as of that review and have since moved.
+
 ## Summary of Changes
 
 This document describes fixes for three code quality issues identified in the code review:

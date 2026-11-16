@@ -1,0 +1,226 @@
+/* Phone-friendly pages: sign-in and the restricted routing page.
+
+   Built only on LumaSuite's family tokens (family.css) -- every colour, radius and
+   spacing comes from a semantic token, so every preset, density and the light/dark
+   theme apply here exactly as they do on the operator pages. Nothing in this file
+   names a hue, and no state changes a control's box (hover, press, selection and
+   focus alter colour, shadow and outline only).
+
+   family.css declares `body { min-width: 1000px }` because the operator pages are a
+   desktop tool. These pages are used on phones, so that floor is lifted here; this
+   file is loaded after family.css. */
+
+[hidden] { display: none !important; }   /* a class that sets `display` must not defeat `hidden` */
+
+/* The operator pages get their type from their own stylesheets; these pages load only
+   family.css, so the family's font stack is stated here. Form controls do not inherit it. */
+body.remote { min-width: 0; margin: 0; font-size: 15px; line-height: 1.45;
+              font-family: Calibri, system-ui, "Segoe UI", Roboto, sans-serif; }
+body.remote button, body.remote input, body.remote select { font-family: inherit; }
+
+/* The operator pages get their button base from matrix.css, which these pages do not load.
+   Without this the primary action is an unstyled browser button. Built from the family's
+   tokens only, so every preset and both themes apply; hover, press, focus and disabled come
+   from family.css, and secondary/danger variants keep their own rules. */
+body.remote button {
+  background-color: var(--action-primary); color: var(--action-primary-text);
+  border: 1px solid transparent; border-radius: 8px; padding: 6px 12px; cursor: pointer;
+}
+body.remote input[type="text"], body.remote input[type="password"] {
+  background: var(--surface); color: var(--text); border: 1px solid var(--edge);
+}
+
+:root { --touch-target: 44px; --remote-max: 1100px; }
+
+/* ---- sign-in ----------------------------------------------------------- */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center;
+              padding: 16px; box-sizing: border-box; }
+.login-card { width: min(100%, 380px); background: var(--surface-raised);
+              border: 1px solid var(--edge); border-radius: var(--panel-radius);
+              padding: 22px 20px; box-sizing: border-box; }
+.login-logo { height: 44px; width: auto; display: block; margin: 0 0 12px; }
+.login-card h1 { margin: 0; font-size: 19px; }
+.login-sub { margin: 2px 0 16px; color: var(--text-muted); font-size: 13px; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.field input, .remote-input { width: 100%; box-sizing: border-box; min-height: var(--touch-target);
+              font-size: 16px; /* 16px stops phones zooming into the field */
+              padding: 8px 10px; border-radius: 8px; }
+.btn-large { width: 100%; min-height: var(--touch-target); font-size: 16px; font-weight: 600;
+             border-radius: 9px; cursor: pointer; }
+.form-error { color: var(--state-error-text); font-size: 13px; min-height: 1.2em; margin: 10px 0 0; }
+.form-note { font-size: 12px; margin: 14px 0 0; padding-left: 10px;
+             border-left: 3px solid var(--edge); color: var(--text-muted); }
+.form-note-ok { border-left-color: var(--state-success); }
+.form-note-warn { border-left-color: var(--state-warning); }
+
+/* ---- header ------------------------------------------------------------ */
+.remote-header { position: sticky; top: 0; z-index: 100; display: flex; align-items: center;
+                 gap: 12px; padding: 10px 16px; background: var(--surface-raised);
+                 border-bottom: 1px solid var(--edge); }
+.remote-header img { height: 34px; width: auto; }
+.remote-header h1 { margin: 0; font-size: 17px; font-weight: 600; flex: 1; }
+.remote-header .who { color: var(--text-muted); font-size: 12px; }
+.remote-header button { min-height: 36px; }
+
+.remote-main { max-width: var(--remote-max); margin: 0 auto; padding: 16px 16px 120px; }
+.remote-loading { color: var(--text-muted); padding: 24px 0; text-align: center; }
+.remote-empty { color: var(--text-muted); padding: 14px; border: 1px dashed var(--edge);
+                border-radius: var(--panel-radius); }
+
+/* ---- the two-step chooser: sources across the top, displays across the bottom */
+.panel { background: var(--surface-raised); border: 1px solid var(--edge);
+         border-radius: var(--panel-radius); padding: 14px; margin-bottom: 14px; }
+.panel h2 { margin: 0 0 4px; font-size: 13px; text-transform: uppercase;
+            letter-spacing: .07em; color: var(--text-muted); }
+.panel .hint { margin: 0 0 12px; color: var(--text-muted); font-size: 13px; }
+
+.pick-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+
+.pick { display: flex; flex-direction: column; align-items: stretch; text-align: left;
+        min-height: 62px; padding: 0; border-radius: 10px; cursor: pointer; overflow: hidden;
+        background: var(--surface-elevated) !important; color: var(--text) !important;
+        border: 1px solid var(--edge); box-shadow: none; }
+.pick .pick-body { padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 2px; }
+.pick .pick-name { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.pick .pick-sub { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.pick[aria-pressed="true"] { background: var(--selected-tint-strong, var(--state-selection)) !important;
+        border-color: var(--selected-edge, var(--action-primary));
+        box-shadow: inset 0 0 0 2px var(--selected-edge, var(--action-primary)); }
+.pick.offline { opacity: .7; cursor: not-allowed; }
+/* Dragging a source: it lifts, the destinations that will take it say so, and the one
+   under the pointer is filled -- the fill and the edge carry it, not a text colour. */
+.pick[draggable="true"] { cursor: grab; }
+.pick.dragging { opacity: .55; }
+.pick.drop-target { outline: 2px dashed var(--text-muted); outline-offset: 2px; }
+.pick.drop-over { outline: 2px solid var(--accent); outline-offset: 2px;
+  background: var(--selected-tint-strong, var(--state-selection)) !important; }
+.pick.route-ok { box-shadow: inset 0 -3px 0 var(--state-success); }
+.pick.route-failed { box-shadow: inset 0 -3px 0 var(--state-error); }
+.pick.offline .pick-sub { color: var(--state-warning-text); }
+.pick.routing { cursor: progress; }
+.pick.routing .pick-sub { color: var(--state-info-text); }
+.pick.degraded .pick-sub { color: var(--state-warning-text); }
+
+/* the native device picture: a still, 16:9, never stretched */
+.pick-shot { position: relative; aspect-ratio: 16 / 9; background: var(--screen-off, #0b0f14);
+             overflow: hidden; }
+.pick-shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.pick-shot.empty::after { content: attr(data-note); position: absolute; inset: 0; display: flex;
+             align-items: center; justify-content: center; font-size: 12px; color: #9aa7b4;
+             padding: 0 8px; text-align: center; }
+
+/* a group presents itself as a group: no picture, a badge, text and status only */
+.pick.group .group-badge { align-self: flex-start; font-size: 11px; font-weight: 600;
+        letter-spacing: .04em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px;
+        border: 1px solid var(--edge); color: var(--text-muted); margin-bottom: 4px; }
+
+.section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+                 color: var(--text-muted); margin: 14px 0 8px; }
+.section-label:first-of-type { margin-top: 0; }
+
+/* ---- the action bar, pinned so a long list can never push it off screen ----- */
+.action-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 90; display: flex;
+              align-items: center; gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+              background: var(--surface-raised); border-top: 1px solid var(--edge); }
+.action-bar .summary { flex: 1; font-size: 14px; overflow-wrap: anywhere; }
+.action-bar .summary .muted { color: var(--text-muted); }
+.btn-route { min-height: var(--touch-target); padding: 0 22px; font-size: 16px; font-weight: 600;
+             border-radius: 9px; cursor: pointer; }
+
+.result-list { margin: 8px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.result-list li { padding: 3px 0; display: flex; gap: 8px; }
+.result-list .ok { color: var(--state-success-text); }
+.result-list .bad { color: var(--state-error-text); }
+
+@media (max-width: 560px) {
+  .remote-main { padding: 12px 12px 130px; }
+  .pick-grid { grid-template-columns: 1fr; }
+  .remote-header { padding: 8px 12px; }
+  .remote-header h1 { font-size: 15px; }
+  .remote-header img { height: 28px; }
+  .action-bar { flex-wrap: wrap; padding-left: 12px; padding-right: 12px; }
+  .action-bar .summary { flex-basis: 100%; }
+  .btn-route { flex: 1; }
+}
+@media (min-width: 1200px) { .pick-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); } }
+@media (prefers-reduced-motion: reduce) { .pick, .btn-route { transition: none; } }
+
+/* ---- the toolbar: how many are chosen, and the Preview switch ------------------- */
+.user-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                margin: 0 0 12px; min-height: 28px; }
+.user-toolbar .selection-count { font-size: 13px; color: var(--text-muted); }
+.user-toggle { position: relative; display: inline-flex; align-items: center; gap: 8px;
+               cursor: pointer; user-select: none; margin-left: auto; font-size: 14px; }
+.user-toggle + .user-toggle { margin-left: 0; }
+.user-toggle .switch { position: relative; width: 34px; height: 18px; border-radius: 999px;
+               background: var(--edge); border: 1px solid var(--edge); transition: background .15s; }
+.user-toggle .knob { position: absolute; top: 1px; left: 2px; width: 14px; height: 14px;
+               border-radius: 50%; background: var(--text-muted); transition: left .15s, background .15s; }
+.user-toggle input:checked ~ .switch { background: var(--selected-tint-strong, var(--state-selection));
+               border-color: var(--selected-edge, var(--action-primary)); }
+.user-toggle input:checked ~ .switch .knob { left: 18px; background: var(--action-primary); }
+.user-toggle input:focus-visible ~ .switch { outline: 2px solid var(--action-primary); outline-offset: 2px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.panel-head h2 { margin: 0 0 4px; }
+button.small { min-height: 30px; padding: 0 12px; font-size: 13px; }
+/* a chosen card says so in words and shape as well as colour */
+.pick[aria-pressed="true"] .pick-name::before { content: "\2713\00a0"; }
+.pick:focus-visible, .btn-route:focus-visible, button.small:focus-visible {
+  outline: 2px solid var(--action-primary); outline-offset: 2px; }
+
+/* ---- routing interface tabs: Routing | Matrix (a selected tab is filled) ---- */
+.mode-tabs { display: flex; gap: 6px; margin: 0 0 14px; }
+.mode-tab { min-height: 36px; padding: 6px 18px; border-radius: 8px; font-weight: 600;
+            background: var(--surface-elevated) !important; color: var(--text) !important;
+            border: 1px solid var(--edge) !important; box-shadow: none; cursor: pointer; }
+.mode-tab[aria-selected="true"] { background: var(--action-primary) !important;
+            color: var(--on-accent) !important; border-color: var(--action-primary) !important; }
+
+/* ---- the matrix: sources across, destinations down ---- */
+.mx-modes { display: inline-flex; gap: 14px; flex-wrap: wrap; }
+.mx-mode { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.mx-hint { margin: 6px 0 10px; }
+.mx-scroll { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--edge);
+             border-radius: var(--panel-radius); background: var(--surface-raised); }
+.mx-table { border-collapse: separate; border-spacing: 0; min-width: 100%; }
+.mx-table th, .mx-table td { border-bottom: 1px solid var(--edge); border-right: 1px solid var(--edge);
+             padding: 6px 8px; background: var(--surface-raised); text-align: center; }
+.mx-table thead th { position: sticky; top: 0; z-index: 2; font-weight: 600; vertical-align: bottom; }
+.mx-table .mx-rowhead { position: sticky; left: 0; z-index: 1; text-align: left; min-width: 170px;
+             font-weight: 600; }
+.mx-table .mx-corner { position: sticky; left: 0; top: 0; z-index: 3; }
+.mx-table .mx-sub { display: block; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.mx-table .mx-row.mx-wall .mx-rowhead, .mx-table .mx-row.mx-group .mx-rowhead {
+             background: var(--surface-elevated); }
+.mx-table .group-badge { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+             text-transform: uppercase; padding: 1px 7px; border-radius: 999px; margin-right: 6px;
+             border: 1px solid var(--edge); color: var(--text-muted); }
+.mx-src { background: transparent !important; color: var(--text) !important; border: 0 !important;
+          box-shadow: none !important; font-weight: 600; cursor: default; padding: 2px 4px;
+          overflow-wrap: anywhere; }
+.mx-cell { width: 40px; height: 40px; padding: 0; border-radius: 8px; cursor: pointer;
+           background: var(--surface-elevated) !important; color: var(--text) !important;
+           border: 1px solid var(--edge) !important; box-shadow: none; }
+.mx-cell:disabled, .mx-cell[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
+.mx-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mx-cell.pending { cursor: progress; opacity: 1; border-color: var(--state-info-text) !important; }
+.mx-ring { position: relative; display: inline-flex; align-items: center; justify-content: center;
+           width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--text-muted);
+           box-sizing: border-box; }
+.mx-ring.v-all { background: var(--action-primary); border-color: var(--action-primary); }
+.mx-ring.v-partial { border-style: dashed; border-color: var(--action-primary); }
+.mx-dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; box-sizing: border-box; }
+.mx-dot.a-all { background: var(--on-accent); outline: 1px solid var(--text); }
+.mx-dot.a-partial { background: transparent; border: 2px solid var(--text); }
+.mx-ring:not(.v-all) .mx-dot.a-all { background: var(--text); outline: 0; }
+.mx-preview { position: fixed; z-index: 120; width: 260px; pointer-events: none;
+              background: var(--surface-raised); border: 1px solid var(--edge); border-radius: 8px;
+              padding: 6px; }
+.mx-preview img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; }
+
+/* ---- account editor: routing interface choice ---- */
+.routing-interfaces { border: 1px solid var(--edge); border-radius: var(--panel-radius);
+                      margin: 0 0 12px; padding: 8px 12px; }
+.routing-interfaces legend { font-size: 13px; font-weight: 600; padding: 0 6px; }
+.routing-interfaces .check { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; }

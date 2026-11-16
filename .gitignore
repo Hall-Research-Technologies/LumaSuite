@@ -91,3 +91,27 @@ firmware/
 tools/
 ui/imagestream/
 ui/logos/
+
+# Remote access runtime state: accounts and password hashes, the audit log, device
+# names, display groups, the remote-access preference, the generated certificate and
+# private key, backups and the restore snapshot. None of it belongs in version
+# control, even as defaults: the copy the application reads is in its data folder,
+# and the next password change would otherwise be published.
+users.json
+security_audit.json
+device_aliases.json
+display_groups.json
+remote_access.json
+remote_cert.pem
+remote_key.pem
+*.lumabak
+restore-snapshot/
+*.corrupt
+*.pem
+*.key
+.mutation-run.lock
+
+# Third-party source ships byte for byte; its own lib/ tools/ and archives must be tracked
+!third_party/**
+!third_party/**/lib/
+!third_party/**/tools/

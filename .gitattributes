@@ -26,3 +26,8 @@
 *.pyd binary
 *.so binary
 *.dylib binary
+
+# Third-party source is kept byte for byte (no line-ending translation)
+third_party/** -text
+*.whl binary
+*.tar.gz binary

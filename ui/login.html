@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script src="/ui/theme-boot.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
+  <link rel="stylesheet" href="/ui/remote.css">
+  <meta charset="utf-8"/>
+  <title>Sign in - LumaSuite</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
+</head>
+<body class="remote login-page">
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
+  <main class="login-wrap">
+    <section class="login-card">
+      <img id="company_logo" src="/ui/companylogo.png" alt="Hall Research" class="login-logo">
+      <h1>Sign in</h1>
+      <p class="login-sub">LumaSuite remote access</p>
+
+      <form id="login_form" novalidate>
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" autocomplete="username"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password"
+                 autocomplete="current-password" required>
+        </div>
+        <button id="submit" class="btn-large" type="submit">Sign in</button>
+        <p id="error" class="form-error" role="alert" aria-live="assertive"></p>
+      </form>
+
+      <!-- Stated, not implied: what protects this connection is decided from the
+           scheme the page was served over. Hidden until then, because a note
+           that flickers from one claim to the other is worse than a late one. -->
+      <p class="form-note" id="transport_note" hidden></p>
+    </section>
+  </main>
+  <script src="/ui/csrf.js"></script>
+  <script src="/ui/login.js"></script>
+</body>
+</html>

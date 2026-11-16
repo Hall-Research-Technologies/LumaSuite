@@ -106,6 +106,26 @@
     };
   }
 
+  // OsdLogo.Set limits, measured on hardware (not documented by the vendor):
+  // backtransparency integer 1..255, logohight integer 1..100 (percent of output
+  // height), startx 0..100, starty <= 100 and >= logohight (starty is the logo's
+  // BOTTOM edge in percent of output height). Anything else is "Invalid params",
+  // and a partial displaylogo object is refused too, so the whole object is sent.
+  function buildLogoDevicePayload(enabled, transparency, height, pos){
+    const h = Math.round(clampNumber(height, 1, 100, 10));
+    return {
+      osdlogoenabled: !!enabled,
+      displaylogo: {
+        backtransparency: Math.round(clampNumber(transparency, 1, 255, 255)),
+        startpostion: {
+          startx: Math.round(clampNumber(pos && pos.startx, 0, 100, 0)),
+          starty: Math.round(clampNumber(pos && pos.starty, h, 100, h))
+        },
+        logohight: h
+      }
+    };
+  }
+
   function safeLogoFallbackPosition(preset, logoHeightPercent){
     const height = clampNumber(logoHeightPercent, 1, 98, 10);
     const isRight = preset === "upper-right" || preset === "lower-right";
@@ -535,7 +555,7 @@ fetch = async function(url, opts){
     if (ext) body.set("ext",ext);
 
     const j = await fetch(EP.pushImage,{method:"POST",body}).then(r=>r.json());
-    if (!j.ok) return alert("Image push failed");
+    if (!j.ok) return window.toast("Image push failed", "error");
 
     // Wait for device to update, then refresh with retries
     await new Promise(r=>setTimeout(r,800));
@@ -637,9 +657,9 @@ fetch = async function(url, opts){
 
     const j = await fetch(EP.pushLogo,{method:"POST",body}).then(r=>r.json());
     if (!j.ok) {
-      // On error, clear pending flag and alert
+      // On error, clear pending flag and notify
       setTimeout(()=> pendingLogo = false, 1500);
-      return alert("Logo push failed");
+      return window.toast("Logo push failed", "error");
     }
 
     // Wait for device to update, then refresh with retries
@@ -790,7 +810,7 @@ fetch = async function(url, opts){
             pill.classList.remove("off");
             pill.classList.add("on");
             updateRtmpLed(true);
-            alert("RTMP disable failed");
+            window.toast("RTMP disable failed", "error");
           } finally {
             setTimeout(() => pendingRtmp = false, 3000);
           }
@@ -802,7 +822,7 @@ fetch = async function(url, opts){
           
           if (!selectedRadio && !rtmpLoaded) {
             // No preset selected and no loaded RTMP config
-            alert("Please select an RTMP preset first, or load RTMP settings on the device");
+            window.toast("Please select an RTMP preset first, or load RTMP settings on the device", "error");
             return;
           }
           
@@ -867,7 +887,7 @@ fetch = async function(url, opts){
             pill.classList.add("off");
             updateRtmpLed(false);
             savedProfileBeforeRtmp = null;
-            alert("RTMP settings send failed");
+            window.toast("RTMP settings send failed", "error");
           } finally {
             setTimeout(() => pendingRtmp = false, 3000);
           }
@@ -910,7 +930,7 @@ fetch = async function(url, opts){
         pollNow = true;
         if (state.unit) pollUnit(state.unit.ip);
       } catch(e){
-        alert("RTMP Apply failed");
+        window.toast("RTMP Apply failed", "error");
         t.checked=false;
         // Attempt to reflect failure visually
         updateRtmpLed(false);
@@ -1045,7 +1065,7 @@ fetch = async function(url, opts){
     function currentLogoControlValues(){
       return {
         transparency: clampNumber($("#logoTransparency")?.value, 1, 255, 255),
-        height: clampNumber($("#logoHeight")?.value, 1, 98, 10),
+        height: clampNumber($("#logoHeight")?.value, 1, 100, 10),
         position: $("#logoPosition")?.value || 'upper-right'
       };
     }
@@ -1115,14 +1135,9 @@ fetch = async function(url, opts){
 
       if (position !== "custom") updateLogoCoordinateInputs(pos);
 
-      return {
-        osdlogoenabled: currentEnabled,
-        displaylogo: {
-          backtransparency: transparency,
-          startpostion: pos,
-          logohight: height
-        }
-      };
+      const payload = buildLogoDevicePayload(currentEnabled, transparency, height, pos);
+      if (position === "custom") updateLogoCoordinateInputs(payload.displaylogo.startpostion);
+      return payload;
     }
 
     // Function to send logo settings
@@ -1134,9 +1149,17 @@ fetch = async function(url, opts){
       try {
         const payload = buildLogoSettingsPayload(options);
         if (!payload) return;
-        await rpc("OsdLogo.Set", payload);
+        const res = await rpc("OsdLogo.Set", payload);
+        // The device answers with the state it now holds; a value it did not keep is a failure.
+        const got = res && res.displaylogo;
+        const want = payload.displaylogo;
+        if (got && (got.backtransparency !== want.backtransparency || got.logohight !== want.logohight ||
+            got.startpostion?.startx !== want.startpostion.startx || got.startpostion?.starty !== want.startpostion.starty)) {
+          window.toast?.("Logo settings were not kept by the unit", "error");
+        }
       } catch (e) {
         console.error("Failed to apply logo settings:", e);
+        window.toast?.("Logo settings rejected: " + (e && e.message || e), "error");
       } finally {
         // Allow encoder to settle before poll overwrites UI
         setTimeout(()=> pendingLogo = false, 1500);
@@ -1146,13 +1169,13 @@ fetch = async function(url, opts){
     // Wire up transparency input
     const transInput = $("#logoTransparency");
     if (transInput) {
-      transInput.onchange = refreshLogoPresetCoordinates;
+      transInput.onchange = () => { refreshLogoPresetCoordinates(); applyLogoSettings(); };
     }
 
     // Wire up height input
     const heightInput = $("#logoHeight");
     if (heightInput) {
-      heightInput.onchange = refreshLogoPresetCoordinates;
+      heightInput.onchange = () => { refreshLogoPresetCoordinates(); applyLogoSettings(); };
     }
 
     // Wire up position dropdown
@@ -1166,18 +1189,19 @@ fetch = async function(url, opts){
         }
         
         refreshLogoPresetCoordinates();
+        await applyLogoSettings();
       };
     }
 
     // Wire up horizontal/vertical coordinate inputs
     const horizInput = $("#logoHorizontal");
     if (horizInput) {
-      horizInput.onchange = () => {};
+      horizInput.onchange = () => { if ($("#logoPosition")?.value === "custom") applyLogoSettings(); };
     }
     
     const vertInput = $("#logoVertical");
     if (vertInput) {
-      vertInput.onchange = () => {};
+      vertInput.onchange = () => { if ($("#logoPosition")?.value === "custom") applyLogoSettings(); };
     }
 
     // Store function to detect position preset from coordinates
@@ -1685,7 +1709,7 @@ function paintTickerRows(){
             if (selectedRadio) {
               state.ticker.pending = tickerCfgFromRow(selectedRadio.closest(".ticker-row"));
             } else {
-              alert("Please select a ticker first (check a radio button)");
+              window.toast("Please select a ticker first (check a radio button)", "error");
               return;
             }
 		  }
@@ -2492,11 +2516,11 @@ async function pollUnit(ip){
     if (activeEncoders.length > 0) {
       streamingUnits.innerHTML = activeEncoders.map(enc => {
         const previewUrl = `http://${enc.ip}/stream?resolution=320x180&fps=15&bitrate=128`;
-        return `<div class="streaming-unit" data-ip="${enc.ip}" style="display:flex;align-items:center;gap:6px;position:relative;cursor:pointer;padding:4px;border-radius:4px;">
+        return `<div class="streaming-unit" data-ip="${escapeHtml(enc.ip)}" style="display:flex;align-items:center;gap:6px;position:relative;cursor:pointer;padding:4px;border-radius:4px;">
           <div style="width:10px;height:10px;border-radius:50%;background:#28a745;box-shadow:0 0 6px #28a745;"></div>
-          <span>${enc.hostname}</span>
+          <span>${escapeHtml(enc.hostname)}</span>
           <div class="stream-preview" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:1000;border:2px solid var(--border);border-radius:8px;background:var(--card);box-shadow:0 4px 12px rgba(0,0,0,0.4);padding:4px;">
-            <img src="${previewUrl}" style="width:320px;height:180px;display:block;border-radius:4px;" />
+            <img src="${escapeHtml(previewUrl)}" style="width:320px;height:180px;display:block;border-radius:4px;" />
           </div>
         </div>`;
       }).join('');

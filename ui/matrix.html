@@ -1,53 +1,53 @@
 <!doctype html>
 <html>
 <head>
+  <script src="/ui/theme-boot.js"></script>
+  <script src="/ui/csrf.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
   <meta charset="utf-8"/>
-  <title>Matrix Routing</title>
+  <title>Matrix Routing - LumaSuite</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
   <link rel="stylesheet" href="matrix.css">
-  <style>
-    .nav-tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); }
-    .nav-tab { padding:6px 14px; text-decoration:none; color:var(--fg); border-radius:6px 6px 0 0; transition:all 0.2s; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; }
-    .nav-tab:hover { background:rgba(30,144,255,0.1); color:#fff; }
-    .nav-tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
-  </style>
+  <!-- .nav-tabs/.nav-tab layout+colour rules moved to /ui/family.css
+       (shell-consistency pass, 2026-09-19) -- was byte-for-byte identical
+       to the same block duplicated in every other page. -->
 </head>
 <body>
-  <!-- Connection Status Banner -->
-  <div id="connection_banner" style="display:none; position:fixed; top:0; left:0; right:0; background:#d32f2f; color:white; padding:12px 20px; font-weight:bold; text-align:center; z-index:10000; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-    ⚠️ Connection lost, check application.
-  </div>
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
   <div class="row header" style="justify-content:space-between;align-items:center;">
     <div style="display:flex;align-items:center;gap:12px;">
       <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
-      <h1 class="title" style="margin:0;">LumaSuite Device Manager</h1>
+      <h1 class="title" style="margin:0;">LumaSuite Matrix Routing</h1>
     </div>
     <div class="right" style="display:flex;align-items:center;gap:16px;">
       <div class="nav-tabs">
         <a class="nav-tab" href="/ui/index.html">
-          <span>📊</span>
           <span>Device Manager</span>
         </a>
         <a class="nav-tab active" href="/ui/matrix.html">
-          <span>🔀</span>
           <span>Matrix Routing</span>
         </a>
         <a class="nav-tab" href="/ui/producer.html">
-          <span>🎬</span>
           <span>Production Studio</span>
         </a>
         <a class="nav-tab" href="/ui/wall.html">
-          <span>🧱</span>
           <span>Video Wall</span>
         </a>
       </div>
-
+      <button id="header_gear" class="gear-btn" title="Settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
     </div>
   </div>
   <div class="top">
     <div class="row">
-      <button id="refreshBtn">Refresh</button>
+      <button id="refreshBtn" class="secondary">Refresh</button>
+      <div class="divider"></div>
+      <div class="mode" role="group" aria-label="Routing mode">
+        <button type="button" class="modebtn secondary active" data-mode="av" aria-pressed="true">AV (Audio + Video)</button>
+        <button type="button" class="modebtn secondary" data-mode="video" aria-pressed="false">Video</button>
+        <button type="button" class="modebtn secondary" data-mode="audio" aria-pressed="false">Audio</button>
+      </div>
+      <span id="mode_label" class="small" aria-live="polite"></span>
       <div class="divider"></div>
       <label class="toggle" id="sticky_headers_label">
         <input type="checkbox" id="sticky_headers_toggle" />
@@ -63,16 +63,16 @@
     <div class="matrix-wrap">
       <table id="matrix" class="matrix" aria-label="Routing matrix"></table>
     </div>
-    <div style="display:flex;gap:24px;margin:18px 0 8px 0;align-items:center;">
+    <div class="matrix-filters">
       <div>
         <label for="encFilterInput"><b>Filter Encoders:</b></label>
         <input type="text" id="encFilterInput" placeholder="Type to filter encoders..." style="margin-left:8px;min-width:110px;width:110px;">
-        <button id="encFilterClearBtn" type="button" style="margin-left:4px;">Clear</button>
+        <button id="encFilterClearBtn" class="secondary" type="button" style="margin-left:4px;">Clear</button>
       </div>
       <div>
         <label for="decFilterInput"><b>Filter Decoders:</b></label>
         <input type="text" id="decFilterInput" placeholder="Type to filter decoders..." style="margin-left:8px;min-width:110px;width:110px;">
-        <button id="decFilterClearBtn" type="button" style="margin-left:4px;">Clear</button>
+        <button id="decFilterClearBtn" class="secondary" type="button" style="margin-left:4px;">Clear</button>
       </div>
     </div>
   </div>
@@ -102,6 +102,8 @@
 
 <!-- Connection Monitoring -->
 <script src="/ui/dialogs.js?v=1"></script>
+<script src="/ui/settings.js?v=1"></script>
+  <script src="/ui/adminnav.js"></script>
 <script>
 let connectionCheckInterval = null;
 let heartbeatInterval = null;
@@ -113,21 +115,10 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 3000;
 const HEARTBEAT_FAILURE_LIMIT = 3;
 
-function showConnectionBanner() {
-  const banner = document.getElementById("connection_banner");
-  if(banner && banner.style.display === 'none') {
-    banner.style.display = 'block';
-    document.body.style.paddingTop = '50px';
-  }
-}
-
-function hideConnectionBanner() {
-  const banner = document.getElementById("connection_banner");
-  if(banner && banner.style.display === 'block') {
-    banner.style.display = 'none';
-    document.body.style.paddingTop = '0';
-  }
-}
+// The persistent "connection lost" banner is gone. The heartbeat still records reachability in
+// window.__lumaConnection for diagnostics; an operation that really fails reports its own error.
+function showConnectionBanner() { window.__lumaConnection = {reachable:false, since:Date.now()}; }
+function hideConnectionBanner() { window.__lumaConnection = {reachable:true, since:Date.now()}; }
 
 function startConnectionMonitoring() {
   if(heartbeatInterval) return;

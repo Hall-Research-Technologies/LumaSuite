@@ -1,6 +1,9 @@
 <!doctype html>
 <html>
 <head>
+  <script src="/ui/theme-boot.js"></script>
+  <script src="/ui/csrf.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
   <meta charset="utf-8"/>
   <title>LumaSuite Manual</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -19,14 +22,37 @@
     .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
     .callout { border-left:3px solid var(--accent); padding:8px 12px; background:rgba(30,144,255,.08); border-radius:6px; }
     a { color:#7cc4ff; }
+    table { border-collapse:collapse; width:100%; margin:8px 0 12px; }
+    th, td { border:1px solid var(--border); padding:6px 10px; text-align:left; vertical-align:top; color:var(--muted); line-height:1.45; }
+    th { background:var(--panel-2); }
     code { color:#e5e7eb; background:var(--panel-2); border:1px solid var(--border); border-radius:4px; padding:1px 4px; }
   </style>
 </head>
 <body>
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
+  <div class="row header" style="justify-content:space-between;align-items:center;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
+      <h1 class="title" style="margin:0;">LumaSuite Manual</h1>
+    </div>
+    <div class="right" style="display:flex;align-items:center;gap:16px;">
+      <div class="nav-tabs">
+        <a class="nav-tab" href="/ui/index.html">
+          <span>Device Manager</span></a>
+        <a class="nav-tab" href="/ui/matrix.html">
+          <span>Matrix Routing</span></a>
+        <a class="nav-tab" href="/ui/producer.html">
+          <span>Production Studio</span></a>
+        <a class="nav-tab" href="/ui/wall.html">
+          <span>Video Wall</span></a>
+      </div>
+      <button id="header_gear" class="gear-btn" title="Settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
+    </div>
+  </div>
   <main>
     <div class="topbar">
       <div>
-        <h1>LumaSuite Manual</h1>
+        <h2>LumaSuite Manual</h2>
         <p>How to scan, configure, route, and save LumaStream systems.</p>
       </div>
       <a href="/ui/index.html">Back to Device Manager</a>
@@ -35,13 +61,51 @@
     <section class="panel">
       <h2>First-Time Setup</h2>
       <ol>
-        <li>Open Device Manager.</li>
-        <li>Open the gear button and verify the password, websocket port, firmware path, static image path, and logo path.</li>
-        <li>Use Dark Mode in the gear popup if the display theme needs to change.</li>
-        <li>Choose the network adapter that matches the LumaStream subnet.</li>
-        <li>Enter a scan range such as <code>192.168.100.1/24</code> or <code>192.168.100.1-254</code>, then press Scan.</li>
+        <li>Open Device Manager (or any page -- Settings is the same everywhere).</li>
+        <li>Open the gear button and review Settings: your device password, websocket port, firmware folder, and the Production Studio asset folders (static image / logo). See <a href="#settings">Settings</a> below.</li>
+        <li>Switch Theme (light/dark) and Layout (Classic/Compact) under Appearance if you'd like a different look -- these apply instantly and persist per browser.</li>
+        <li>Choose the network adapter that matches the LumaStream subnet. LumaSuite lists the connected wired Ethernet port first, then Wi-Fi, then any other physical adapter, and virtual, VPN and Hyper-V adapters last, so the first entry is normally the right one. A choice you make is remembered and never overridden.</li>
+        <li>Press Scan. To also look on another network, type it in <em>Targets</em> &mdash; see <a href="#routed-scan">Scanning other networks</a>.</li>
       </ol>
       <div class="callout">Devices are tracked by MAC address when available. If DHCP changes a unit IP, rescan and LumaSuite updates the existing unit instead of creating a duplicate.</div>
+    </section>
+
+    <section class="panel" id="platforms">
+      <h2>Supported computers</h2>
+      <p>LumaSuite is released as a separate download for each of these. Choose the one that matches your computer.</p>
+      <table>
+        <thead><tr><th>Computer</th><th>Download</th><th>How far it has been checked</th></tr></thead>
+        <tbody>
+          <tr><td>Windows, 64-bit (Intel or AMD)</td><td>The <em>windows</em> zip: one <code>LumaSuite.exe</code></td><td>Started and used on Windows 11.</td></tr>
+          <tr><td>Mac with an Intel processor</td><td>The <em>x86_64</em> zip: <code>LumaSuite.app</code></td><td>Not yet built or run by the release process for this version. When the release is built, the release workflow runs the automatic tests on a GitHub Intel Mac runner and builds the app there; nothing has been run on a Mac to date, and nobody has used it on a Mac.</td></tr>
+          <tr><td>Mac with Apple Silicon</td><td>The <em>arm64</em> zip: <code>LumaSuite.app</code></td><td>As above, on a GitHub Apple Silicon runner.</td></tr>
+          <tr><td>Linux, 64-bit (x86-64)</td><td>The <em>linux</em> tar.gz</td><td>Built on Ubuntu only, and needs a desktop session. Other Linux distributions have not been tried, and it has not been used on a desktop by the release process.</td></tr>
+        </tbody>
+      </table>
+      <p>The Mac downloads are one for each kind of processor, not a single universal app: if macOS says the app cannot run on this Mac (&ldquo;bad CPU type&rdquo;), you have the other one. Windows on Arm, 32-bit systems and Linux on Arm are not provided. The oldest macOS and Linux versions that work have not been established. None of the downloads is code-signed, so Windows SmartScreen and macOS Gatekeeper ask you to confirm the first time.</p>
+      <p>When LumaSuite checks for a newer release (see <a href="#about">About</a>) it offers only the download that matches this computer, and none if there is no match; the Releases button always takes you to the full list.</p>
+    </section>
+
+    <section class="panel" id="settings">
+      <h2>Settings</h2>
+      <p>One Settings dialog, opened from the gear button on every page, reading and writing the same configuration -- what you see in Settings is identical no matter which page you opened it from.</p>
+      <p>Settings is arranged the same way as in OmniSuite, in this order:</p>
+      <h3>Device Communication</h3>
+      <p>Username and Password are the primary credential LumaSuite uses to talk to your LumaStream devices, and WS Port (80 or 443) is the port it uses. See <a href="#password-fallback">Primary/Fallback Passwords</a> below for the Fallback Password field.</p>
+      <h3>Firmware</h3>
+      <p>The folder LumaSuite searches for firmware <code>.tar.gz</code> files when you upgrade. This is operator/job-site content &mdash; choose the folder rather than typing a developer path, and it is never packaged into the application. Below the folder, Settings summarises firmware availability: whether any model has newer firmware, when Hall Research was last checked, and a table of <em>Model</em>, <em>Installed</em>, <em>Latest</em> and <em>Status</em> (<strong>Up to Date</strong>, <strong>Available</strong> or <strong>Unknown</strong>, with the reason). Opening Settings only shows what is already known &mdash; it never contacts Hall Research. <em>Check Now</em>, under the table, asks Hall Research once, right away, and then updates the table and <em>Last checked</em>; if Hall Research cannot be reached the last known result stays on screen and a message says so. Each unit's own status is also in the Device Manager table; see <a href="#firmware-status">Firmware status</a>.</p>
+      <h3>Production Studio</h3>
+      <p>Separate folders for the static images and logo overlays Production Studio can push to a device.</p>
+      <h3>Appearance</h3>
+      <p>Theme (light or dark), Layout (Classic or Compact &mdash; density only, same functionality either way) and Colour. <em>Default</em> is Hallway blue, the same blue as in OmniSuite. Reset Appearance restores the defaults without touching devices, routes, or any other setting.</p>
+      <h3>Remote Access</h3>
+      <p>Turning remote access on or off, the network and security it uses, and the certificate. See <a href="#remote-access">Remote Access</a>.</p>
+      <h3>Local Application Port</h3>
+      <p>The TCP port LumaSuite's own browser address uses on this computer, shown on the computer LumaSuite runs on only. It is separate from Remote Access. See <a href="#local-port">The local application port</a>.</p>
+      <h3>Backup and Restore</h3>
+      <p>On the computer LumaSuite runs on only. See <a href="#backup-restore">Backup and Restore</a>.</p>
+      <h3>Application</h3>
+      <p>The installed version, a check for a newer LumaSuite release (opening Settings, or pressing Check Now; there is no setting to turn it off. It only reads the newest release's published details from GitHub, and never downloads or installs anything &mdash; the result is shown in green when this version is current, in red when a newer release is available, and in the ordinary text colour as "Unable to check for updates" when the check could not say &mdash; a network failure is never shown as if it were current), copyright, and links to the licence information and this User Guide. See <a href="#about">About</a> at the end of this guide.</p>
     </section>
 
     <section class="grid">
@@ -49,7 +113,24 @@
         <h2>Device Manager Basics</h2>
         <h3>Select Units</h3>
         <p>Use the left checkboxes to select units for reboot, firmware update, password sync, NTP sync, and Slate Manager actions.</p>
-        <h3>Firmware Updates</h3>
+        <h3 id="device-table">The device table</h3>
+        <p>The table is laid out the way OmniSuite's Device Info is: the checkbox, <strong>IP</strong> and <strong>Hostname</strong> stay in place when you scroll sideways, so a row is never a line of values with no device name; the header row stays at the top when you scroll down; and a scroll bar sits above the table as well as below it. Click a column heading to sort by it (the arrow shows the direction, click again to reverse); IP addresses and versions sort as numbers, so 1.0.10 comes after 1.0.9. The heading can also be reached with Tab and sorted with Enter or Space.</p>
+        <p>The counts beside the firmware controls (<em>Encoders</em>, <em>Decoders</em>, and <em>Switchers</em> when there is one) follow the devices that are currently listed. The folder button next to the firmware refresh opens the firmware folder chosen in Settings on the computer running LumaSuite; if no folder has been chosen it says so rather than opening anything.</p>
+        <h3 id="preview-column">Preview: the unit's thumbnail</h3>
+        <p>The <em>Preview</em> column shows, for each encoder and decoder, a checkbox with the word <strong>Preview</strong> beneath it. The checkbox is the unit's own thumbnail switch &mdash; the same setting the unit's web page shows on its Info page &mdash; and it is read when the unit is scanned. Tick or untick it to turn the thumbnail on or off <em>on the unit itself</em>. LumaSuite asks the unit to change, reads the setting back, and updates the box only once the unit confirms; if the unit does not confirm, the box keeps showing what the unit holds and a message says so. A box that is neither ticked nor unticked means the unit has not reported yet; scan to read it.</p>
+        <p>While the thumbnail is on, rest the pointer on the word <em>Preview</em> to see the unit's current picture beside the pointer; it refreshes every two seconds while you hover and stops as soon as you move away. Click the word (or press Enter on it) to open the picture in a window of its own that keeps refreshing every two seconds until you close it. A unit that does not answer shows "Preview unavailable" in that window and is tried again. With the thumbnail off the unit produces no picture, so the word explains that instead of opening anything. A CS31 switcher has no thumbnail setting and no Preview column entry.</p>
+        <h3 id="link-speed">Link Speed and the connected switch</h3>
+        <p><em>Link Speed</em> sits beside the MAC address and is what the unit itself reports for its AV LAN port (not its second port), read when the unit is scanned. A gigabit (1000 Mbps) link is shown in green; any other speed is shown in red, because a stream that expects gigabit will not run properly below it. A dash means the unit did not report a speed (for example the cable is unplugged, the unit was not reachable, or a CS31, which is not asked) &mdash; it is not a fault. The column sorts by speed, with unknown last.</p>
+        <p>Hover over, or Tab to, a unit's <em>MAC</em> address to see the switch it is plugged into: the switch name, its management address, chassis ID, the port, how long the switch says the advertisement lasts, and what the switch says it is. This comes from the same scan, so nothing is requested when you hover. If a unit reports no neighbour the pop-up says so; it never guesses a switch. To refresh the speed or the switch after you move a cable, scan again.</p>
+        <p>The lightbulb in the <em>Blink</em> column asks that device to flash its front panel LED (30 seconds on an encoder or decoder; the CS31 stays on until you press it again). A tick means the command was sent: LumaStream units cannot report whether they are blinking, so look at the unit.</p>
+        <h3 id="routed-scan">Scanning other networks</h3>
+        <p>A scan looks on the selected adapter's network <strong>and</strong> on any network you list in <em>Targets</em>, in one scan. Type networks separated by commas, for example <code>198.51.100.0/24, 203.0.113.1-254</code>. A device does not have to be on the adapter's own network, only reachable from this computer. Choose <em>No adapter &mdash; additional networks only</em> to scan just the networks you typed. The list is remembered by LumaSuite, so it is still there after a restart.</p>
+        <p>To keep a scan quick and safe, LumaSuite counts the addresses before it starts and refuses a request that is too large: one range may cover at most 4,096 addresses (a /20) and a whole scan 8,192, with at most 32 ranges. It tells you which one is too large rather than scanning part of it. A scan only finds devices that answer; a network that is not reachable from this computer returns nothing.</p>
+        <h3 id="firmware-status">Firmware status</h3>
+        <p>Each device's Version cell shows whether Hall Research has published a newer firmware for that model: <strong>Up to Date</strong>, <strong>Available</strong>, or <strong>Unknown</strong> when it cannot be determined (the reason is in the tooltip). There is no setting to turn this off. LumaSuite looks this up on its own &mdash; in the background shortly after it starts, and then every seven days while it keeps running &mdash; and also when you press <em>Check Now</em>. It never delays discovery, routing or the page, and it never downloads or installs anything: it only reads the version Hall Research lists for each product.</p>
+        <p>The last answer is remembered, so it is shown straight away after a restart. If Hall Research cannot be reached the last answer stays on screen, and its tooltip says it is the last answer received and when it was checked; an offline computer never turns a known status into Unknown. After a failed check LumaSuite tries again after six hours rather than waiting a week. The check sends only a request for each product's public page; the request carries the computer's address (as any web request does) and the standard identification of the software making it, and nothing about your devices or network. It reads published firmware versions and nothing else.</p>
+        <h3>Firmware updates</h3>
+        <p>Choose a firmware file from your Firmware folder and upgrade selected units:</p>
         <ol>
           <li>Select the firmware file.</li>
           <li>Select the target units.</li>
@@ -58,16 +139,28 @@
         </ol>
         <h3>NTP Sync</h3>
         <p>Select units, press Set NTP, choose timezone and server, then sync. The dashboard refreshes NTP values after scan or polling.</p>
+        <h3>Password Column</h3>
+        <p>Shows which credential last authenticated successfully to that device: <strong>Primary</strong>, <strong>Fallback</strong>, <strong>Auth Failed</strong> (both were rejected), or <strong>Unknown</strong> (no successful call yet). See <a href="#password-fallback">Primary/Fallback Passwords</a>.</p>
       </div>
 
       <div class="panel">
         <h2>Matrix Routing</h2>
         <ol>
           <li>Open Matrix Routing.</li>
-          <li>Pick an encoder/source for each decoder output.</li>
-          <li>Route changes are sent live and should behave like fast switching.</li>
+          <li>Choose a mode, then click the cell for the source and decoder. The ring shows where a display's <strong>video</strong> comes from and the small dot where its <strong>audio</strong> comes from.</li>
+          <li>Route changes are sent live and should behave like fast switching. A route is only reported as successful after the display itself confirms the new source.</li>
           <li>Use refresh if the device state was changed from outside LumaSuite.</li>
+          <li>A unit that has stopped answering is dimmed and its cells cannot be chosen: a route needs both the source and the display to be there. LumaSuite also refuses the route if it is attempted another way, and the cells come back by themselves once the unit answers again, whether that is the next refresh or a scan that finds it.</li>
         </ol>
+        <h3>Audio and video modes</h3>
+        <ul>
+          <li><strong>AV (Audio + Video)</strong> &mdash; the default. The video is routed and the display's audio follows it, the way a LumaStream display normally works. If a display had been given separate audio, AV puts it back to following the video.</li>
+          <li><strong>Video</strong> &mdash; changes only the picture. The display keeps the audio it has now, even though that stops following the video.</li>
+          <li><strong>Audio</strong> &mdash; changes only the sound, and leaves the picture alone. You can choose the source the display is already showing.</li>
+          <li><strong>Picture from one source and sound from another</strong> &mdash; choose Video and click the picture's source, then choose Audio and click the sound's source. Each step is confirmed on the display separately.</li>
+        </ul>
+        <p>Every route is confirmed by reading the display back. If the display accepts a change but does not hold it, the route fails, the display is put back as it was, and the message says whether that was confirmed. A source's audio is checked against the audio the display can actually receive before anything is changed: a source whose audio the display does not list is refused rather than leaving the display listening to nothing. Switchers (CS31) route audio and video together and are not offered the other modes.</p>
+        <p>A User sees the Audio + Video, Video and Audio choices only in the <strong>Matrix</strong> routing interface, and only if you gave their account that interface (see Accounts and Permissions). In the ordinary routing page a User's route always means audio and video together: both go to the source you chose, even if a display had been given separate audio. A display whose audio follows its video is left that way; a display that had separate audio is given the chosen source's audio explicitly, and is not changed back to following. Video and Audio in the Matrix change only the picture or only the sound and keep the other as it was. If a source has no audio of its own, only its picture is routed and the result says the audio was not moved.</p>
       </div>
     </section>
 
@@ -90,6 +183,49 @@
       <p>Inside a display cell, choose a source other than Wall Video to break that one display out of the wall. Selecting a new Wall Video Source snaps all displays back to Wall Video.</p>
     </section>
 
+    <section class="panel" id="video-wall-zones">
+      <h2>Video Wall Zones</h2>
+      <p>A <strong>Zone</strong> is a reusable rectangular group of displays within a Video Wall -- for example a 1&times;2 pair, a 2&times;1 pair, a full row or column (1&times;3, 3&times;1), a 2&times;2 corner, or any other rectangular area that fits inside the wall (2&times;3, 3&times;2, and so on).</p>
+      <p>A <strong>Physical Wall</strong> is the actual arrangement of displays and decoders on the wall. A <strong>Zone</strong> is a reusable rectangular routing target you define inside that wall -- it doesn't change the physical arrangement, it just gives you a named group you can route a source to as one action.</p>
+      <ol>
+        <li>Open Video Wall.</li>
+        <li>Select the desired saved wall.</li>
+        <li>Press <strong>Edit Zones</strong>.</li>
+        <li>Click one corner display, then the opposite corner display, to create or select a rectangular group of displays.</li>
+        <li>Give the Zone a useful name (for example "Top Row" or "Left 2x2").</li>
+        <li>Save the Zone.</li>
+      </ol>
+      <p>Once saved, the Zone appears alongside the other routing targets below the wall grid. Drag a source onto the Zone to route that source to every display in the Zone in one action. You can also click a source and then click a Zone or a display: the route starts as soon as you click the target. There is no Route button and no second confirmation, and the result (including any display that did not confirm) is reported when it finishes.</p>
+      <p>Individual displays remain independently routable at any time -- creating or using a Zone never removes the ability to route to a single display. <strong>Apply to Entire Wall</strong> remains the explicit action for routing a source to every display on the wall at once, separate from any Zone.</p>
+      <h3>Video Wall Mode and Apply to Entire Wall</h3>
+      <p>Select a display to open <strong>Selected Display</strong>. <strong>Video Wall Mode</strong> shows whether that decoder itself has Video Wall mode turned on, as the decoder reports it. It reads <em>Unknown</em> until the decoder has been read (press <strong>Read</strong> or refresh the wall), or when it cannot be read; being listed in a saved wall does not turn it on. Choosing <em>Enabled</em> or <em>Disabled</em> changes the decoder and then reads it back. LumaSuite says the mode changed only when the decoder itself confirms it; otherwise it shows what the decoder really holds and why the change did not take.</p>
+      <p><strong>Apply to Entire Wall</strong> checks every display in the saved wall, turns Video Wall mode on where it is needed, applies the position, source, bezel and rotation, and reads each decoder back. The result is <em>complete</em> only when every display was confirmed. If one display fails (offline, unreadable, or it did not keep the setting) the others are still configured and the result is <em>Partial</em>, naming the display and the reason.</p>
+      <div class="callout">Editing Zones (creating, renaming, resizing, or deleting one) only changes the saved Zone definition. It does not reconfigure or reroute any device by itself -- devices only change when you actually route a source, whether to a display, a Zone, or the entire wall.</div>
+    </section>
+
+    <section class="panel" id="video-wall-discovery">
+      <h2>Existing-Site Video Wall Discovery</h2>
+      <p>When you scan a site that already has LumaStream decoders configured into a Video Wall, LumaSuite can detect that existing configuration and let you bring it into LumaSuite without retyping it. The workflow is:</p>
+      <p style="text-align:center;font-weight:600;">Scan &rarr; LumaSuite detects an existing configuration &rarr; Review &rarr; Confirm or Adjust &rarr; Save locally</p>
+      <p>When LumaSuite notices an existing wall it doesn't already know about, it shows a small notice (on Device Manager, next to the Video Wall tab, and on the Video Wall page itself under "Existing Video Walls Detected"). From there you can:</p>
+      <ul>
+        <li><strong>Review</strong> the proposed wall -- name, size, and which decoder is in which position.</li>
+        <li><strong>Confirm</strong> the decoder/display placement if it looks right, or <strong>correct</strong> it first (rename it, resize it, or reassign a decoder to a different position) if the proposed arrangement isn't quite right.</li>
+        <li><strong>Confirm &amp; Save</strong> to save LumaSuite's understanding of the wall for future use.</li>
+        <li><strong>Ignore</strong> a candidate you don't want LumaSuite to keep asking about.</li>
+      </ul>
+      <div class="callout"><strong>Reviewing, adjusting, ignoring, or confirming a detected wall never reconfigures the physical devices.</strong> Confirm &amp; Save only saves LumaSuite's own record of what the installation already looks like -- it does not reapply Video Wall settings to the decoders. Actually routing or reconfiguring the wall is always a separate, explicit action (Apply Saved Wall, Apply to Entire Wall, or routing a source), taken later and on purpose.</div>
+      <p>LumaSuite describes what it found using plain-language statuses rather than a numeric confidence score:</p>
+      <ul>
+        <li><strong>Detected</strong> -- LumaSuite found a coherent wall layout.</li>
+        <li><strong>Possible</strong> -- LumaSuite found something that looks like a wall grouping worth reviewing.</li>
+        <li><strong>Partial</strong> -- some expected wall positions or devices are unavailable or unresolved.</li>
+        <li><strong>Ambiguous</strong> -- LumaSuite found wall configuration but can't reliably determine the complete physical grouping.</li>
+        <li><strong>Conflict</strong> -- device information conflicts and requires operator review.</li>
+      </ul>
+      <p>The Review screen also offers a "Why?" toggle with a short plain-language explanation of what LumaSuite found, if you want more detail before confirming.</p>
+    </section>
+
     <section class="panel">
       <h2>Saving Wall Configs By Job Site</h2>
       <h3>Export</h3>
@@ -110,6 +246,13 @@
       <div class="callout">Unit cache JSON and unrelated JSON files are rejected. Import is only for files marked as <code>lumasuite.video_walls</code>.</div>
     </section>
 
+    <section class="panel" id="password-fallback">
+      <h2>Primary/Fallback Passwords</h2>
+      <p>Settings has a <strong>Password</strong> field and a <strong>Fallback Password</strong> field. LumaSuite tries Password first for every device. It tries the Fallback Password only when a device genuinely rejects Password as an invalid credential -- never when a device is offline, times out, or answers with an unrelated error. This means a normal, fully-working network costs nothing extra: only devices actually running a different password ever trigger a second attempt.</p>
+      <p>Once a device accepts either credential, LumaSuite remembers it and uses it first the next time, rather than re-trying Password on every call. The Password column in Device Manager shows which one is currently working for each device.</p>
+      <p>Leave Fallback Password blank to disable this behavior entirely.</p>
+    </section>
+
     <section class="panel">
       <h2>Production Studio</h2>
       <ol>
@@ -118,20 +261,226 @@
         <li>Adjust output, input, RTMP, ticker, static image, and logo controls as needed.</li>
         <li>Most controls apply live. Use Save buttons where the panel provides them for preset or explicit push actions.</li>
       </ol>
+      <h3 id="logo-controls">Logo position, height and transparency</h3>
+      <p>The Logo panel has <em>Transparency</em>, <em>Height</em> and <em>Position</em> (Upper Right, Upper Left, Lower Right, Lower Left or Custom). Each change is sent to the unit as soon as you make it; there is no separate Apply. If the unit refuses a value, or accepts it but does not keep it, a message says so and the unit keeps what it had.</p>
+      <ul>
+        <li><em>Transparency</em> is 1 to 255 (255 is fully opaque).</li>
+        <li><em>Height</em> is 1 to 100, as a percentage of the output's height.</li>
+        <li>With <em>Custom</em>, <em>Horizontal (X)</em> is 0 to 100 and <em>Vertical (Y)</em> is the position of the logo's bottom edge, 1 to 100; it can never be less than the height, because the logo would then run off the top of the picture.</li>
+      </ul>
+      <p>These limits are what the units accept, measured on real equipment, so a value outside them is corrected before it is sent.</p>
       <h3>Slate Manager</h3>
       <p>Open Slate Manager from Device Manager, select encoders or decoders, choose a 1280x720 or 1920x1080 image, and upload. Load Default and Save restores the factory image.</p>
+    </section>
+
+    <section class="panel" id="local-port">
+      <h2>The local application port</h2>
+      <p>LumaSuite shows its address in the launcher window (for example <code>http://127.0.0.1:8090</code>) and opens it in your browser. By default LumaSuite starts on its normal port and, if that port is already in use, quietly takes the next free one, so the address can differ from one start to the next. This is the port of LumaSuite on this computer; it is not the port Remote Access uses.</p>
+      <h3>Keeping the address the same</h3>
+      <ol>
+        <li>On the computer LumaSuite runs on, open Settings and find <em>Local Application Port</em>. It shows the address in use now.</li>
+        <li>Tick <em>Use a fixed TCP port</em>. The window offers the port LumaSuite is using right now; keep it or type another between 1024 and 65535.</li>
+        <li>Press <em>Save and Restart</em>. LumaSuite closes, releases the port and starts again on it. Cancel changes nothing. Unticking the box (and confirming) returns to automatic selection.</li>
+      </ol>
+      <h3>If the fixed port is busy when LumaSuite starts</h3>
+      <p>Another program may be using the port. LumaSuite never moves to a different port without being told to. The launcher stays open and says <em>Server could not start &mdash; Configured TCP port N is already in use</em>, with four buttons:</p>
+      <ul>
+        <li><strong>Retry N</strong> tries the same port again, for example after you closed the other program.</li>
+        <li><strong>Start on Alternate Port</strong> runs LumaSuite on a free port for this session only. The launcher shows the address to open. Your saved port is not changed, and the next start tries it again.</li>
+        <li><strong>Change Fixed Port</strong> opens a small window: type a new port and press <em>Start</em>. LumaSuite starts on it and saves it only if it starts. If that port is busy too, nothing is changed and you can try another.</li>
+        <li><strong>Exit</strong> closes the launcher without changing anything.</li>
+      </ul>
+      <p>You never need to edit a file, delete application data or stop a program to get past this. While LumaSuite is running on a temporary port, Settings shows <em>Running temporarily on TCP port N</em> with the port you configured, and offers <em>Retry Fixed Port</em>, <em>Make N Fixed</em> (keep the port it is on) and <em>Change Fixed Port</em>.</p>
+      <div class="callout">The fixed port is a setting of this computer. It is not part of a Backup, and a restored backup does not change it.</div>
+    </section>
+
+    <section class="panel" id="remote-access">
+      <h2>Remote Access</h2>
+      <p>Remote Access lets people on your network open LumaSuite from another device: an administrator gets the normal LumaSuite pages, and a User gets a simple page for routing the sources and displays they were given. It is <strong>off</strong> until you turn it on, and LumaSuite on this computer works exactly as it always has whether it is on or off.</p>
+      <h3>Turning it on</h3>
+      <ol>
+        <li>On the computer LumaSuite runs on, open Settings and find <em>Remote Access</em>. If there is no administrator yet, create one there. It can only be created on this computer.</li>
+        <li>Choose the <em>Network</em> other devices will use. LumaSuite remembers the network adapter, so a changed address does not lose the setting.</li>
+        <li>Choose <em>Security</em>. It starts on <strong>HTTP</strong>, which is not encrypted (see below). To encrypt, choose HTTPS; if you have no certificate yet, press <em>Create one for this network</em> (<em>Regenerate certificate</em> once one exists), or <em>Use my own files</em> to choose a certificate and key you already have. The HTTPS choice says what certificate there actually is: <em>certificate active</em> for the one LumaSuite created, <em>custom certificate active</em> for yours, or <em>certificate required</em> when there is none, it cannot be read, it has expired or it was made for another network. <em>Active</em> means LumaSuite can serve HTTPS with it; it does not mean your browser trusts it, and a certificate LumaSuite created for itself will make the browser warn.</li>
+        <li>Press <em>Turn on remote access</em> and confirm. Settings shows the address other devices should open, and a <strong>Remote Access</strong> entry appears in the main navigation, next to Video Wall, for administrators. It leads to accounts, device names, display groups and activity. While remote access is off the entry is not shown, because nobody could sign in to use what it manages; the controls that turn remote access on stay in Settings.</li>
+      </ol>
+      <p>If remote access was on when LumaSuite last closed, it comes back on when LumaSuite starts, as long as the administrator, the network adapter and the certificate are still there. If one is missing, Settings says which, and remote access stays off. LumaSuite never switches to a less secure setting by itself.</p>
+      <h3>HTTP or HTTPS</h3>
+      <p><strong>HTTP is the default, and it is not encrypted.</strong> Passwords and routing commands cross the network in clear, so use it only on a network you trust. Settings says so whenever it is in use, and LumaSuite asks you to confirm it explicitly. The sign-in protections are the same either way: sessions, the request checks that stop another website acting for you, the lock-out after repeated wrong passwords, and the account permissions do not depend on HTTP or HTTPS.</p>
+      <p>HTTP is the default because of the certificate, not because encryption is unwanted. A certificate is only valid for the address it was made for, and a computer whose address comes from DHCP can change address at any time; a browser then refuses the connection, and a certificate LumaSuite made for the old address cannot be used for the new one. HTTPS stays available: choose it in <em>Security</em>.</p>
+      <p>HTTPS encrypts everything between the browser and LumaSuite, including passwords. A certificate that LumaSuite creates for itself is self-signed, so browsers do not know who issued it and the first visit shows a warning. That is expected, and it is not a fault: <em>certificate active</em> in Settings means LumaSuite can serve HTTPS with it, never that a browser trusts it. Compare the fingerprint shown in Settings with the one in the warning before you continue. If the network's address changes, LumaSuite will not start HTTPS on the new address with the old certificate, and asks you to create a new one. A certificate you supply is used as it is, whatever name it carries: Settings calls it <em>custom certificate active</em>, LumaSuite never replaces it, and the browser warns or not according to who issued it.</p>
+      <p><strong>What a created certificate says.</strong> It is issued to this computer's Windows machine name, by <em>Hall Research</em>, unit <em>LumaSuite</em>, and it is valid for two names: the machine name and the address of the network adapter chosen for Remote Access. Open LumaSuite by that address and the name matches. Opening it by the machine name matches too, but only works where your network can already find that name; a plain machine name is not found across routed networks, and LumaSuite does not add any other name. If you need a name your own DNS resolves everywhere, create the certificate yourself with that name and use <em>Use my own files</em>.</p>
+      <p><strong>How long it lasts.</strong> A created certificate is valid for three calendar years from the day it was created (a certificate created on 29 February ends on 28 February three years on). Settings shows the days left. When it has expired, or the network changed, Settings says <em>certificate required</em>.</p>
+      <p><strong>Replacing a created certificate.</strong> LumaSuite never replaces a certificate by itself, and a certificate created by an earlier version keeps working until it expires. To replace it, turn Remote Access off and press <em>Regenerate certificate</em> (the button reads <em>Create one for this network</em> when there is none). LumaSuite asks first and, afterwards, shows the old and new fingerprints: the fingerprint changes, so browsers warn again until the new certificate is accepted. A certificate you supplied is never replaced by this button; remove it first if you want LumaSuite to create one.</p>
+      <h3>Signing in from another device</h3>
+      <p>Open LumaSuite by the address shown in Settings, by this computer's name, or by a name the certificate you supplied carries. Opened by any other name, even one that leads to the same computer, the page is refused with &ldquo;This address is not one this listener is served on&rdquo;; use the address Settings shows. The port Remote Access uses is chosen automatically and must be between 1024 and 65535.</p>
+      <p>Open the address from Settings and sign in with a username and password. An administrator lands on the normal LumaSuite pages with Sign out beside the Settings gear; a User lands on the routing page. After repeated wrong passwords, sign-in is paused for a while. Turning remote access off signs everyone out.</p>
+      <h3>What stays on this computer</h3>
+      <p>Some things only make sense, or are only safe, on the computer LumaSuite runs on, so a remote administrator cannot do them and is not offered the controls: choosing folders on that computer, showing the device passwords in Settings, creating the first administrator, and exporting or restoring a backup. A remote administrator can do everything else the normal pages do, with one more limit: only on devices LumaSuite has already found. Asking it to act on an address it has not found is refused ("is not a device this application has found"), and a scan started from a remote session may cover private network addresses but not public Internet, loopback, link-local or multicast ones; do those from this computer. This stops a stolen sign-in from being used to send the device password to a machine of someone's choosing.</p>
+    </section>
+
+    <section class="panel" id="accounts">
+      <h2>Accounts and Permissions</h2>
+      <p>Open <em>Remote Access</em> from the main navigation (it is there while remote access is on; Settings also leads to it). The page has four tabs: <em>Accounts</em>, <em>Device names</em>, <em>Display groups</em> and <em>Activity</em>. There are two kinds of account:</p>
+      <ul>
+        <li><strong>Administrator</strong> &mdash; the normal LumaSuite pages. At least one enabled administrator always remains: the last one cannot be disabled, demoted or deleted.</li>
+        <li><strong>User</strong> &mdash; the restricted routing page only, and only for what you assign: the <em>sources</em> they may route, the <em>displays</em> they may route to, the <em>display groups</em> they may route to, and the <em>saved video walls</em> they may route to. These are separate lists. A User never has Production Studio, Video Wall or any setting.</li>
+      </ul>
+      <p>An account is edited in this order: username, role, password, <em>Direct access</em>, <em>Routing interface</em>, then what they may use (sources, displays, display groups, saved video walls). Passwords must be at least 8 characters; there are no other rules. Changing a password signs out that account's password sign-ins; changing the account's type signs out everything it has open. A page opened from a Direct Access link keeps working after a password change, because the link has its own life (see Direct Access Links). Changing what an account may use does not: it takes effect on the very next thing that person does, and an open routing page updates itself within about twenty seconds (anything that was taken away is deselected and cannot be routed). Assignments are remembered by each device's hardware (MAC) address, so a device that gets a new network address keeps its name, its assignments and its place in groups.</p>
+      <h3>Activity</h3>
+      <p>The <em>Activity</em> tab lists sign-ins, changes to accounts and access, routes, refusals and remote-access changes in plain sentences, newest first, and can be searched and filtered. Passwords, tokens and links are never recorded.</p>
+      <p>Activity is not kept forever. <strong>Entries older than 30 days are removed, and the log is also kept under 4 MB</strong>, removing the oldest first if it would grow past that. Both limits always apply, and you can change them under <em>How long activity is kept</em> on the Activity tab: from 1 to 365 days, and from 1 to 64 MB. A shorter period or a smaller size takes effect at once and the change is itself recorded. Roughly, 4 MB holds about twelve thousand entries &mdash; over 400 a day for the whole 30 days.</p>
+    </section>
+
+    <section class="panel" id="friendly-names">
+      <h2>Friendly Names</h2>
+      <p>On the <em>Device names</em> tab you can give sources and displays the names people will see, such as "Main Stage" or "Lobby Left". A name is only a label: it is stored by LumaSuite, never written to the device, and never decides who may route what. If two devices end up with the same name, people see them told apart by their location where the device has one.</p>
+    </section>
+
+    <section class="panel" id="user-routing">
+      <h2>Routing as a User</h2>
+      <p><strong>Routing interface.</strong> For each User you choose which of two ways of routing they may use, in the account's editor under <em>Routing interface</em>: <em>Standard routing</em> (the source and display cards below, including dragging a source onto a display) and <em>Matrix routing</em> (a grid, described under Matrix routing). Choose one or both; at least one is always required. If both are chosen the User sees two tabs, <em>Routing</em> and <em>Matrix</em>, and the page remembers which one they used last on that device. If only one is chosen there are no tabs and the other interface is not offered at all. Accounts that existed before this setting keep Standard routing and gain no Matrix. Dragging is part of Standard routing, not a separate permission. The choice is checked again on every action, so removing an interface takes effect on the person's very next action and an open page moves to the one they still have, without signing in again.</p>
+      <p>A User sees <strong>sources</strong> across the top and <strong>displays</strong> below: saved video walls first, then display groups, then individual displays.</p>
+      <ol>
+        <li>Choose one source.</li>
+        <li>Choose one or more displays, display groups and saved video walls. Each chosen card is ticked and outlined, the page counts what you have chosen, and choosing a card again, or pressing <em>Clear selection</em>, removes it.</li>
+        <li>Press <strong>Route</strong>. It stays unavailable until a source and at least one destination are chosen, and says which is missing.</li>
+      </ol>
+      <p><strong>Or drag.</strong> You can also drag a source onto a display, a group or a wall to route it there at once. It does exactly what choosing both and pressing Route does, for that one destination only; whatever you had chosen is left alone. A destination that cannot take the source, because it is offline or is not yours, does not accept the drop, and clicking a card never routes anything. Choosing and Route work from the keyboard as before; dragging is an extra, not a replacement.</p>
+      <p><strong>Offline equipment.</strong> A source, display, group or wall that is not answering stays on the page, dimmed and marked <em>Offline</em>, and cannot be chosen, dragged or dropped on. LumaSuite calls a unit offline after it has missed two refreshes in a row, so one dropped reply does not grey out a working unit; OmniSuite decides offline from its own observations, with the same meaning and the same refusal. If it goes offline while chosen it is deselected. A group or wall with only some members offline can still be used; the result names the members that did not change.</p>
+      <p>If you choose a display and also a group that contains it, that display is routed once. LumaSuite checks everything you chose first and then sends the change to all of the displays <strong>together</strong> (a few at a time for a very large selection), so a room switches at about the same moment instead of one display after another. Each display is confirmed on its own. If one does not answer or does not confirm, the rest are still done and nothing already routed is undone; the result says how many were routed, for example <em>3 of 4 displays routed</em>, and names any that were not. Your choices stay selected afterwards so the same routing can be repeated. Choosing a display group lets you route to the group only; to pick one of its displays on its own, the display must be assigned to you as well.</p>
+      <p><strong>Audio follows video.</strong> This switch, beside <em>Preview</em> at the top of Routing, decides what a route changes. With it <strong>on</strong> (the default every time the page opens) a route sends both the picture and the sound of the chosen source, to every display, group and wall you route to, whether you press Route or drag. With it <strong>off</strong> a route changes the picture only and each display keeps the audio it already had. It applies to everything on the Routing page for as long as the page is open; it is not stored and it is not a permission. The Matrix is not affected: its <em>Audio + Video</em>, <em>Video</em> and <em>Audio</em> choices always do exactly what they say.</p>
+      <p>The <strong>Preview</strong> switch at the top of the page turns pictures on or off, and the page remembers your choice on that device. Each source card shows the encoder's own preview picture, and each display card shows that display's own preview of what it is currently outputting. With Preview on, pictures are fetched for the cards on screen and then refreshed <strong>every five seconds</strong> while the page is open and visible; a display you have just routed is refreshed straight away, and the five seconds start again from there. Cards scrolled out of view, a page in a hidden tab, a page you have left and a page with Preview off make no requests, and a slow device is never asked again before it has answered. With Preview off the page asks for no pictures at all. Pictures are fetched by LumaSuite on your behalf, so the person's device never contacts the equipment and never learns its address. If a device has no picture available the card says <em>No preview</em>; routing still works. A CS31 switcher has no picture and is not asked for one. A card for a device that is offline stays visible and says so.</p>
+      <p>Pictures load three at a time, so a route you make is never held up behind a slow picture. If a display cannot receive the chosen source's audio, nothing is changed and the message says so, whether you routed from the cards, by dragging, or from the Matrix. A route is only reported as done once the display itself confirms it. If the display accepted the command but does not hold the new source, you are told it did not confirm. Audio and video are one route: both go to the source you chose. A display that follows video keeps following it; a display that had been given separate audio is given the chosen source's audio as well. If the display cannot receive that source's audio, nothing is changed and you are told so. A source with no audio of its own routes only its picture, and LumaSuite says the audio was not moved.</p>
+      <p>If someone else is changing the same display at that moment, you are asked to try again in a moment. The page works on a phone, follows the light or dark theme and colour preset you chose, and reads what you may use when it opens, after your own action, and when an administrator changes your account. The only thing that refreshes on a timer is the pictures, as described above.</p>
+    </section>
+
+    <section class="panel" id="user-matrix">
+      <h2>Matrix routing</h2>
+      <p>The Matrix shows only what that account was given: the <strong>sources</strong> they may use run across the top and the <strong>destinations</strong> they may route to run down the side, as one row each: saved video walls, then display groups, then individual displays, each marked with its type. A group or wall is one row, never expanded into its displays, and having a group or wall does not give the displays in it.</p>
+      <ul>
+        <li>Pick <em>Audio + Video</em>, <em>Video</em> or <em>Audio</em> above the grid, then press the cell where a source meets a destination. Nothing is routed by anything else. A wall row works in all three: <em>Audio + Video</em> sends both to every member of the wall, <em>Video</em> changes only the picture and each member keeps its own audio, and <em>Audio</em> changes only the sound and each member keeps its own picture. The wall is one row, so you need only the wall's permission, not one for each display in it; LumaSuite works out which displays belong to the wall when you press, skips any that are offline, and says how many changed (for example <em>3 of 4 displays</em>).</li>
+        <li>Each cell shows what the display is doing now: the <strong>ring</strong> is video and the <strong>dot</strong> inside it is audio. Video from one source and audio from another (a breakaway) simply lights two different columns in one row.</li>
+        <li>A group or wall is lit fully only when every one of its displays has that source. If only some do the cell is dashed, and the row says <em>Mixed</em> when its displays differ, <em>Not available</em> when none answers, or how many are offline. A display that is offline never counts as having the source.</li>
+        <li>An offline source or display cannot be pressed, and LumaSuite refuses the route if it is attempted another way. Routes to groups and walls work exactly as in Standard routing: the displays change together, each confirmed on its own, with a result such as <em>2 of 3 displays routed</em>.</li>
+        <li>Resting the pointer on a routing dot (the cell where a source meets a display) shows that source's preview for as long as the pointer stays there, if the Preview switch is on and the device has a picture; it goes when you move away or press the dot. Hovering a source heading alone does nothing. Nothing is fetched when the page opens and nothing refreshes by itself.</li>
+        <li>When an administrator changes the account, the grid follows within about twenty seconds: sources, displays, groups, walls and the interfaces themselves appear or go away.</li>
+        <li>A Direct Access link follows the same interface choice as the account it belongs to.</li>
+      </ul>
+    </section>
+
+    <section class="panel" id="display-groups">
+      <h2>Display Groups</h2>
+      <p>A display group is a named set of displays that all receive the same source, for example <em>Lobby Displays</em>. It is <strong>not</strong> a video wall: there is no layout, so each display shows the whole picture. Video Walls are separate and are not affected.</p>
+      <h3>Creating and editing</h3>
+      <p>Open <em>Remote Access</em>, then <em>Display groups</em>, and choose a name and the displays in it. A display can be in any number of groups. Members are remembered by hardware address, so a display that changes network address stays in its groups. Deleting a group tells you which accounts had it and does not touch the displays.</p>
+      <h3>Who can use a group</h3>
+      <p>Give a User a group on their account. That lets them route to the group, <strong>and nothing more</strong>: it does not give them the displays in it individually, and the page does not list the members. To let someone also route to one display on its own, assign that display to them as well. Changing a group's members takes effect immediately.</p>
+      <h3>How a group routes</h3>
+      <p>One press of Route sends the source to <strong>all the displays of the group together</strong>, not one after another, and then asks each display what it is showing. If one display does not answer or does not confirm, the rest are still done and nothing already routed is undone. The result says how many were routed, for example <em>3 of 4 displays routed</em>, and names any that were not.</p>
+      <p><strong>A group only ever changes its own members.</strong> LumaSuite finds each member by hardware address, and before it changes a display it asks the unit at the address it has on record which hardware it is. If another unit now answers there (an address that was handed to a different display), or the unit will not say, that display is <em>not</em> changed and the result says so; scan again to refresh the addresses. If LumaSuite holds more than one address for the same member it does not guess, and the result asks for a scan. A scan never gives one unit the identity of another.</p>
+      <p>A group card shows how many displays it has and what they are showing: the source's name when they all agree, <em>Mixed</em> when they differ, <em>Unrouted</em> when none is routed, and how many are offline. A group never shows a combined picture.</p>
+      <p><strong>Everything you have chosen is routed together.</strong> The page remembers which groups, displays and video walls are ticked. If you choose group A, route, and then choose group B, group A is still ticked, so the next Route sends the source to A <em>and</em> B. The Route button always says what will happen before you press it, for example <em>Route Alpha Camera to 2 groups (up to 6 displays)</em>; the number is a ceiling because two groups can share a display. Use <em>Clear selection</em> beside the selection count to start from nothing.</p>
+    </section>
+
+    <section class="panel" id="user-video-walls">
+      <h2>Saved Video Walls for Users</h2>
+      <p>A <strong>saved video wall</strong> (one you built and saved on the Video Wall page) can be given to a User as a destination of its own. On the account, tick it under <em>Saved video walls</em>; only saved walls are listed. The User sees it by <strong>name</strong>, with how many displays it has, and routes a source to it like any other destination.</p>
+      <ul>
+        <li>Giving someone a wall does <strong>not</strong> give them the displays it is made of, and a display or a group never stands in for a wall.</li>
+        <li>Routing to a wall uses the wall exactly as you saved it, the way the Video Wall page's <em>Sync Source</em> does: every display that follows the wall's source is sent the chosen source and then asked what it is showing. A display you gave its own source, or put in a region, keeps it. The User cannot create or change a wall, and sees no wall settings.</li>
+        <li>A wall is only reported as done when <strong>every</strong> display that follows it confirmed the new source. If a display is offline or did not confirm, the result says how many changed, for example <em>Only 3 displays of 4 changed</em>, and the display that is offline is never written to.</li>
+        <li>A wall, like a group, only changes its own displays. Before a display of the wall (or the Video Wall page's <em>Sync Source</em>) is changed, LumaSuite asks the unit at the address it has on record which hardware it is, and does the same for the wall's source. A display that answers as a different unit, will not say, or has more than one address on record is <em>not</em> changed, and the result says why; scan again to refresh the addresses.</li>
+        <li>After a successful route the saved wall's source is updated to match what the displays are now showing, so the Video Wall page agrees.</li>
+        <li>Renaming a wall, changing which displays are in it or changing its settings reaches a signed-in User within about twenty seconds, and is used by their very next route. Deleting a wall takes it away from everyone who had it, at once.</li>
+        <li><em>Clear Units</em> does not delete saved walls. While Remote Access is on, the decoders in a saved wall and the wall's source are kept; with Remote Access off, a wall whose displays were cleared stays in the list and shows them as offline until the displays are found again.</li>
+      </ul>
+    </section>
+
+    <section class="panel" id="direct-access">
+      <h2>Direct Access Links</h2>
+      <p>For a wall panel or lectern tablet where nobody can type a password, a User account can have a <em>direct link</em>. Open it and the routing page appears, with the same limits as that account. In the account's editor, <em>Direct access</em> sits directly under the password; tick <em>Allow passwordless direct link</em> and the link is shown there to copy.</p>
+      <p><strong>Anyone with this link can use the controls assigned to this account.</strong> Treat the link like a password.</p>
+      <ul>
+        <li>It stays valid until you turn it off or regenerate it. It does not expire from time or inactivity, and a panel that has been idle for weeks still works.</li>
+        <li>Only one link is live per account. <em>Regenerate</em> makes a new one and the old one stops working immediately, including on a device that saved it; the new link works straight away, even if you tried the old one several times first. Changing the account's password does not change its link. Untick <em>Allow passwordless direct link</em> to turn it off.</li>
+        <li>It can only reach the routing page. It can never open the administrative pages, and administrator accounts cannot have one.</li>
+        <li>A link shows no sign-in or account controls.</li>
+        <li>It follows the account's routing interface: Standard routing always routes audio and video together, and Video or Audio alone are available only through the Matrix interface if the account has it.</li>
+      </ul>
+    </section>
+
+    <section class="panel" id="clear-units">
+      <h2>Clearing Known Devices</h2>
+      <p><em>Clear Units</em> (on Device Manager and under <em>Remote Access</em> &gt; <em>Device names</em>) behaves in one of two ways, depending on whether Remote Access is on.</p>
+      <p><strong>Remote Access off.</strong> It asks once, then empties the discovered inventory. The cleared devices are also removed from every account's sources and displays, from display groups and from the friendly-names list, so nobody keeps a control for a device LumaSuite no longer knows. Scan again to find the devices; they then appear for new assignments, but nothing is assigned back automatically. Display groups keep their name and the people who hold them, with no displays in them until you add some.</p>
+      <p><strong>Remote Access on.</strong> Units that are in use by Remote Access are kept: a unit given to a user (as a source or a display, including through a Direct Access link), a member of a display group, a decoder in a saved video wall, or the source a saved video wall uses. Only the other units are removed, along with their friendly names. Nothing Remote Access holds changes: no account, group, wall or permission is edited, and people who are signed in see no difference. The question has three answers: <em>Cancel</em>, <em>View Assignments</em> and <em>Clear Unassigned Units</em>. <em>View Assignments</em> lists each unit that will be kept and what is keeping it: its type, friendly name, device name, how many users, groups and walls use it, and who they are. For a saved video wall it says why the unit is held (<em>Member of wall &hellip;</em> or <em>Source of wall &hellip;</em>) and who holds that wall. To remove an assigned unit, take the assignment away, or turn Remote Access off in Settings and clear again. There is no one-step &ldquo;turn off and clear everything&rdquo;.</p>
+      <p><strong>Remove Selected</strong> follows the same rule. With Remote Access off it removes the units you selected and what pointed at them. With Remote Access on it removes only the selected units nothing uses, keeps the others, and shows you the ones it kept and why. If every unit you selected is in use, nothing is removed and it says so. It never edits an account, group or saved wall.</p>
+      <p>Under <em>Remote Access</em> &gt; <em>Device names</em>, the <em>Assignments</em> column shows the same information for every device: <em>Unassigned</em>, <em>1 User</em>, <em>2 Users &middot; 1 Group &middot; 1 Wall</em>. Select one to see the names, including <em>Wall access</em>, the people who hold a wall the device is part of (holding a wall does not give someone its displays). It is read fresh from the saved accounts, groups and walls, so a change shows as soon as you open or return to the page.</p>
+      <p>Saved video walls are saved configuration rather than inventory, so they are never deleted by Clear Units, together with who holds them. A wall whose displays were cleared (Remote Access off) shows them as offline until they are found again.</p>
+    </section>
+
+    <section class="panel" id="backup-restore">
+      <h2>Backup and Restore</h2>
+      <p>In Settings, on the computer LumaSuite runs on, <em>Backup and Restore</em> has two buttons. <strong>Export Configuration&hellip;</strong> saves accounts and permissions, device names, display groups, saved video walls, Production Studio settings, remote-access settings and the device sign-in details into one file, encrypted with a passphrase you choose (at least 8 characters, asked for once). Nobody can recover the passphrase for you. Keep the file somewhere other than this computer. A Direct Access link already in use keeps working after a restore, but it cannot be shown again; generate a new one to copy it.</p>
+      <p><strong>Restore Configuration&hellip;</strong> asks you to choose the file, then its passphrase, and then shows what the backup contains, and what it will remove, before changing anything. What is there now is saved first and put back if the restore fails: if any part of the restore cannot be written, every part already changed is put back, a file the restore created is removed, and Settings says the restore failed and that the previous configuration is back. If even that cannot be completed, the message says so, names the folder that still holds the copy taken first, and LumaSuite refuses further changes until it is closed and reopened. Settings that name this computer's own hardware (the network adapter, folders) are kept as they are, and the certificate and its private key are never part of a backup. Run a Scan afterwards so LumaSuite finds the equipment again. Device details the backup remembered (hostname, model, serial number) are filled into units LumaSuite already knows, matched by hardware address and never over something a scan has just learned, and never bringing back a unit you removed. If those details cannot be saved to this computer's disk, the restore of your settings still stands, Settings says the device details were not applied, and the next Scan learns them again from the equipment; nothing is reported as saved that was not. The confirmation names any account on this computer that the backup does not hold (it will be removed) and any it will replace with the backup's version. If nobody remembers a restored administrator's password, or the backup held no accounts at all, create or reset an administrator in <em>Accounts</em> on this computer: that always works from this computer, whatever the restore did.</p>
+      <p><strong>What a restore replaces.</strong> The backup is the authority for what it manages. Accounts and permissions, device names, display groups, saved video walls, Production Studio settings and the device sign-in are replaced as a whole, so anything on this computer that is not in the backup is gone afterwards. If the backup was made when there were no device names, display groups, saved video walls or Production Studio settings, those are cleared too, and the confirmation says so first. Accounts are part of that set: a backup that held none removes the accounts on this computer, and the confirmation says which. Device sign-in and remote-access settings are never removed just because a backup has none. A backup made by an earlier version does not say what it managed, so it changes only what it contains.</p>
+      <p><strong>Who stays signed in after a restore.</strong> Someone who is already signed in stays signed in only if their account comes back exactly as it was: the same password, role, permissions (sources, displays, groups, video walls and which routing interfaces they may use), the same on or off state and the same Direct Access link. If any of those differs, everyone signed in as that account &mdash; by password or by Direct Access link, administrator or User &mdash; is signed out and has to sign in again, and gets the restored account. An account the backup does not hold, or holds switched off, is signed out too. An administrator whose account the restore did not change is not signed out. The confirmation names the accounts the restore will replace, and those are the people who will be signed out.</p>
+      <p><strong>What stays on this computer.</strong> The network adapter and address, the folder paths, the certificate and its private key, and the activity log are never part of a backup and a restore leaves them alone. <strong>What is rebuilt.</strong> The discovered inventory comes back with a Scan (your saved names and groups are matched by hardware, not address), Direct Access links keep working but cannot be displayed again. <strong>Sessions.</strong> A person whose account was removed, disabled, or restored with a different password or Direct Access link is signed out at once, and a removed account's link stops working. A person whose account came back unchanged stays signed in, and what they may do follows the restored permissions from their next click. An account from before the Standard/Matrix routing choice keeps Standard routing and gets no Matrix.</p>
+      <p>While a restore runs, other changes to settings, names, accounts and groups are refused with a message that a restore is in progress, and work again a moment later. If the restore finished but LumaSuite could not load all of it without restarting, it says so and keeps refusing changes until you close and reopen LumaSuite, so nothing can overwrite what was restored. If the previous configuration could not be put back after a failure, the message says so and names the folder that still holds the copy taken first.</p>
+    </section>
+
+    <section class="panel" id="known-limits">
+      <h2>Known limitations</h2>
+      <ul>
+        <li><strong>Remote Access in Settings can be slow to appear.</strong> Settings looks up the computer's network adapters before it shows the Remote Access block, which can take a few seconds, longest the first time. Nothing else waits for it.</li>
+        <li><strong>Run only one LumaSuite at a time.</strong> Nothing stops a second copy from starting. It takes the next free port (or tells you a fixed port is busy), but both copies use the same saved settings, so leave only one running.</li>
+        <li><strong>LumaSuite uses a little more memory the longer it runs.</strong> In a six-hour test it grew by about 2 MB an hour while in use, mostly the activity log (which has a size limit), and not at all while idle. Whether that levels off for good has not been established, so close and reopen a LumaSuite that has been running for days.</li>
+        <li><strong>It contacts the Internet in two ways, and neither has an off switch.</strong> Shortly after it starts, and every seven days (six hours after a failed attempt), it asks Hall Research which firmware is published for each model. When you open Settings or press <em>Check Now</em> it asks GitHub for the newest LumaSuite release. Both are read-only lookups: they only read published version information and never download or install anything, including LumaSuite itself. The GitHub request identifies the software as <code>LumaSuite/&lt;version&gt;</code>; the Hall Research request uses the standard identification of the software library. Both servers can see this computer's public address, as with any web request. No device names, addresses, serial numbers or settings are sent. With no Internet connection the last answer is kept and everything else works as normal.</li>
+        <li><strong>The key LumaSuite generates for HTTPS is protected by the folder it is in.</strong> It is stored owner-only where the system supports that; on Windows it takes the access list of LumaSuite's data folder. It is never shown, logged or packaged, so keep that folder private.</li>
+        <li><strong>An administrator signed in remotely can change devices.</strong> The routing, hostname, NTP, HDCP, reset, firmware and Production Studio pages work remotely for an administrator, on devices LumaSuite already knows; Users never get them.</li>
+        <li><strong>A User's route to a saved video wall updates the saved wall.</strong> After a verified route the wall's saved source becomes what its displays now show, so the Video Wall page agrees with the room. Whether a User should be able to do that is a decision still to be made.</li>
+        <li><strong>HTTP Remote Access is not encrypted.</strong> Passwords and routing commands cross the network in clear; use it only on a network you trust, or choose HTTPS.</li>
+        <li><strong>Some behaviour belongs to the equipment.</strong> Whether a display's audio follows its video after a route is the display's own setting; LumaSuite reports it and does not change it. The encoder's own preview as a picture source has not been verified on hardware.</li>
+        <li><strong>LumaSuite is source-available, not open source.</strong> You may use it free of charge, including in business; selling it and distributing modified versions are not permitted. The full terms are in the <em>License</em> page and in the <code>LICENSE</code> file in the download (see <a href="#about">About</a>).</li>
+        <li><strong>The Mac and Linux downloads have not been used on those systems</strong> by the release process (see <a href="#platforms">Supported computers</a>).</li>
+      </ul>
     </section>
 
     <section class="panel">
       <h2>Troubleshooting</h2>
       <ul>
+        <li>If a User says a route "did not confirm", the display accepted the command but does not hold the new source. Check the display and the source, then route again.</li>
+        <li>If remote access will not turn on, Settings says why: no administrator yet, no certificate, a certificate for a different address, or the chosen network is not available.</li>
+        <li>If a browser warns about the certificate, compare the fingerprint in Settings with the one in the warning, then continue.</li>
+        <li>If a User cannot see a source or display, check it is assigned to their account (or, for a group, that the group is). Assigning a group does not assign its members.
+        <li>If a source, display, group or wall is dimmed and says <em>Offline</em>, LumaSuite has found that it stopped answering. It is never written to while it is offline, and it comes back by itself once it answers again; there is no need to rescan.</li>
         <li>If adapters do not appear, reopen the app after connecting the network adapter and check the OS network settings.</li>
+        <li>If the address LumaSuite opens on is different from last time, another program was using the port. Fix it for good with <em>Use a fixed TCP port</em> in Settings (see <a href="#local-port">The local application port</a>).</li>
+        <li>If Check Now says <em>Unable to check for updates</em>, the computer could not reach GitHub or got an answer it could not read. That is not the same as being up to date; try again later or open the Releases page.</li>
         <li>If a device changed IP, rescan the subnet. MAC matching should update the existing unit.</li>
         <li>If Video Wall shows Modified, press Refresh From Devices to compare the saved wall with device state.</li>
         <li>If Sync Source would interrupt video, confirm the wall is Healthy first. Healthy displays should be skipped.</li>
         <li>If an import fails, confirm the file was exported from Video Wall and contains <code>kind: "lumasuite.video_walls"</code>.</li>
       </ul>
     </section>
+
+    <section class="panel" id="about">
+      <h2>About</h2>
+      <p>LumaSuite <span id="manual_version">(version loading...)</span></p>
+      <p>Copyright &copy; 2026 Hall Research Technologies LLC</p>
+      <p><a href="/license" target="_blank" rel="noopener noreferrer">License</a></p>
+      <p>The <em>License</em> link opens the licence information built into this copy of LumaSuite. It shows LumaSuite's own licence, the Hall Research Technologies Source-Available Software License. Separate links list the open-source components that make up the application (web server, encryption, imaging, tray icon and so on) with the version and licence of each, and each licence's full text. The tray icon library (pystray) is licensed under the GNU Lesser General Public License; its source and instructions for rebuilding LumaSuite with a modified copy come in the download, beside <code>LumaSuite.exe</code>.</p>
+    </section>
   </main>
+  <script>
+    fetch("/api/app_version", { cache: "no-store" }).then(r => r.json()).then(d => {
+      var el = document.getElementById("manual_version");
+      if (el) el.textContent = d && d.ok && d.version ? ("v" + d.version) : "";
+    }).catch(function(){});
+  </script>
+  <script src="/ui/dialogs.js?v=1"></script>
+  <script src="/ui/settings.js?v=1"></script>
+  <script src="/ui/adminnav.js"></script>
 </body>
 </html>

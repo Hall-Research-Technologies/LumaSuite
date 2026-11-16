@@ -1,0 +1,576 @@
+/*
+ * LumaSuite / Hall Research application-family design tokens.
+ *
+ * Three independent dimensions, per the family spec:
+ *   Layout  -> html[data-density="classic|compact"]  (density tokens only)
+ *   Mode    -> html.light / body.light present = light; absent = dark
+ *   Colour  -> html[data-preset="..."]  (accent + derived control tokens)
+ *
+ * Nothing below the token block may name a literal hue. Every component in
+ * family.css (and the shared toast/confirm/settings modules) reads only the
+ * semantic roles defined here, so a preset or mode change covers the whole
+ * control system by construction.
+ *
+ * Back-compat: LumaSuite's existing per-page stylesheets (index.html,
+ * producer.html, matrix.css) were written against an earlier variable set
+ * (--bg, --card, --panel-2, --fg/--text, --muted, --accent, --border,
+ * --table, --danger, ...). Those names are aliased onto the new semantic
+ * tokens below, in the SAME :root / light blocks as the tokens they alias,
+ * so existing component CSS keeps working unchanged in both modes without
+ * a page-by-page rewrite. New shared modules (toast/confirm/settings/shell)
+ * are written against the new semantic names directly.
+ */
+
+:root {
+  /* ---- Surfaces and text (dark is the base) ---- */
+  --surface:          #1d232a;
+  --surface-raised:   #222a33;
+  --surface-elevated: #262f39;
+  --text:             #e9eef5;
+  --text-muted:       #9aa7b4;
+  --edge:             rgba(255, 255, 255, .08);
+
+  /* ---- Actions ---- */
+  --action-primary:      #1e90ff;
+  --action-primary-text: #ffffff;
+  --action-secondary:      transparent;
+  --action-secondary-text: var(--text);
+
+  /* ---- States ---- */
+  --state-success: #4ade80;
+  --state-warning: #eab308;
+  --state-error:   #e5534b;
+  --state-info:    #38bdf8;
+  --state-selection: rgba(30, 144, 255, .16);
+  --state-pending:   rgba(148, 163, 184, .22);
+
+  --backdrop-veil: rgba(0, 0, 0, .45);
+
+  /* ---- Derived control tokens ---- */
+  --selected-fill:  var(--state-selection);
+  --selected-on:    var(--on-selection, var(--action-primary-text));
+  --selected-tint:        color-mix(in srgb, var(--state-selection) 20%, transparent);
+  --selected-tint-strong: color-mix(in srgb, var(--state-selection) 45%, transparent);
+  --selected-edge:  var(--state-selection);
+
+  --focus-ring: color-mix(in srgb, var(--action-primary) 55%, var(--text) 45%);
+  --danger-ring: color-mix(in srgb, var(--state-error) 45%, #000000 55%);
+
+  --control-hover-veil:       color-mix(in srgb, var(--text) 12%, transparent);
+  --control-press-veil:       color-mix(in srgb, #000000 16%, transparent);
+  --control-disabled-opacity: .45;
+
+  /* On-* contrast tokens: computed at build time for the shipped preset
+     (see 'Colour presets' below) rather than assumed as white. */
+  --on-accent:  #ffffff;
+  --on-success: #0d1117;
+  --on-warning: #1d232a;
+  --on-error:   #ffffff;
+  --on-info:    #0d1117;
+
+  /* ---- Density (classic is the default; redefined per layout below) ---- */
+  --gap-sm: 6px;   --gap-md: 10px;  --gap-lg: 16px;
+  --row-pad-y: 8px; --row-pad-x: 10px;
+  --panel-pad: 14px;
+  --panel-radius: 10px;
+  --control-height: 30px;
+  --font-body: 14px;
+  --font-small: 12px;
+
+  /* ---- Back-compat aliases onto the current LumaSuite variable names ---- */
+  --bg: var(--surface);
+  --card: var(--surface-raised);
+  --panel: var(--surface-raised);
+  --panel-2: var(--surface-elevated);
+  --fg: var(--text);
+  --muted: var(--text-muted);
+  --accent: var(--action-primary);
+  --accent-strong: var(--surface-elevated);
+  --border: var(--edge);
+  --table: var(--surface-raised);
+  --danger: var(--state-error);
+  --spinner: var(--text-muted);
+  --ring: var(--surface-elevated);
+  --ok: var(--state-success);
+  --dim: var(--text-muted);
+  --video: var(--action-primary);
+  --audio: #000000;
+}
+
+/* The light-mode trap: every semantic alias is restated here, not just the
+   raw values, so a rule written against an alias (e.g. --bg) tracks the
+   current mode instead of freezing at the value in effect when it was
+   declared. */
+html.light, body.light {
+  --surface:          #f7f8fb;
+  --surface-raised:   #ffffff;
+  --surface-elevated: #eef1f5;
+  --text:       #0d1117;
+  --text-muted: #5a6b7a;
+  --edge: rgba(0, 0, 0, .10);
+
+  --state-success: #15803d;
+  --state-warning: #a16207;
+  --state-error:   #b91c1c;
+  --state-info:    #0369a1;
+  --state-selection: rgba(30, 144, 255, .12);
+  --state-pending:   rgba(100, 116, 139, .18);
+  --backdrop-veil: rgba(15, 23, 42, .35);
+
+  --danger-ring:        color-mix(in srgb, var(--state-error) 40%, #000000 60%);
+  --control-hover-veil: color-mix(in srgb, #000000 8%, transparent);
+  --control-press-veil: color-mix(in srgb, #000000 12%, transparent);
+
+  --on-accent:  #ffffff;
+  --on-success: #ffffff;
+  --on-warning: #1d232a;
+  --on-error:   #ffffff;
+  --on-info:    #ffffff;
+
+  --bg: var(--surface);
+  --card: var(--surface-raised);
+  --panel: var(--surface-raised);
+  --panel-2: var(--surface-elevated);
+  --fg: var(--text);
+  --muted: var(--text-muted);
+  --accent: var(--action-primary);
+  --accent-strong: var(--surface-elevated);
+  --border: var(--edge);
+  --table: var(--surface-raised);
+  --danger: var(--state-error);
+  --spinner: var(--text-muted);
+  --ring: var(--surface-elevated);
+  --ok: var(--state-success);
+  --dim: var(--text-muted);
+}
+
+/* State colour as TEXT. A preset's green, amber, red and blue are fills, written
+   onto html and body by the preset itself; used as text they measured 1.6:1 to
+   4.5:1 on a light page. Text takes them mixed toward white on a dark page and
+   toward black on a light one, so it follows the preset and stays readable.
+   Declared where the preset writes its colours so the mix resolves with the
+   preset's own value, and restated for light mode. The percentages sum to 100,
+   which keeps the result opaque. */
+:root,
+body {
+  --state-success-text: color-mix(in srgb, var(--state-success) 62%, #ffffff 38%);
+  --state-warning-text: color-mix(in srgb, var(--state-warning) 62%, #ffffff 38%);
+  --state-error-text: color-mix(in srgb, var(--state-error) 52%, #ffffff 48%);
+  --state-info-text: color-mix(in srgb, var(--state-info) 62%, #ffffff 38%);
+}
+html.light,
+body.light {
+  --state-success-text: color-mix(in srgb, var(--state-success) 50%, #000000 50%);
+  --state-warning-text: color-mix(in srgb, var(--state-warning) 50%, #000000 50%);
+  --state-error-text: color-mix(in srgb, var(--state-error) 55%, #000000 45%);
+  --state-info-text: color-mix(in srgb, var(--state-info) 55%, #000000 45%);
+}
+
+html, body { background: var(--surface); }
+body { color: var(--text); }
+
+/* ============================================================
+   Layout density. Two layouts shipped: classic (default) and
+   compact (denser). Only density tokens change per layout; no
+   component rule is duplicated per layout. The mechanism (a
+   single attribute driving a token block) supports adding
+   "modern"/"workspace" later without touching component CSS.
+   ============================================================ */
+html[data-density="compact"] {
+  --gap-sm: 4px;   --gap-md: 6px;   --gap-lg: 10px;
+  --row-pad-y: 3px; --row-pad-x: 7px;
+  --panel-pad: 9px;
+  --panel-radius: 5px;
+  --control-height: 25px;
+  --font-body: 13px;
+  --font-small: 11px;
+}
+html[data-density="compact"] .btn,
+html[data-density="compact"] button:not(.icon-only) {
+  background: var(--action-secondary);
+  color: var(--action-secondary-text);
+  border: 1px solid var(--edge);
+}
+html[data-density="compact"] .btn.fill-intent,
+html[data-density="compact"] button.fill-intent {
+  background: var(--action-primary);
+  color: var(--on-accent);
+}
+html[data-density="compact"] th {
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+
+/* ============================================================
+   Colour presets. Ten full palettes (ui/theme-boot.js, LUMA_PRESETS),
+   adapted from the Hall Research application-family reference
+   implementation. Applied at runtime via element.style.setProperty on
+   <html>/<body> (mirroring how the reference implementation does it),
+   which is why there are no static [data-preset="..."] blocks here --
+   the inline style always wins over one anyway. The default preset's
+   values above on :root/:root.light are the fallback for the brief
+   window before theme-boot.js runs, and for storage-disabled contexts.
+   ============================================================ */
+
+/* ============================================================
+   Control system — two rules that hold throughout:
+   1. Nothing names a hue; every colour derives from a role above.
+   2. No state changes a control's box. Hover/press/focus/selection
+      alter background, color, box-shadow, outline only.
+   ============================================================ */
+.btn, .tab, .gear-btn, .action-btn, .file-chooser-btn, button {
+  transition: background-color .15s ease, color .15s ease,
+              box-shadow .15s ease, filter .15s ease;
+}
+
+.btn:hover:not(:disabled):not([aria-disabled="true"]),
+button:hover:not(:disabled):not([aria-disabled="true"]) {
+  background-image: linear-gradient(var(--control-hover-veil), var(--control-hover-veil));
+}
+.btn:active:not(:disabled), button:active:not(:disabled) {
+  background-image: linear-gradient(var(--control-press-veil), var(--control-press-veil));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35);
+}
+.btn:focus-visible, button:focus-visible, .gear-btn:focus-visible,
+a.tab:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.btn:disabled, .btn[aria-disabled="true"],
+button:disabled, button[aria-disabled="true"] {
+  opacity: var(--control-disabled-opacity);
+  cursor: not-allowed;
+  filter: saturate(.4);
+  background-image: none;
+  box-shadow: none;
+}
+
+/* Button hierarchy */
+/* Roles: primary (accent, the action a surface exists for), secondary (neutral),
+   success (green, genuine success only), warn (amber, caution), danger (red,
+   destructive only), disabled (muted). A control with no role class is primary,
+   as it always has been; every hue below derives from a semantic token. */
+.btn.primary, button.primary {
+  background-color: var(--action-primary) !important;
+  color: var(--action-primary-text) !important;
+  border-color: color-mix(in srgb, var(--action-primary) 60%, #000000 40%);
+}
+.btn.secondary, button.secondary, button.btn-secondary {
+  background-color: var(--surface-elevated) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--edge);
+  box-shadow: none;
+}
+.btn.danger:not(:disabled), button.danger:not(:disabled) {
+  background-color: var(--state-error) !important;
+  color: var(--on-error) !important;
+  border-color: var(--danger-ring);
+  box-shadow: inset 0 0 0 1.5px var(--danger-ring);
+}
+.btn.success:not(:disabled), button.success:not(:disabled) {
+  background-color: var(--state-success) !important;
+  color: var(--on-success) !important;
+  border-color: color-mix(in srgb, var(--state-success) 60%, #000000 40%);
+}
+.btn.warn, button.warn {
+  background-color: var(--state-warning) !important;
+  color: var(--on-warning) !important;
+  border-color: color-mix(in srgb, var(--state-warning) 60%, #000000 40%);
+}
+.btn.icon-only, button.icon-only {
+  background: transparent !important;
+  border: none;
+  color: var(--action-primary);
+  font-size: 20px; padding: 4px 8px; cursor: pointer;
+  box-shadow: none;
+}
+.btn.icon-only:hover, button.icon-only:hover { color: var(--text); }
+
+/* Mutually exclusive groups (tabs) */
+.tab, a.tab, .nav-tab {
+  background: transparent; color: var(--text-muted);
+  border: 1px solid transparent;
+}
+.tab:hover, a.tab:hover, .nav-tab:hover { color: var(--text); }
+.tab.active, .tab[aria-current="page"],
+a.tab.active, a.tab[aria-current="page"],
+.nav-tab[aria-current="page"],
+.nav-tab.active {
+  background-color: var(--selected-tint-strong);
+  color: var(--text);
+  border-color: var(--selected-edge);
+  box-shadow: inset 0 -2px 0 0 var(--selected-fill);
+}
+
+/* Unobtrusive nav-tab notification badge (e.g. Device Manager's "Video
+   Wall configurations detected" count) -- a small always-inline pill next
+   to the tab label, never a layout-shifting overlay or a browser alert.
+   See PROJECT.md, "Video Wall: site discovery". */
+.vw-nav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 16px; padding: 0 5px; margin-left: 2px;
+  border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: var(--state-info); color: #fff; line-height: 16px;
+}
+.vw-nav-badge.attention { background: var(--state-warning); }
+
+/* Toggle switches: real checkbox stays in the tab order / a11y tree */
+.toggle input[type="checkbox"].switch-input {
+  position: absolute; width: 1px; height: 1px; margin: -1px;
+  padding: 0; overflow: hidden; clip: rect(0 0 0 0);
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Status pills */
+.status, .pill.status-pill {
+  padding: 2px 8px; border-radius: 999px; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.s-idle       { background: #14532d; color: #bbf7d0; }
+.s-error      { background: #7f1d1d; color: #fecaca; }
+.s-uploading  { background: #854d0e; color: #fde68a; }
+.s-upgrading  { background: var(--state-info); color: var(--on-info); }
+.s-rebooting  { background: #0f172a; color: #bfdbfe; border: 1px solid var(--edge); }
+.s-na         { background: #374151; color: #e5e7eb; }
+
+.badge { display: inline-block; font-size: 10px; padding: 1px 6px;
+         border-radius: 99px; border: 1px solid var(--edge); color: var(--text-muted); }
+.badge.ok   { border-color: var(--state-success); color: var(--state-success-text); }
+.badge.warn { border-color: var(--state-warning); color: var(--state-warning-text); }
+
+/* Password source pill (Part 4.6) */
+.pwd-pill { padding: 2px 8px; border-radius: 999px; font-size: 12px;
+            display: inline-flex; align-items: center; gap: 6px; }
+.pwd-primary  { background: #1f2937; color: #e5e7eb; }
+.pwd-fallback { background: #7f1d1d; color: #fecaca; }
+.pwd-unknown  { background: var(--surface-elevated); color: var(--text-muted); }
+.pwd-failed   { background: #7f1d1d; color: #fecaca; }
+
+/* Notices */
+.notice {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 10px 0; padding: 9px 11px;
+  border: 1px solid var(--notice-border, var(--edge));
+  border-left: 3px solid var(--notice-accent, var(--state-info));
+  border-radius: 8px;
+  background: var(--notice-bg, var(--surface-elevated));
+  color: var(--notice-fg, var(--text));
+  font-size: 13px; line-height: 1.4;
+}
+.notice.notice-warning { --notice-accent: var(--state-warning); }
+.notice.notice-info    { --notice-accent: var(--state-info); }
+.notice .notice-title  { font-weight: 600; margin-bottom: 2px; }
+.notice .notice-detail { opacity: .92; }
+.notice button {
+  flex: 0 0 auto; border: none; background: transparent; color: inherit;
+  font-size: 18px; line-height: 1; padding: 0 2px; cursor: pointer; opacity: .75;
+}
+.notice button:hover { opacity: 1; }
+
+/* Settings gear */
+.gear-btn {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--edge);
+  background: var(--surface-elevated);
+  cursor: pointer; font-size: 18px; color: var(--text);
+}
+@keyframes update-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--state-warning); }
+  50%      { box-shadow: 0 0 0 4px transparent; }
+}
+.gear-btn.update-alert {
+  border-color: var(--state-warning);
+  animation: update-pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gear-btn.update-alert {
+    animation: none;
+    border-color: var(--state-warning);
+    box-shadow: 0 0 0 3px var(--state-warning);
+  }
+}
+
+/* Shared shell navigation (added 2026-09-19, shell-consistency pass).
+   Every page (Device Manager, Matrix Routing, Production Studio, Video
+   Wall, Manual) previously carried its own byte-for-byte copy of these
+   four rules in a page-local <style> block -- genuinely identical values,
+   just duplicated five times, which is exactly the kind of copy that can
+   silently drift the next time only one page gets edited. Centralized
+   here instead; page-local copies were removed. The one deliberate
+   normalization: Device Manager's copy was missing `color:#fff` on
+   :hover that the other four already had -- picked the majority version
+   rather than inventing a new one. */
+/* Main navigation. Text only: a tab names a place, and the one thing that
+   may sit beside the label is a state badge (Video Wall's count). Geometry
+   matches OmniSuite's main tabs -- same padding, size and weight -- and the
+   colours come from the same semantic roles (see the .nav-tab block above:
+   muted at rest, text on hover, filled with a bottom edge when selected). No
+   rule here names a hue, so every preset and both modes apply. */
+.nav-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--edge); }
+.nav-tab {
+  padding: 8px 16px; text-decoration: none;
+  border-radius: 6px 6px 0 0;
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 14px; font-weight: 500; line-height: 1.25;
+  margin-bottom: -2px;
+}
+.nav-tab:hover { background-image: linear-gradient(var(--control-hover-veil), var(--control-hover-veil)); }
+.nav-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* File chooser pattern */
+.file-chooser      { display: flex; gap: 8px; align-items: center; flex: 1 1 auto; min-width: 0; }
+.file-chooser-btn  { flex: 0 0 auto; padding: 4px 10px; border: 1px solid var(--edge);
+                     border-radius: 6px; background: var(--surface-elevated);
+                     color: var(--text); cursor: pointer; font-size: 13px; }
+.file-chooser-path { flex: 1 1 auto; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.file-chooser-path.unset { color: var(--text-muted); font-style: italic; }
+
+/* Toasts */
+.family-toast {
+  position: fixed; left: 50%; bottom: -60px; transform: translateX(-50%);
+  z-index: 2000; max-width: min(560px, 92vw);
+  padding: 9px 14px; border-radius: 8px;
+  background-color: var(--surface-elevated); color: var(--text);
+  border: 1px solid var(--edge);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
+  opacity: 0; pointer-events: none;
+  transition: bottom .25s ease, opacity .25s ease;
+}
+.family-toast.show  { bottom: 20px; opacity: 1; }
+.family-toast.ok    { background-color: var(--state-success); color: var(--on-success);
+               border-color: color-mix(in srgb, var(--state-success) 60%, #000000 40%); }
+.family-toast.error { background-color: var(--state-error); color: var(--on-error);
+               border-color: var(--danger-ring); }
+@media (prefers-reduced-motion: reduce) { .family-toast { transition: none; } }
+
+/* Modals (settings + general) */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: var(--backdrop-veil);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 20000;
+  overflow: auto;
+  padding: 24px 12px;
+}
+.modal-backdrop.open { display: flex; }
+.modal {
+  background: var(--surface-raised);
+  border: 1px solid var(--edge);
+  border-radius: var(--panel-radius);
+  padding: 20px;
+  width: 540px; max-width: 95%;
+  color: var(--text);
+  margin: auto;
+}
+.modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+.modal-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.modal-row label { min-width: 100px; font-size: 12px; color: var(--text-muted); }
+.modal-row input[type=text], .modal-row select, .modal-row input[type=password] { flex: 1; }
+.modal-error { color: var(--state-error-text); font-size: 12px; margin: 8px 0; display: none; }
+.modal-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.settings-section { border-top: 1px solid var(--edge); margin-top: var(--gap-md);
+                    padding-top: var(--gap-sm); }
+.settings-section.first { border-top: 0; margin-top: 0; padding-top: 0; }
+.settings-section > h4 { margin: 0 0 var(--gap-sm); font-size: var(--font-small);
+                         text-transform: uppercase; letter-spacing: .07em;
+                         color: var(--text-muted); }
+.template-choice, .preset-choice { display: flex; gap: var(--gap-sm); flex-wrap: wrap; }
+.template-choice button { flex: 1 1 120px; text-align: left; padding: 7px 10px;
+  border: 1px solid var(--edge); border-radius: 8px;
+  background: var(--action-secondary); color: var(--text); cursor: pointer; }
+.template-choice button[aria-pressed="true"],
+.preset-choice   button[aria-pressed="true"] {
+  border-color: var(--action-primary); background: var(--state-selection); }
+.template-choice .template-name { display: block; font-weight: 600; }
+.template-choice .template-hint { display: block; font-size: var(--font-small);
+                                  color: var(--text-muted); }
+.preset-choice button { display: flex; align-items: center; gap: 7px; padding: 6px 10px;
+  border: 1px solid var(--edge); border-radius: 8px; background: var(--action-secondary);
+  color: var(--text); cursor: pointer; }
+.preset-swatches { display: inline-flex; gap: 2px; }
+.preset-swatches i { width: 9px; height: 14px; border-radius: 2px; display: inline-block; }
+
+.update-status { font-size: 12px; margin: 6px 0 0; color: var(--text); }
+.update-status.muted { color: var(--text-muted); }
+/* The application's own status: current is green, an available update is red, and anything the check could not
+   establish stays neutral (.muted). Text only -- the Version field above it is never coloured. Both colours are the
+   derived state text tokens, so they hold 4.5:1 in every preset in both modes. */
+.update-status.update-available { color: var(--state-error-text); font-weight: 700; letter-spacing: .02em; }
+#cfg_app_version { box-sizing: border-box; }
+.update-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
+
+.cfg-about       { align-items: flex-start; }
+.cfg-about-text  { flex: 1 1 auto; min-width: 0; font-size: 12px;
+                   color: var(--text-muted); line-height: 1.5; }
+.cfg-about-terms { margin-top: 2px; }
+.cfg-about-links { margin-top: 4px; display: flex; gap: 14px; }
+.cfg-about-text a       { color: inherit; text-decoration: underline; }
+.cfg-about-text a:hover { color: var(--text); }
+
+/* Confirmation dialog (window.lumaConfirm) */
+.confirm-backdrop { position: fixed; inset: 0; background: var(--backdrop-veil);
+                    display: flex; align-items: center; justify-content: center; z-index: 60000; }
+.confirm-backdrop.hidden { display: none !important; }
+.confirm-card { width: min(95vw, 520px); background: var(--surface-raised);
+                border: 1px solid var(--edge); border-radius: var(--panel-radius); padding: 18px;
+                color: var(--text); box-shadow: 0 18px 50px rgba(0, 0, 0, .38); }
+.confirm-card h3 { margin: 0 0 8px; font-size: 17px; }
+.confirm-message { font-size: 13px; line-height: 1.5; }
+.confirm-summary { border: 1px solid var(--edge); border-radius: 8px;
+                   background: var(--surface-elevated); padding: 10px; margin: 10px 0; }
+.confirm-summary-row { display: flex; justify-content: space-between; gap: 16px;
+                       padding: 3px 0; font-size: 13px; }
+.confirm-summary-row span:first-child { color: var(--text-muted); }
+.confirm-suppress { display: flex; align-items: center; gap: 8px; font-size: 12px;
+                    color: var(--text-muted); margin-top: 8px; cursor: pointer; }
+.confirm-field { display: block; margin-top: 12px; font-size: 13px; }
+.confirm-field[hidden] { display: none; }
+.confirm-field-label { display: block; margin-bottom: 4px; color: var(--text-muted); }
+.confirm-field-help { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.confirm-field-help[hidden] { display: none; }
+.confirm-field-input { display: block; width: 100%; box-sizing: border-box; padding: 7px 9px;
+                       border: 1px solid var(--edge); border-radius: 6px; background: var(--surface-elevated);
+                       color: var(--text); font: inherit; }
+.confirm-field-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* Responsive floor: LumaSuite is a desktop operator tool, matched to its
+   real minimum content width rather than a fabricated mobile breakpoint. */
+body { min-width: 1000px; }
+
+/* Hallway logo: light/dark swap (added 2026-09-19, shell-consistency
+   pass). Replaces the earlier dark-backdrop-chip workaround now that a
+   real light-mode asset exists (ui/companylogo-light.png, copied from
+   OmniSuite -- see PROJECT.md). Mirrors OmniSuite's own mechanism
+   exactly (ui/templates.css, `html.light .logo, body.light .logo`):
+   `content: url()` replaces only the rendered image, keeping the <img>
+   element, its alt text, and the header's height:48px/width:auto sizing
+   untouched, so the swap can never move surrounding layout. It is driven
+   purely by the theme class theme-boot.js applies before first paint --
+   Classic/Compact density and colour presets never participate, exactly
+   like OmniSuite's. */
+html.light #company_logo, body.light #company_logo {
+  content: url("/ui/companylogo-light.png");
+}
+
+/* `hidden` has to win over any class that sets `display`. `.notice { display: flex }` defeated
+   `element.hidden = true`, so two contradictory statements about the connection were on screen
+   at once. One rule here, rather than one beside every class that could cause it. */
+[hidden] { display: none !important; }
+
+/* Firmware availability, per model (Settings). Semantic tokens only. */
+.fw-table { border-collapse: collapse; margin-top: 8px; width: 100%; font-size: 12px; }
+.fw-table th, .fw-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.fw-table th { color: var(--text-muted); font-weight: 600; }
+.fw-state.fw-up_to_date { color: var(--state-success-text); }
+.fw-state.fw-update_available { color: var(--state-warning-text); }
+.fw-state.fw-unknown { color: var(--text-muted); }
+.fw-reason { font-size: 12px; color: var(--text-muted); }
+.update-status.ok { color: var(--state-success-text); }
+.update-status.warn { color: var(--state-warning-text); }

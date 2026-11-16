@@ -1,4 +1,6 @@
 from flask import Blueprint, jsonify, request, current_app, send_from_directory
+
+import luma_request
 import os, re, json, time, base64
 import requests
 
@@ -117,12 +119,17 @@ def _forward_file(ip, field_name, file_tuple, url_path, username="admin", passwo
     headers = {"Authorization": f"Bearer {_mint_bearer(username, password, trim_padding=trim_padding)}"}
     files = { field_name: file_tuple }  # ("filename.ext", bytes, "image/png")
     url = f"http://{ip}{url_path}"
-    return requests.post(url, files=files, headers=headers, timeout=timeout)
+    return requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
 
 # ---------- Routes ----------
 @producer2_bp.get("/assets")
 def assets():
     return jsonify(_scan_assets())
+
+#: The logo and image folders hold pictures. Whatever else is in a folder somebody chose --
+#: a configuration file, an export -- is not theirs to be handed over.
+_ASSET_IMAGE_TYPES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico"})
+
 
 @producer2_bp.get("/asset/<kind>/<path:filename>")
 def asset_file(kind, filename):
@@ -133,6 +140,8 @@ def asset_file(kind, filename):
     dir_path, _ = _resolve_asset_dir(kind)
     if not dir_path or not os.path.isdir(dir_path):
         return jsonify({"ok": False, "error": "missing_dir"}), 404
+    if os.path.splitext(filename)[1].lower() not in _ASSET_IMAGE_TYPES:
+        return jsonify({"ok": False, "error": "not_found"}), 404
     try:
         return send_from_directory(dir_path, filename, as_attachment=False)
     except FileNotFoundError:
@@ -141,7 +150,7 @@ def asset_file(kind, filename):
 @producer2_bp.post("/push/image")
 def push_image():
     try:
-        data = request.get_json(silent=True) or request.form
+        data = luma_request.json_object() or request.form
         ip = (data.get("ip") or "").strip()
         slot = str(data.get("slot") or "").strip()
         ext  = (data.get("ext") or "").strip().lower() or None
@@ -165,7 +174,7 @@ def push_image():
                               username=username, password=password, trim_padding=False)
         except Exception as e:
             current_app.logger.exception("push/image request error (padded)")
-            return jsonify({"ok": False, "error": f"requests-error: {e}"}), 502
+            return jsonify({"ok": False, "error": "The unit did not answer (" + type(e).__name__ + ")."}), 502
 
         if not (200 <= r.status_code < 300):
             # Retry once without padding (seen in some captures)
@@ -186,12 +195,12 @@ def push_image():
         return jsonify({"ok": True, "status": r.status_code, "pushed": {"slot": slot, "url": web_url, "ext": chosen_ext}})
     except Exception as e:
         current_app.logger.exception("push/image 500")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return luma_request.internal_error(e)
 
 @producer2_bp.post("/push/logo")
 def push_logo():
     try:
-        data = request.get_json(silent=True) or request.form
+        data = luma_request.json_object() or request.form
         ip = (data.get("ip") or "").strip()
         slot = str(data.get("slot") or "").strip()
         ext  = (data.get("ext") or "").strip().lower() or None
@@ -214,7 +223,7 @@ def push_logo():
                               username=username, password=password, trim_padding=False)
         except Exception as e:
             current_app.logger.exception("push/logo request error (padded)")
-            return jsonify({"ok": False, "error": f"requests-error: {e}"}), 502
+            return jsonify({"ok": False, "error": "The unit did not answer (" + type(e).__name__ + ")."}), 502
 
         if not (200 <= r.status_code < 300):
             try:
@@ -234,4 +243,4 @@ def push_logo():
         return jsonify({"ok": True, "status": r.status_code, "pushed": {"slot": slot, "url": web_url, "ext": chosen_ext}})
     except Exception as e:
         current_app.logger.exception("push/logo 500")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return luma_request.internal_error(e)

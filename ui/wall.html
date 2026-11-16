@@ -1,17 +1,21 @@
 <!doctype html>
 <html>
 <head>
+  <script src="/ui/theme-boot.js"></script>
+  <script src="/ui/csrf.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
   <meta charset="utf-8"/>
-  <title>Video Wall</title>
+  <title>Video Wall - LumaSuite</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
   <link rel="stylesheet" href="matrix.css">
   <style>
-    .nav-tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); }
-    .nav-tab { padding:6px 14px; text-decoration:none; color:var(--text); border-radius:6px 6px 0 0; transition:all 0.2s; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; }
-    .nav-tab:hover { background:rgba(30,144,255,0.1); color:#fff; }
-    .nav-tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
-    .wall-page { display:grid; grid-template-columns:minmax(0, 1fr) 420px; gap:12px; align-items:start; }
+    /* .nav-tabs/.nav-tab layout+colour rules moved to /ui/family.css
+       (shell-consistency pass, 2026-09-19) -- was byte-for-byte identical
+       to the same block duplicated in every other page. */
+    .wall-page { display:grid; grid-template-columns:240px minmax(0, 1fr); gap:12px; align-items:start; }
+    @media (max-width:1500px) { .wall-page { grid-template-columns:220px minmax(0, 1fr); } }
+    .stack { display:flex; flex-direction:column; gap:12px; min-width:0; }
     .panel { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; }
     .panel h2, .panel h3 { margin:0; font-size:15px; }
     .panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
@@ -22,29 +26,215 @@
     select, input { color:var(--text); background:var(--panel-2); border:1px solid var(--border); padding:6px 8px; border-radius:6px; }
     input[type=number] { width:76px; }
     .btn-secondary { background:var(--panel-2); }
-    .btn-danger { background:#b91c1c; }
     .status-chip { display:inline-flex; align-items:center; min-height:24px; padding:3px 8px; border-radius:999px; font-size:12px; background:var(--panel-2); color:var(--muted); }
     .status-chip.healthy { background:#14532d; color:#bbf7d0; }
     .status-chip.modified, .status-chip.partial { background:#854d0e; color:#fde68a; }
     .status-chip.conflict, .status-chip.error { background:#7f1d1d; color:#fecaca; }
     .status-chip.override { background:#4338ca; color:#c7d2fe; }
+    /* ---- Top area redesign (operator-UX reorganization pass) -----------
+       Replaces the old single dense .toolbar row with three calmer,
+       intent-grouped rows: wall selector+health, wall source+apply, and
+       edit/new/actions. Nothing here changes what any control DOES --
+       only how it is grouped/labelled -- see PROJECT.md. */
+    .wall-topbar { display:flex; flex-direction:column; gap:12px; }
+    .wall-topbar-row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+    .wall-topbar-row.wall-topbar-actions { justify-content:flex-end; align-items:center; }
+    .wall-topbar-label { color:var(--muted); font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; width:100%; margin-bottom:-4px; }
+    .wall-actions-menu { position:relative; }
+    .wall-actions-dropdown { position:absolute; right:0; top:calc(100% + 6px); z-index:40; min-width:220px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 12px 28px rgba(0,0,0,.35); padding:6px; display:flex; flex-direction:column; gap:2px; }
+    .wall-actions-dropdown[hidden] { display:none; }
+    .wall-action-item { display:flex; width:100%; text-align:left; justify-content:flex-start; background:transparent; border:1px solid transparent; padding:8px 10px; border-radius:6px; cursor:pointer; color:var(--text); font-size:13px; }
+    .wall-action-item:hover { background:var(--panel-2); }
+    .wall-action-item.danger { color:#fca5a5; }
+    .wall-action-sep { height:1px; background:var(--border); margin:4px 2px; }
+    .wall-action-badge { margin-left:auto; font-size:10px; padding:1px 6px; border-radius:999px; background:var(--state-warning); color:#1d232a; font-weight:700; }
+    /* Create/Edit Wall wizard -- one shared component for both flows (see
+       ui/wall.js openWallWizard()). Uses the family's existing
+       .modal-backdrop/.modal shell, widened for the two-column Step 2
+       layout. */
+    #wallWizardBackdrop .modal { width:min(94vw, 760px); }
+    .wizard-step[hidden] { display:none; }
+    .wiz-preview-wrap { display:flex; flex-direction:column; align-items:center; gap:8px; margin:14px 0; padding:14px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.14); }
+    .wiz-preview-grid { display:grid; gap:4px; }
+    .wiz-preview-grid .wiz-cell { border:1px solid var(--border); border-radius:4px; background:var(--panel-2); display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted); overflow:hidden; }
+    .wiz-step2-body { display:grid; grid-template-columns:200px minmax(0,1fr); gap:14px; align-items:start; }
+    .wiz-decoder-list { display:flex; flex-direction:column; gap:6px; max-height:360px; overflow-y:auto; }
+    .wiz-decoder-tile { border:1px solid var(--border); border-radius:6px; padding:7px 9px; background:var(--panel-2); cursor:grab; font-size:12px; }
+    .wiz-decoder-tile.armed { border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+    .wiz-decoder-tile.placed { opacity:.6; }
+    .wiz-decoder-tile .wiz-decoder-name { font-weight:600; }
+    .wiz-decoder-tile .wiz-decoder-meta { color:var(--muted); font-size:11px; margin-top:2px; }
+    .wiz-assign-grid .wiz-cell { flex-direction:column; gap:2px; padding:4px; cursor:pointer; min-height:52px; font-size:11px; }
+    .wiz-assign-grid .wiz-cell.assigned { background:color-mix(in srgb, var(--accent) 16%, var(--panel-2)); color:var(--text); }
+    .wiz-assign-grid .wiz-cell.drop-target { border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+    .wiz-assign-grid .wiz-cell-pos { font-weight:600; }
+    .wiz-assign-grid .wiz-cell-decoder { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+    .wiz-assign-grid .wiz-cell-rotation { display:flex; align-items:center; gap:4px; }
+    .wiz-assign-grid .wiz-cell-rotation select { font-size:11px; padding:1px 3px; }
+    .wiz-unassign-btn { border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:11px; text-decoration:underline; padding:0; }
+    #detectionBanner { display:flex; flex-direction:column; gap:8px; }
+    #detectionBanner .detect-section-title { font-weight:600; font-size:13px; }
+    .detect-item { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-left:4px solid var(--state-info); padding:8px 10px; border-radius:6px; background:var(--surface-2, rgba(255,255,255,0.03)); }
+    .detect-item.status-conflict, .detect-item.status-ambiguous { border-left-color:var(--state-error); }
+    .detect-item.status-partial { border-left-color:var(--state-warning); }
+    .detect-item.status-changed { border-left-color:var(--state-warning); }
+    .detect-item.status-possible { border-left-color:var(--state-info); }
+    .detect-item .detect-title { font-weight:600; margin-bottom:2px; }
+    .detect-item .detect-status-pill { font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 6px; border-radius:4px; margin-right:6px; background:var(--state-info); color:#fff; }
+    .detect-item.status-conflict .detect-status-pill, .detect-item.status-ambiguous .detect-status-pill { background:var(--state-error); }
+    .detect-item.status-partial .detect-status-pill, .detect-item.status-changed .detect-status-pill { background:var(--state-warning); }
+    .detect-item .detect-detail { color:var(--muted); font-size:12px; }
+    .detect-item .detect-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .wall-stage { position:relative; }
     .wall-grid { display:grid; gap:8px; min-height:220px; justify-content:center; overflow-x:auto; padding-bottom:4px; }
-    .wall-cell { border:1px solid var(--border); border-radius:8px; background:var(--table); padding:8px; width:340px; min-height:0; aspect-ratio:16 / 9; display:flex; flex-direction:column; gap:7px; cursor:pointer; position:relative; overflow:hidden; }
+    .wall-cell { box-sizing:border-box; border:2px solid var(--border); border-radius:8px; background:#0b0f16; padding:8px; width:340px; min-width:0; min-height:0; aspect-ratio:16 / 9; display:flex; flex-direction:column; gap:7px; cursor:pointer; position:relative; overflow:hidden; transition:border-color .12s, box-shadow .12s, background .12s; }
     .wall-cell.selected { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+    /* Idle chrome stays minimal (task 2): only the currently-hovered/valid
+       target gets strong treatment. A whole-region drop highlights every
+       cell in that region (setDropHighlight() adds .drop-target to each
+       matched cell, not just the one under the pointer). */
+    .wall-cell.drop-target { border-color:var(--accent); border-style:solid; background:color-mix(in srgb, var(--action-primary) 22%, #0b0f16); box-shadow:0 0 0 3px color-mix(in srgb, var(--action-primary) 70%, transparent), 0 0 22px color-mix(in srgb, var(--action-primary) 45%, transparent); }
+    .wall-cell.regioned { border-style:dashed; }
+    /* While a source drag is in progress, every monitor discoverable as a
+       drop target gets a light dashed affordance so the operator can see
+       all nine valid targets at once, without any of them looking like the
+       strong "about to drop here" state reserved for .drop-target. */
+    .wall-stage.routing-active .wall-cell:not(.drop-target) { border-style:dashed; border-color:color-mix(in srgb, var(--action-primary) 40%, var(--border)); }
     .wall-cell.preview-enabled > :not(.wall-cell-preview) { position:relative; z-index:1; }
     .wall-cell-preview { position:absolute; inset:0; z-index:0; background-position:center; background-size:contain; background-repeat:no-repeat; opacity:var(--preview-opacity, .5); filter:saturate(1.15) contrast(1.05); pointer-events:none; transform-origin:center; }
     .wall-cell.preview-enabled::after { content:""; position:absolute; inset:0; z-index:0; pointer-events:none; background:rgba(7,13,28,var(--preview-veil, .34)); }
     .wall-cell .head { display:flex; justify-content:space-between; gap:8px; align-items:center; }
     .wall-cell .title { font-weight:600; }
-    .wall-cell select, .wall-cell input { width:100%; min-width:0; }
     .wall-cell.compact { font-size:12px; }
-    .wall-cell.compact .field label { display:none; }
+    /* The screen face is now dominated by the live preview (task 3) -- the
+       old large centered source name block is gone. A thin spacer keeps the
+       head/foot rows pinned to top/bottom of the monitor face. */
+    .wall-cell-spacer { flex:1 1 auto; min-height:0; }
+    .wall-cell-foot { display:flex; flex-direction:column; gap:4px; font-size:11px; position:relative; z-index:1; }
+    .wall-video-chip { align-self:flex-start; max-width:100%; box-sizing:border-box; padding:3px 9px; border-radius:999px; background:rgba(5,8,14,.6); color:#fff; font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .wall-cell-meta { display:flex; justify-content:space-between; align-items:center; gap:6px; }
+    .wall-cell-meta .muted { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .wall-cell-meta .chip-decoder, .wall-cell-meta .chip-rotation { cursor:pointer; border-radius:4px; padding:1px 4px; margin:-1px -4px; }
+    .wall-cell-meta .chip-decoder:hover, .wall-cell-meta .chip-rotation:hover { background:rgba(255,255,255,.08); color:#fff; }
+    /* Source palette (left) -- draggable cards, mirroring the Hall family's
+       Multiview-style source list: a card per encoder, dragged onto the
+       wall rather than picked from a per-cell dropdown. */
+    .source-palette { display:flex; flex-direction:column; gap:8px; max-height:70vh; overflow-y:auto; }
+    .source-tile { border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--panel-2); cursor:grab; user-select:none; }
+    .source-tile:hover { background:var(--selected-tint, rgba(30,144,255,.12)); }
+    .source-tile.dragging { opacity:.5; cursor:grabbing; }
+    /* Armed for the non-drag routing path (click source, then click target
+       -- the route starts at once) -- see ui/wall.js armSourceForNonDragRouting(). */
+    .source-tile.armed { border-color:var(--action-primary); box-shadow:0 0 0 2px color-mix(in srgb, var(--action-primary) 35%, transparent); }
+    .source-tile-name { font-weight:600; font-size:13px; }
+    .source-tile-meta { font-size:11px; color:var(--muted); margin-top:2px; }
+    /* Hover preview card, same interaction pattern as OmniSuite Multiview's
+       source hover preview (debounced open, one card, clean dismissal) --
+       see ui/wall.js scheduleSourcePreview()/closeSourcePreview(). Uses
+       LumaSuite's own existing decoder-preview thumbnail URL, just for an
+       encoder instead of a decoder. */
+    .source-preview { position:fixed; z-index:1200; width:260px; max-width:min(70vw, 260px); box-sizing:border-box; padding:10px; background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:10px; box-shadow:0 12px 28px rgba(0,0,0,.35); }
+    .source-preview[hidden] { display:none; }
+    .source-preview-name { font-size:13px; font-weight:600; line-height:1.25; }
+    .source-preview-meta { font-size:11px; color:var(--muted); margin-top:2px; }
+    .source-preview-frame { margin-top:8px; aspect-ratio:16 / 9; width:100%; background:var(--bg); border:1px solid var(--border); border-radius:6px; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+    .source-preview-frame img { width:100%; height:100%; object-fit:contain; display:block; }
+    .source-preview-note { font-size:12px; color:var(--muted); font-weight:500; text-align:center; padding:0 10px; }
+    /* Zone rail: every multi-cell routing target (a saved zone, an
+       on-the-fly 2x2 convenience zone, or "Entire Wall") as its own
+       explicit, always-visible, individually-labeled chip -- replaces the
+       old crosshair overlay. No two chips ever occupy the same screen
+       space, so there is no overlapping-hit-area ambiguity: whichever chip
+       the pointer is over during a drag IS the target. Always visible (not
+       just mid-drag) so the non-drag click-source/click-target
+       path has the same targets to click. */
+    .zone-rail { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; padding-top:10px; border-top:1px dashed var(--border); }
+    .zone-rail[hidden] { display:none; }
+    .zone-rail-label { font-size:12px; margin-right:2px; }
+    .zone-chip { padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; transition:background .12s, border-color .12s, box-shadow .12s; }
+    .zone-chip:hover, .zone-chip:focus-visible { border-color:var(--action-primary); outline:none; }
+    .zone-chip.entire-wall { border-style:dashed; }
+    .zone-chip.auto { opacity:.9; }
+    .zone-chip.drop-target { background:color-mix(in srgb, var(--action-primary) 55%, transparent); border-color:var(--action-primary); box-shadow:0 0 0 2px color-mix(in srgb, var(--action-primary) 40%, transparent); color:var(--text); }
+    .zone-rail.dragging-active .zone-chip { border-color:color-mix(in srgb, var(--action-primary) 60%, var(--border)); }
+    /* Edit Zones mode: cells that make up the in-progress draft rectangle,
+       or that already belong to 1+ saved (draft) zones, get a clear visible
+       treatment -- no invisible/oversized hit-areas anywhere in this mode
+       either; every cell is its own mousedown/mouseenter/mouseup target. */
+    .wall-cell.zone-edit { cursor:crosshair; }
+    .wall-cell.in-saved-zone { box-shadow:inset 0 0 0 2px color-mix(in srgb, var(--action-primary) 45%, transparent); }
+    .wall-cell.zone-draft { box-shadow:inset 0 0 0 3px var(--action-primary); background:color-mix(in srgb, var(--action-primary) 16%, var(--card)); }
+    .wall-cell.zone-armed { box-shadow:inset 0 0 0 3px var(--accent); }
+    .zone-count-badge { display:inline-block; margin-left:6px; min-width:16px; padding:0 4px; border-radius:999px; background:var(--action-primary); color:#fff; font-size:10px; line-height:16px; text-align:center; }
+    #zoneEditorPanel[hidden] { display:none; }
+    .zone-editor-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); }
+    .zone-editor-row.redefining { background:color-mix(in srgb, var(--action-primary) 10%, transparent); }
+    .zone-name-input { flex:1 1 auto; min-width:0; }
+    .zone-editor-range { font-size:11px; white-space:nowrap; }
+    /* Non-drag routing bar: appears once a source is armed (click path),
+       names the selected source (a hint, no buttons), and the next click calls the exact same
+       assignSpatialTarget() the drag/drop path calls. */
+    .route-bar { display:flex; align-items:center; gap:8px; margin-top:10px; padding:8px; border-radius:8px; background:var(--card); border:1px solid var(--action-primary); font-size:12px; }
+    .route-bar[hidden] { display:none; }
+    .route-bar-text { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+    /* Concise contextual hint that follows the pointer during a drag
+       ("Route to R1 C1", "Route to Top 2 Displays", ...). Pure text, never
+       part of the routing decision itself -- hitTestTarget()/setDropHighlight()
+       remain the single source of truth for what a drop will do. */
+    .drop-hint { position:fixed; z-index:60; pointer-events:none; padding:4px 10px; border-radius:6px; background:var(--card); border:1px solid var(--accent); color:var(--text); font-size:12px; font-weight:600; box-shadow:0 6px 16px rgba(0,0,0,.3); white-space:nowrap; }
+    .drop-hint[hidden] { display:none; }
     .cell-row { display:grid; grid-template-columns:1fr 96px; gap:6px; }
     .detail-grid { display:grid; gap:8px; }
     .kv { display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px; padding:5px 0; border-bottom:1px solid var(--border); }
     .kv span:first-child { color:var(--muted); }
     .kv span:last-child { overflow-wrap:anywhere; }
+    /* Decoder/Source/Rotation <select> elements in the Selected Display
+       panel (ui/wall.js renderDetails()) have no explicit width, so a
+       native select shrinks-to-fit its longest <option> text (e.g. an IP +
+       streamname) rather than the grid column's minmax(0,1fr) track --
+       overflowing the panel and causing page-wide horizontal scroll at
+       narrower viewports. Constrain it to the row's available width. */
+    .kv select { width:100%; max-width:100%; box-sizing:border-box; }
     .diff-list { margin:0; padding-left:18px; color:#fcd34d; }
+    /* The Selected Display panel is now a contextual flyout (task 4/5/8):
+       positioned next to whichever monitor is selected (ui/wall.js
+       positionFloating()) instead of a permanent third grid column, so the
+       wall workspace keeps the reclaimed horizontal space at idle. */
+    #displayInspector { position:fixed; z-index:50; width:320px; max-width:92vw; max-height:calc(100vh - 32px); overflow:auto; box-shadow:0 16px 36px rgba(0,0,0,.4); }
+    #displayInspector[hidden] { display:none; }
+    /* While the inspector is docked open, the wall workspace reflows to
+       make room on the right rather than letting the flyout sit on top of
+       (and block clicks on) whichever cell happens to render underneath it
+       -- see ui/wall.js openInspector()/closeInspector(). 362px = the
+       inspector's rendered width (320 + padding + border) plus its 16px
+       dock margin. */
+    .wall-page.inspector-open main { margin-right:362px; transition:margin-right .15s ease; }
+    /* Below ~1360px there usually isn't enough room to both reflow the wall
+       grid AND dock a 320px-wide panel beside it without forcing the grid's
+       own horizontal scrollbar (a 2x2 wall alone needs ~690px). Below that
+       width ui/wall.js positionInspector() docks the panel to the bottom of
+       the viewport instead of the right edge, so it never competes with the
+       grid for horizontal space. */
+    @media (max-width:1360px) {
+      .wall-page.inspector-open main { margin-right:0; }
+      /* Too narrow to both reflow the grid and float a docked panel without
+         one covering the other -- drop the inspector into the normal
+         document flow below the wall workspace instead (it's already the
+         next sibling of .wall-page in the DOM). A vertical scroll to reach
+         it is an acceptable trade-off; a horizontal one, or the panel
+         sitting on top of a monitor, is not. */
+      #displayInspector { position:static; width:auto; max-width:none; max-height:none; margin-top:12px; box-shadow:none; }
+    }
+    /* Bezel calibration is secondary to the routing workspace (task 7):
+       collapsed by default behind a native <details> disclosure so it
+       never competes with the wall/routing area for attention. */
+    .bezel-panel > summary { cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:15px; font-weight:600; }
+    .bezel-panel > summary::-webkit-details-marker { display:none; }
+    .bezel-panel > summary::after { content:"\25B8"; color:var(--muted); font-size:13px; transition:transform .12s; margin-left:auto; }
+    .bezel-panel[open] > summary::after { transform:rotate(90deg); }
+    .bezel-panel > summary .muted { font-weight:400; font-size:12px; }
+    .bezel-body { margin-top:12px; }
+    .bezel-body-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
     .bezel-box { border:1px solid var(--border); border-radius:6px; padding:14px 16px; }
     .bezel-box legend { padding:0 8px; font-size:16px; color:var(--text); }
     .bezel-row { display:grid; grid-template-columns:130px minmax(0, 560px); gap:12px; align-items:center; margin-bottom:12px; }
@@ -83,58 +273,152 @@
   </style>
 </head>
 <body>
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
   <div class="row header" style="justify-content:space-between;align-items:center;">
     <div style="display:flex;align-items:center;gap:12px;">
       <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
-      <h1 class="title" style="margin:0;">LumaSuite Device Manager</h1>
+      <h1 class="title" style="margin:0;">LumaSuite Video Wall</h1>
     </div>
     <div class="right" style="display:flex;align-items:center;gap:16px;">
       <div class="nav-tabs">
-        <a class="nav-tab" href="/ui/index.html"><span>📊</span><span>Device Manager</span></a>
-        <a class="nav-tab" href="/ui/matrix.html"><span>🔀</span><span>Matrix Routing</span></a>
-        <a class="nav-tab" href="/ui/producer.html"><span>🎬</span><span>Production Studio</span></a>
-        <a class="nav-tab active" href="/ui/wall.html"><span>🧱</span><span>Video Wall</span></a>
+        <a class="nav-tab" href="/ui/index.html">
+          <span>Device Manager</span></a>
+        <a class="nav-tab" href="/ui/matrix.html">
+          <span>Matrix Routing</span></a>
+        <a class="nav-tab" href="/ui/producer.html">
+          <span>Production Studio</span></a>
+        <a class="nav-tab active" href="/ui/wall.html">
+          <span>Video Wall</span></a>
       </div>
+      <button id="header_gear" class="gear-btn" title="Settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
     </div>
   </div>
+
+  <!-- "Existing Video Walls Detected" -- read-only site-discovery section,
+       built entirely from GET /api/video_wall/detect (no write). Lists
+       every candidate that still needs operator review (a fresh
+       unconfirmed candidate, a partial/conflict/ambiguous grouping, or a
+       previously confirmed wall whose live state has materially changed);
+       a candidate the operator already confirmed-and-saved or explicitly
+       ignored (and that hasn't changed since) is never listed here. Review
+       reuses the Create/Edit Wall wizard component -- see
+       renderCandidatesSection()/openWallWizard("review", ...) in wall.js. -->
+  <div id="detectionBanner" class="panel" style="margin-bottom:12px;display:none;"></div>
 
   <div class="panel" style="margin-bottom:12px;">
-    <div class="toolbar">
-      <div class="field">
-        <label for="wallSelect">Video Wall</label>
-        <select id="wallSelect"></select>
+    <div class="wall-topbar">
+      <div class="wall-topbar-row">
+        <div class="field">
+          <label for="wallSelect">Video Wall</label>
+          <select id="wallSelect"></select>
+        </div>
+        <span id="statusChip" class="status-chip">Not refreshed</span>
       </div>
-      <div class="field">
-        <label for="wallName">Wall Name</label>
-        <input id="wallName" type="text" value="Video Wall 1">
+      <div class="wall-topbar-row">
+        <div class="field" style="min-width:240px;">
+          <label for="wallSource">Wall Source</label>
+          <select id="wallSource"></select>
+        </div>
+        <button id="routeWallSourceBtn" title="Set the entire wall to this source now -- breaks out of any temporary single-display or pair overrides and returns every display to Wall Video on this source">Apply to Entire Wall</button>
       </div>
-      <div class="field">
-        <label for="rowsInput">Rows</label>
-        <input id="rowsInput" type="number" min="1" max="16" value="2">
+      <div class="wall-topbar-row wall-topbar-actions">
+        <button id="editWallBtn" class="btn-secondary">Edit Wall</button>
+        <button id="newWallBtn" class="btn-secondary">New Wall</button>
+        <button id="editZonesBtn" class="btn-secondary" title="Define saved rectangular routing-target zones for this wall (e.g. Top Row, Left 2x2) -- separate from live source routing">Edit Zones</button>
+        <div class="wall-actions-menu">
+          <button id="wallActionsBtn" class="btn-secondary" type="button" aria-haspopup="true" aria-expanded="false">&bull;&bull;&bull; Wall Actions</button>
+          <div id="wallActionsDropdown" class="wall-actions-dropdown" hidden>
+            <button type="button" id="applyWallBtn" class="wall-action-item" title="Reapply this saved wall's full configuration (decoder placement, rotation, bezel, and source) to the real hardware -- a recovery action, not routing">Apply Saved Wall</button>
+            <button type="button" id="refreshWallBtn" class="wall-action-item" title="Read-only: compare saved configuration against live decoder state">Refresh From Devices</button>
+            <div class="wall-action-sep"></div>
+            <button type="button" id="saveWallBtn" class="wall-action-item">Save Changes<span id="saveWallBadge" class="wall-action-badge" hidden>&bull;</span></button>
+            <button type="button" id="exportWallConfigBtn" class="wall-action-item">Export Config...</button>
+            <button type="button" id="importWallConfigBtn" class="wall-action-item">Import Config...</button>
+            <input id="importWallConfigFile" type="file" accept="application/json,.json" style="display:none;">
+            <div class="wall-action-sep"></div>
+            <button type="button" id="wallDetailsBtn" class="wall-action-item">Details...</button>
+            <button type="button" id="deleteWallBtn" class="wall-action-item danger">Delete Wall...</button>
+          </div>
+        </div>
       </div>
-      <div class="field">
-        <label for="colsInput">Columns</label>
-        <input id="colsInput" type="number" min="1" max="16" value="2">
-      </div>
-      <div class="field" style="min-width:240px;">
-        <label for="wallSource">Wall Video Source</label>
-        <select id="wallSource"></select>
-      </div>
-      <button id="routeWallSourceBtn" class="btn-secondary" title="Sync the selected wall source to displays that are out of sync">Sync Source</button>
-      <button id="newWallBtn" class="btn-secondary">New</button>
-      <button id="saveWallBtn">Save</button>
-      <button id="applyWallBtn">Apply Saved Wall</button>
-      <button id="refreshWallBtn" class="btn-secondary">Refresh From Devices</button>
-      <button id="exportWallConfigBtn" class="btn-secondary">Export Config</button>
-      <button id="importWallConfigBtn" class="btn-secondary">Import Config</button>
-      <input id="importWallConfigFile" type="file" accept="application/json,.json" style="display:none;">
-      <button id="deleteWallBtn" class="btn-danger">Delete</button>
-      <span id="statusChip" class="status-chip">Not refreshed</span>
     </div>
-    <div id="stateFileInfo" class="muted" style="margin-top:8px;font-size:12px;"></div>
   </div>
 
-  <div class="wall-page">
+  <!-- Create/Edit Wall wizard: a proposed-state-only workspace (see
+       ui/wall.js openWallWizard()). No control in here writes a device or
+       video_walls.json until the final Create/Save action on Step 2; the
+       X, Cancel, Back and Escape all discard wizardWall with zero writes. -->
+  <div id="wallWizardBackdrop" class="modal-backdrop">
+    <div class="modal">
+      <h3 id="wallWizardTitle">Create Video Wall</h3>
+      <div id="wizardStep1" class="wizard-step">
+        <div class="modal-row"><label for="wizName">Name</label><input id="wizName" type="text"></div>
+        <div class="modal-row"><label for="wizRows">Rows</label><input id="wizRows" type="number" min="1" max="16"></div>
+        <div class="modal-row"><label for="wizCols">Columns</label><input id="wizCols" type="number" min="1" max="16"></div>
+        <div id="wizStep1Error" class="modal-error"></div>
+        <div class="wiz-preview-wrap">
+          <div id="wizPreviewGrid" class="wiz-preview-grid"></div>
+          <div id="wizPreviewSummary" class="muted" style="font-size:12px;"></div>
+        </div>
+        <div class="modal-buttons">
+          <button type="button" class="btn-secondary" id="wizCancelBtn1">Cancel</button>
+          <button type="button" id="wizNextBtn">Next</button>
+        </div>
+      </div>
+      <div id="wizardStep2" class="wizard-step" hidden>
+        <div id="wizAssignStatus" class="muted" style="font-size:12px;margin-bottom:8px;"></div>
+        <!-- Review-mode only (openWallWizard("review", candidate)): plain-
+             language evidence summary for the candidate being reviewed --
+             never a numeric confidence score, see PROJECT.md. Hidden for
+             create/edit. -->
+        <div id="wizReviewPanel" class="panel" style="display:none;margin-bottom:10px;padding:10px 12px;">
+          <div id="wizReviewSummary" style="font-weight:600;margin-bottom:4px;"></div>
+          <div id="wizReviewDetail" class="muted" style="font-size:12px;margin-bottom:6px;"></div>
+          <button type="button" id="wizReviewWhyToggle" class="btn-secondary" style="font-size:12px;padding:2px 8px;">Why?</button>
+          <div id="wizReviewWhy" class="muted" style="font-size:12px;margin-top:8px;display:none;white-space:pre-line;"></div>
+        </div>
+        <div class="wiz-step2-body">
+          <div>
+            <div class="wall-topbar-label" style="margin-bottom:6px;">Available Decoders</div>
+            <div id="wizDecoderList" class="wiz-decoder-list"></div>
+          </div>
+          <div>
+            <div class="wall-topbar-label" style="margin-bottom:6px;">Click a decoder above, then a display below to assign it. Drag/drop also works.</div>
+            <div id="wizAssignGrid" class="wiz-preview-grid wiz-assign-grid"></div>
+          </div>
+        </div>
+        <div class="modal-buttons">
+          <button type="button" class="btn-secondary" id="wizIgnoreBtn" style="display:none;margin-right:auto;">Ignore</button>
+          <button type="button" class="btn-secondary" id="wizBackBtn">Back</button>
+          <button type="button" class="btn-secondary" id="wizCancelBtn2">Cancel</button>
+          <button type="button" id="wizFinishBtn">Create Wall</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="wallDetailsBackdrop" class="modal-backdrop">
+    <div class="modal">
+      <h3>Wall Details</h3>
+      <div id="wallDetailsBody" class="detail-grid"></div>
+      <div class="modal-buttons"><button type="button" id="wallDetailsCloseBtn">Close</button></div>
+    </div>
+  </div>
+
+  <div class="wall-page" id="wall-page">
+    <nav class="stack">
+      <section class="panel" id="sourcesSection">
+        <div class="panel-title">
+          <h3>Sources</h3>
+        </div>
+        <p class="muted" style="margin:0 0 8px;font-size:12px;">Drag a source onto a display or a routing-target chip below the grid, or click a source, then a target: it routes at once.</p>
+        <div id="sourcePalette" class="source-palette"></div>
+        <div id="nonDragRouteBar" class="route-bar" hidden>
+          <span class="route-bar-text"></span>
+        </div>
+      </section>
+      <section class="panel" id="zoneEditorPanel" hidden></section>
+    </nav>
     <main class="stack">
       <section class="panel">
         <div class="panel-title">
@@ -146,52 +430,79 @@
             <span id="gridSummary" class="muted"></span>
           </div>
         </div>
-        <div id="wallGrid" class="wall-grid"></div>
-      </section>
-      <section class="panel">
-        <div class="panel-title">
-          <h3>Display Bezel</h3>
-          <label class="field inline"><input id="applyBezelAll" type="checkbox" checked> Apply to all</label>
+        <div id="wallStage" class="wall-stage">
+          <div id="wallGrid" class="wall-grid"></div>
+          <div id="dropHint" class="drop-hint" hidden></div>
         </div>
-        <fieldset class="bezel-box">
-          <legend>Display and Bezel (Unit: mm)</legend>
-          <div class="bezel-row"><label for="totalWidth">Total Width</label><input id="totalWidth" type="number" min="0" value="0"></div>
-          <div class="bezel-row"><label for="totalHeight">Total Height</label><input id="totalHeight" type="number" min="0" value="0"></div>
-          <div class="bezel-row">
-            <label>Bezel Width</label>
-            <div class="bezel-diagram">
-              <input id="topBorder" class="bezel-input top" type="number" min="0" value="0" aria-label="Top bezel">
-              <input id="leftBorder" class="bezel-input left" type="number" min="0" value="0" aria-label="Left bezel">
-              <div class="bezel-screen"><span id="bezelSizeLabel">0 x 0</span></div>
-              <input id="rightBorder" class="bezel-input right" type="number" min="0" value="0" aria-label="Right bezel">
-              <input id="bottomBorder" class="bezel-input bottom" type="number" min="0" value="0" aria-label="Bottom bezel">
-            </div>
-          </div>
-        </fieldset>
-      </section>
-    </main>
-
-    <aside class="stack">
-      <section class="panel">
-        <div class="panel-title">
-          <h3>Selected Display</h3>
-          <button id="identifyBtn" class="btn-secondary" title="Blink selected decoder front panel LED">Identify</button>
-        </div>
-        <div id="details" class="detail-grid"></div>
+        <!-- Zone rail: every multi-cell routing target (saved zones, the
+             on-the-fly 2x2 convenience zones, and "Entire Wall") as its own
+             explicit, always-visible, individually-labeled drop/click
+             target -- replaces the old crosshair overlay. See
+             ui/wall.js renderZoneRail(). -->
+        <div id="zoneRail" class="zone-rail" hidden></div>
       </section>
 
       <section class="panel">
         <div class="panel-title">
           <h3>Device Reports</h3>
-          <span id="reportCount" class="muted"></span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span id="reportCount" class="muted"></span>
+            <button id="reportsToggleBtn" type="button" class="btn-secondary" aria-expanded="false" aria-controls="reports">Details</button>
+          </div>
         </div>
-        <div id="reports" class="reports muted">Refresh from devices to compare saved state with decoder state.</div>
+        <div id="reports" class="reports muted" hidden>Refresh from devices to compare saved state with decoder state.</div>
       </section>
-    </aside>
+
+      <details id="bezelDetails" class="panel bezel-panel">
+        <summary>
+          <span>Display Bezel</span>
+          <span class="muted">Physical screen size and mounting bezel -- calculated crop, not routing</span>
+        </summary>
+        <div class="bezel-body">
+          <div class="bezel-body-head">
+            <span class="muted" style="font-size:12px;">Adjust bezel measurements for accurate multi-display cropping.</span>
+            <label class="field inline"><input id="applyBezelAll" type="checkbox" checked> Apply to all</label>
+          </div>
+          <fieldset class="bezel-box">
+            <legend>Display and Bezel (Unit: mm)</legend>
+            <div class="bezel-row"><label for="totalWidth">Total Width</label><input id="totalWidth" type="number" min="0" value="0"></div>
+            <div class="bezel-row"><label for="totalHeight">Total Height</label><input id="totalHeight" type="number" min="0" value="0"></div>
+            <div class="bezel-row">
+              <label>Bezel Width</label>
+              <div class="bezel-diagram">
+                <input id="topBorder" class="bezel-input top" type="number" min="0" value="0" aria-label="Top bezel">
+                <input id="leftBorder" class="bezel-input left" type="number" min="0" value="0" aria-label="Left bezel">
+                <div class="bezel-screen"><span id="bezelSizeLabel">0 x 0</span></div>
+                <input id="rightBorder" class="bezel-input right" type="number" min="0" value="0" aria-label="Right bezel">
+                <input id="bottomBorder" class="bezel-input bottom" type="number" min="0" value="0" aria-label="Bottom bezel">
+              </div>
+            </div>
+          </fieldset>
+        </div>
+      </details>
+    </main>
+  </div>
+
+  <!-- Contextual "Selected Display" flyout (task 4/5/8): positioned next to
+       the selected monitor by ui/wall.js positionFloating()/openInspector(),
+       not a permanent third grid column. All Decoder/Source/Rotation/Bezel-
+       override editing that used to live in the permanent sidebar is
+       unchanged in behavior -- only its container moved. -->
+  <div id="displayInspector" class="panel" hidden>
+    <div class="panel-title">
+      <h3>Selected Display</h3>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button id="identifyBtn" class="btn-secondary" title="Blink selected decoder front panel LED">Identify</button>
+        <button id="inspectorCloseBtn" type="button" class="btn-secondary" aria-label="Close display inspector" title="Close">&times;</button>
+      </div>
+    </div>
+    <div id="details" class="detail-grid"></div>
   </div>
 
   <div id="toast" class="toast"></div>
   <script src="dialogs.js?v=1"></script>
+  <script src="settings.js?v=1"></script>
+  <script src="/ui/adminnav.js"></script>
   <script src="wall.js?v=wall_config_dialogs_1"></script>
 </body>
 </html>

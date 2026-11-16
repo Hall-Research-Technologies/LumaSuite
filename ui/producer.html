@@ -1,10 +1,13 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="/ui/theme-boot.js"></script>
+  <script src="/ui/csrf.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
   <meta charset="utf-8"/>
   <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>LumaSuite</title>
+  <title>Production Studio - LumaSuite</title>
   <link rel="icon" href="/ui/favicon.ico">
   <style>
             /* Ticker grid layout for perfect alignment */
@@ -14,16 +17,21 @@
               align-items: center;
               gap: 4px;
             }
-    .nav-tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); }
-    .nav-tab { padding:6px 14px; text-decoration:none; color:var(--fg); border-radius:6px 6px 0 0; transition:all 0.2s; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; }
-    .nav-tab:hover { background:rgba(30,144,255,0.1); color:#fff; }
-    .nav-tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
+    /* .nav-tabs/.nav-tab layout+colour rules moved to /ui/family.css
+       (shell-consistency pass, 2026-09-19) -- was byte-for-byte identical
+       to the same block duplicated in every other page. */
     :root{--bg:#1d232a;--card:#222a33;--panel:#222a33;--panel-2:#262f39;--fg:#e9eef5;--muted:#9aa7b4;--accent:#1e90ff;--danger:#e5534b;--border:rgba(255,255,255,0.08)}
     body.light{--bg:#f7f8fb;--card:#fff;--panel:#fff;--panel-2:#f2f5f8;--fg:#0d1117;--muted:#5a6b7a;--border:rgba(0,0,0,.08);color-scheme:light}
     body.dark{--bg:#1d232a;--card:#222a33;--panel:#222a33;--panel-2:#262f39;--fg:#e9eef5;--muted:#9aa7b4;--accent:#1e90ff;--danger:#e5534b;--border:rgba(255,255,255,0.08);color-scheme:dark}
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 Calibri,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-width:1044px}
-    .wrap{max-width:1360px;margin:20px auto 48px;padding:0 16px}
+    /* Top margin removed (shell-consistency pass, 2026-09-19): the header
+       (now a sibling above .wrap, not inside it) supplies its own 16px
+       top margin and 12px bottom margin directly, matching the other
+       three pages' body{margin:16px}/.header{margin-bottom:12px} exactly
+       via CSS margin collapsing, at every viewport width -- .wrap no
+       longer needs (or should add) a top margin of its own. */
+    .wrap{max-width:1360px;margin:0 auto 48px;padding:0 16px}
     h1{margin:0 0 14px;font-size:22px;font-weight:600}
     .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
     .col{display:flex;flex-direction:column;gap:10px}
@@ -193,15 +201,26 @@
   }
 
     /* Header tabs and gear */
-    .header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
-    .header .right { display:flex; align-items:center; gap:8px; }
+    /* margin-bottom matched to the other three pages' shared 12px, and
+       position:sticky/border-bottom/padding-bottom added to match
+       matrix.css's header treatment Matrix Routing/Video Wall already had
+       (shell-consistency pass, 2026-09-19) -- see index.html for the
+       fuller rationale on the latter. */
+    .header {
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border);
+      position:sticky; top:0; z-index:100; background:var(--bg);
+    }
+    /* gap matched to the other three pages' inline 16px (shell-consistency
+       pass, 2026-09-19) -- was 8px here, which shifted the nav tabs/gear
+       8px left of their position on every other page. */
+    .header .right { display:flex; align-items:center; gap:16px; }
     /* Option 1b: Classic Tabs with Icons */
     .tabs { display:flex; gap:4px; border-bottom:2px solid var(--border); }
     .tab { padding:6px 14px; text-decoration:none; color:var(--fg); border-radius:6px 6px 0 0; transition:all 0.2s; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; }
     .tab:hover { background:rgba(30,144,255,0.1); }
     .tab.active { background:var(--accent); color:#fff; border-bottom:2px solid var(--accent); margin-bottom:-2px; }
     .gear-btn { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid var(--border); background:var(--panel-2); cursor:pointer; font-size:18px; color:var(--fg); }
-    #gear{display:none!important}
     .modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:20000; }
     .modal { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; width:520px; max-width:95%; color:var(--fg); }
     .modal h3 { margin:0 0 8px 0; }
@@ -213,41 +232,43 @@
   </style>
 </head>
 <body>
-  <!-- Connection Status Banner -->
-  <div id="connection_banner" style="display:none; position:fixed; top:0; left:0; right:0; background:#d32f2f; color:white; padding:12px 20px; font-weight:bold; text-align:center; z-index:10000; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-    ⚠️ Connection lost, check application.
-  </div>
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
 
-  <div class="wrap">
-    <div class="row header">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
-        <h1 class="title" style="margin:0;">LumaSuite Device Manager</h1>
-      </div>
-      <div class="right">
-        <div class="nav-tabs" style="margin-bottom:0;">
-          <a class="nav-tab" href="/ui/index.html">
-            <span>📊</span>
-            <span>Device Manager</span>
-          </a>
-          <a class="nav-tab" href="/ui/matrix.html">
-            <span>🔀</span>
-            <span>Matrix Routing</span>
-          </a>
-          <span class="nav-tab active">
-            <span>🎬</span>
-            <span>Production Studio</span>
-          </span>
-          <a class="nav-tab" href="/ui/wall.html">
-            <span>🧱</span>
-            <span>Video Wall</span>
-          </a>
-        </div>
-      </div>
+  <!-- Header moved outside .wrap (shell-consistency pass, 2026-09-19):
+       .wrap's max-width:1360 centering previously centered the header
+       itself at viewports wider than ~1392px (measured: logo/nav/gear all
+       shifted 40px right of their position on the other three pages at
+       1440x900), even though .header's own margin/gap values already
+       matched. Flush margins here (16px) match the other three pages'
+       body{margin:16px} exactly at every viewport width; .wrap's own
+       centered max-width layout still governs the page content below,
+       unchanged. -->
+  <div class="row header" style="margin:16px 16px 12px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img id="company_logo" src="/ui/companylogo.png" alt="Company Logo" style="height:48px;width:auto;border-radius:6px;">
+      <h1 class="title" style="margin:0;">LumaSuite Production Studio</h1>
     </div>
+    <div class="right">
+      <div class="nav-tabs" style="margin-bottom:0;">
+        <a class="nav-tab" href="/ui/index.html">
+          <span>Device Manager</span>
+        </a>
+        <a class="nav-tab" href="/ui/matrix.html">
+          <span>Matrix Routing</span>
+        </a>
+        <span class="nav-tab active">
+          <span>Production Studio</span>
+        </span>
+        <a class="nav-tab" href="/ui/wall.html">
+          <span>Video Wall</span>
+        </a>
+      </div>
+      <button id="gear" class="gear-btn" title="Settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
+    </div>
+  </div>
+  <div class="wrap">
 
     <div class="panel" style="position:relative;">
-      <button id="gear" class="gear-btn" title="Settings" style="position:absolute; top:8px; right:8px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
       <div id="streamingStatus" style="display:none;font-size:12px;color:var(--muted);margin-bottom:8px;position:relative;z-index:1;">
         <div id="streamingUnits" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
       </div>
@@ -257,7 +278,7 @@
           <select id="unitSelect" name="unitSelect" class="w-wide"></select>
           <div class="small" id="cacheStatus"></div>
         </div>
-        <button id="refreshBtn" class="btn">Refresh</button>
+        <button id="refreshBtn" class="btn secondary">Refresh</button>
       </div>
 
       <div class="grid" style="margin-top:12px;">
@@ -335,82 +356,7 @@
               </label>
 
 
-  <!-- Configuration modal (producer) -->
-  <div id="cfg_backdrop" class="modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:20000;">
-    <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:520px;max-width:95%;color:var(--fg);">
-    <form autocomplete="off">
-    <h3 style="margin:0 0 8px 0;">Configuration</h3>
-    <div class="row" style="margin-bottom:8px;align-items:center;justify-content:space-between;gap:8px;">
-      <span class="small">App Version</span>
-      <span id="cfg_app_version" class="code small" style="user-select:text;">v?.?.?</span>
-    </div>
-    <div class="row" style="margin-bottom:8px;align-items:center;justify-content:space-between;gap:8px;">
-      <span class="small">Dark Mode</span>
-      <button id="dark_switch" class="switch on" type="button" aria-label="Toggle dark mode"><span class="knob"></span></button>
-    </div>
-    <input type="text" name="username" autocomplete="username" style="display:none;" />
-    <div class="row" style="margin-bottom:8px;align-items:center;gap:8px;">
-      <label class="small" for="cfg_password">Password</label>
-      <input id="cfg_password" name="cfg_password" type="password" autocomplete="current-password" style="width:160px;" />
-      <button id="cfg_pw_toggle" class="btn small" type="button" title="Show/Hide">👁️</button>
-    </div>
-    
-    <div class="row" style="margin-bottom:8px;">
-      <label class="small" for="cfg_ws_port">WS PORT</label>
-      <select id="cfg_ws_port" name="cfg_ws_port" style="width:140px;">
-        <option value="80" selected>80 (ws/http)</option>
-        <option value="443">443 (wss/https)</option>
-      </select>
-    </div>
-    <div class="row" style="margin-bottom:8px;">
-      <label class="small" for="cfg_concurrency">Parallel uploads</label>
-      <select id="cfg_concurrency" name="cfg_concurrency" style="width:80px;">
-        <option>1</option><option>2</option><option>4</option><option selected>6</option><option>8</option><option>12</option>
-      </select>
-    </div>
-    <div class="row" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">
-        <label class="small" for="cfg_firmware_path">Firmware path</label>
-        <input id="cfg_firmware_path" name="cfg_firmware_path" type="text" placeholder="e.g. c:\" style="flex:1;" />
-        <button id="cfg_firmware_browse" class="btn" type="button">Browse</button>
-      </div>
-      <div class="row" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">
-        <label class="small" for="cfg_imagestream_path">Static image path</label>
-        <input id="cfg_imagestream_path" name="cfg_imagestream_path" type="text" placeholder="e.g. c:\" style="flex:1;" />
-        <button id="cfg_imagestream_browse" class="btn" type="button">Browse</button>
-      </div>
-      <div class="row" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">
-        <label class="small" for="cfg_logos_path">Logo path</label>
-        <input id="cfg_logos_path" name="cfg_logos_path" type="text" placeholder="e.g. c:\" style="flex:1;" />
-        <button id="cfg_logos_browse" class="btn" type="button">Browse</button>
-      </div>
-      <div id="browse_hint" class="small" style="display:none;color:var(--muted);margin-top:6px;">
-        If you cannot browse to the file locations, copy and paste the absolute path into the field.
-      </div>
-      <div class="row" style="margin-top:8px;">
-        <a href="/ui/manual.html" target="_blank" rel="noopener" style="color:#7cc4ff;">Open LumaSuite Manual</a>
-      </div>
-      <div id="cfg_error" class="row" style="color:var(--danger);display:none;margin-top:6px;"></div>
-      <div class="row" style="justify-content:flex-end;gap:8px;">
-        <button id="cfg_close" class="btn" type="button">Cancel</button>
-        <button id="cfg_save" class="btn" type="button">Save</button>
-      </div>
-    </form>
-    </div>
-  </div>
-
-  <!-- Server-side folder browser modal -->
-  <div id="cfg_browser_backdrop" class="modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:20001;">
-    <div class="modal" style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;width:640px;max-width:96%;color:var(--fg);">
-      <h3 style="margin:0 0 8px 0;">Select Folder</h3>
-      <div class="row" style="gap:8px;align-items:center;margin-bottom:8px;">
-        <button id="cfg_browser_up" class="btn small">Up</button>
-        <input id="cfg_browser_path" name="cfg_browser_path" type="text" style="flex:1" readonly />
-        <button id="cfg_browser_select" class="btn">Select</button>
-        <button id="cfg_browser_cancel" class="btn">Cancel</button>
-      </div>
-      <div id="cfg_browser_list" style="max-height:320px;overflow:auto;border:1px solid var(--border);padding:8px;background:var(--panel-2);border-radius:8px;"></div>
-    </div>
-  </div>
+  <!-- Configuration modal: injected by ui/settings.js. -->
 
   <script>
   // Preview open/close
@@ -432,204 +378,8 @@
     function stop(){ dragging = false; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', stop); }
   })();
 
-  // Gear modal logic
-  (function initCfg(){
-    function applyTheme(){ const dark = localStorage.getItem('dark') !== 'false'; document.body.classList.toggle('light', !dark); document.body.classList.toggle('dark', dark); const sw = document.getElementById('dark_switch'); if(sw) sw.classList.toggle('on', dark); }
-    function toggleDark(){ const sw = document.getElementById('dark_switch'); const isOn = sw && sw.classList.contains('on'); localStorage.setItem('dark', (!isOn).toString()); applyTheme(); }
-    async function updateConfigVersion(){
-      const el = document.getElementById('cfg_app_version');
-      if(!el) return;
-      try{
-        const d = await fetch('/api/app_version', {cache:'no-store'}).then(r=>r.json());
-        el.textContent = d && d.ok && d.version ? ('v' + d.version) : 'v?.?.?';
-      }catch(e){ el.textContent = 'v?.?.?'; }
-    }
-    function openCfg(){ const d = document.getElementById('cfg_backdrop'); if(!d) return; d.style.display='flex'; applyTheme(); updateConfigVersion(); document.getElementById('cfg_password').value = '';
-      const err = document.getElementById('cfg_error'); if(err){ err.style.display='none'; err.textContent=''; }
-      const hint = document.getElementById('browse_hint'); if(hint) hint.style.display = 'block';
-      const MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"; // bullets
-      fetch('/api/config').then(r=>r.json()).then(cfg=>{ if(cfg){
-        const inp = document.getElementById('cfg_password'); if(inp) inp.value = MASK;
-        if(cfg.ws_port) document.getElementById('cfg_ws_port').value = String(cfg.ws_port);
-        if(cfg.concurrency) document.getElementById('cfg_concurrency').value = String(cfg.concurrency);
-        if(cfg.logos_path) document.getElementById('cfg_logos_path').value = cfg.logos_path;
-        if(cfg.firmware_path) document.getElementById('cfg_firmware_path').value = cfg.firmware_path;
-        if(cfg.imagestream_path) document.getElementById('cfg_imagestream_path').value = cfg.imagestream_path;
-      }}).catch(()=>{});
-      const toggle = document.getElementById('cfg_pw_toggle'); const inp = document.getElementById('cfg_password');
-      if(toggle && inp){ toggle.onclick = async function(){ const show = inp.type === 'password'; inp.type = show ? 'text' : 'password'; if(show){ try{ const cfg2 = await (await fetch('/api/config?include_password=1',{cache:'no-store'})).json(); if(cfg2 && typeof cfg2.password === 'string') inp.value = cfg2.password; }catch(e){} } } }
-    }
-    var g=document.getElementById('gear'); if(g) g.addEventListener('click', openCfg);
-    var dark=document.getElementById('dark_switch'); if(dark) dark.addEventListener('click', toggleDark);
-    var closeBtn = document.getElementById('cfg_close'); if(closeBtn) closeBtn.addEventListener('click', ()=>{ document.getElementById('cfg_backdrop').style.display='none'; const h=document.getElementById('browse_hint'); if(h) h.style.display='none'; });
-    var back = document.getElementById('cfg_backdrop'); if(back) back.addEventListener('click', function(e){ if(e.target===this){ this.style.display='none'; const h=document.getElementById('browse_hint'); if(h) h.style.display='none'; } });
-    var saveBtn = document.getElementById('cfg_save'); if(saveBtn) saveBtn.addEventListener('click', function(){
-      const pwInput = document.getElementById('cfg_password');
-      const val = (pwInput && typeof pwInput.value === 'string') ? pwInput.value : '';
-      const payload = { username:'admin', ws_port: parseInt(document.getElementById('cfg_ws_port').value || '80', 10), concurrency: parseInt(document.getElementById('cfg_concurrency').value || '6', 10), logos_path: document.getElementById('cfg_logos_path').value, firmware_path: document.getElementById('cfg_firmware_path').value, imagestream_path: document.getElementById('cfg_imagestream_path').value };
-      // Only send password if eye is showing (plaintext) or value not mask
-      if (pwInput && pwInput.type === 'text') { payload.password = val; }
-      const errDiv = document.getElementById('cfg_error'); if(errDiv){ errDiv.style.display='none'; errDiv.textContent=''; }
-      fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-        .then(async r=>{
-          if(!r.ok){
-            let j = null;
-            try{ j = await r.json(); }catch(e){}
-            if(errDiv){
-              if(j && j.error === 'invalid_paths' && Array.isArray(j.details)){
-                errDiv.textContent = 'Invalid paths: ' + j.details.map(d=>d.key+': '+d.path).join('; ');
-              }else if(j && j.error){
-                errDiv.textContent = 'Error: ' + (j.error || JSON.stringify(j));
-              }else{
-                errDiv.textContent = 'Save failed';
-              }
-              errDiv.style.display = 'block';
-            }else{
-              alert('Save failed');
-            }
-            return;
-          }
-          // success
-          try{ await r.json(); }catch(e){}
-          var b=document.getElementById('cfg_backdrop'); if(b) b.style.display='none'; const h=document.getElementById('browse_hint'); if(h) h.style.display='none';
-        }).catch(e=>{
-          if(errDiv){ errDiv.textContent = 'Network error: ' + (e && e.message ? e.message : String(e)); errDiv.style.display='block'; }
-        });
-    });
-
-    // Enhanced folder picker: prefer File System Access API (showDirectoryPicker) when available
-    async function pickFolderWithFallback(pickerInput, target){
-      // First try native directory picker API (better UX and 'OK' wording in some browsers)
-      if(window.showDirectoryPicker){
-        try{
-          const handle = await window.showDirectoryPicker();
-          // We cannot reliably get an absolute path for security reasons; use the handle name as a hint
-          const name = handle.name || '';
-          if(name) target.value = name + (name.endsWith('/') ? '' : '/');
-          return;
-        }catch(e){
-          // user cancelled or API not available/allowed — fall back
-        }
-      }
-      // Fallback: trigger hidden file input (webkitdirectory). The browser UI may show 'Upload' text.
-      return new Promise(resolve => {
-        const onChange = function(e){
-          const files = e.target.files;
-          if(files && files.length){
-            let chosen = '';
-            // Prefer an absolute path if the File object exposes it (Electron, some Chromium builds)
-            try{
-              if(files[0].path) {
-                // files[0].path is an absolute OS path in some environments
-                const pth = files[0].path;
-                // If the picker returned a path to a file, extract its containing directory
-                try{
-                  // derive containing directory using JS (no require in browsers)
-                  const sep = (pth.indexOf('\\') !== -1) ? '\\' : '/';
-                  const idx = pth.lastIndexOf(sep);
-                  if(idx>0) chosen = pth.substring(0, idx+1);
-                  else chosen = pth;
-                }catch(err){ chosen = pth; }
-              }
-            }catch(ex){ /* ignore */ }
-
-            // If not available, check the raw input value (may contain full path in some browsers)
-            if(!chosen){
-              try{
-                const val = pickerInput.value || '';
-                if(/^[A-Za-z]:\\|^\\\\|^\//.test(val)){
-                  // value looks like an absolute path
-                  chosen = val;
-                }
-              }catch(ex){}
-            }
-
-            // Last resort: use webkitRelativePath to derive folder name (relative)
-            if(!chosen){
-              if(files[0].webkitRelativePath) chosen = files[0].webkitRelativePath.split('/')[0] + '/';
-              else if(files[0].name) chosen = files[0].name;
-            }
-
-            target.value = chosen;
-          }
-          pickerInput.removeEventListener('change', onChange);
-          resolve();
-        };
-        pickerInput.addEventListener('change', onChange);
-        pickerInput.click();
-      });
-    }
-
-    function openServerFolderBrowser(startPath, targetSelector){
-      const backdrop = document.getElementById('cfg_browser_backdrop');
-      const list = document.getElementById('cfg_browser_list');
-      const pathInput = document.getElementById('cfg_browser_path');
-      const selectBtn = document.getElementById('cfg_browser_select');
-      const upBtn = document.getElementById('cfg_browser_up');
-      if(!backdrop||!list||!pathInput) return;
-      let current = startPath && startPath.trim() ? startPath : '';
-      async function load(p){
-        const url = '/api/list_dir' + (p ? ('?path=' + encodeURIComponent(p)) : '');
-        list.innerHTML = 'Loading...';
-        try{
-          const r = await fetch(url);
-          const j = await r.json();
-          if(!j.ok){ list.innerHTML = '<div class="small">Error: '+(j.error||'')+'</div>'; return; }
-          current = j.path || p || '';
-          pathInput.value = current;
-          list.innerHTML = '';
-          (j.entries||[]).forEach(ent=>{
-            if(!ent.is_dir) return;
-            const row = document.createElement('div');
-            row.className = 'row';
-            row.style.justifyContent = 'space-between';
-            row.style.padding = '6px 8px';
-            row.style.cursor = 'pointer';
-            row.textContent = ent.name;
-            row.onclick = ()=> {
-              // join current + ent.name using forward slashes
-              let base = current || '';
-              // normalize separators to '/'
-              base = base.replace(/\\/g, '/');
-              const next = base.endsWith('/') || base === '' ? (base + ent.name) : (base + '/' + ent.name);
-              load(next);
-            };
-            list.appendChild(row);
-          });
-        }catch(e){ list.innerHTML = '<div class="small">Error: '+String(e)+'</div>'; }
-      }
-      upBtn.onclick = ()=>{
-        try{
-          if(!current) return;
-          // normalize to forward slashes
-          let tmp = String(current).replace(/\\/g, '/');
-          if(tmp === '/' || tmp === '') return;
-          const parts = tmp.split('/').filter(p=>p.length>0);
-          if(parts.length <= 1){
-            // go to root or BASE_DIR equivalent
-            load('/');
-            return;
-          }
-          parts.pop();
-          const parent = '/' + parts.join('/');
-          load(parent);
-        }catch(e){}
-      };
-      document.getElementById('cfg_browser_cancel').onclick = ()=>{ backdrop.style.display='none'; };
-      selectBtn.onclick = ()=>{
-        const target = document.querySelector(targetSelector);
-        if(target){ target.value = pathInput.value; }
-        backdrop.style.display='none';
-      };
-      backdrop.style.display='flex';
-      load(current || '');
-    }
-
-    // Wire browse buttons to server-side browser
-    const fbtn = document.getElementById('cfg_firmware_browse'); if(fbtn) fbtn.addEventListener('click', ()=> openServerFolderBrowser(document.getElementById('cfg_firmware_path').value, '#cfg_firmware_path'));
-    const ibtn = document.getElementById('cfg_imagestream_browse'); if(ibtn) ibtn.addEventListener('click', ()=> openServerFolderBrowser(document.getElementById('cfg_imagestream_path').value, '#cfg_imagestream_path'));
-    const lbtn = document.getElementById('cfg_logos_browse'); if(lbtn) lbtn.addEventListener('click', ()=> openServerFolderBrowser(document.getElementById('cfg_logos_path').value, '#cfg_logos_path'));
-  })();
+  // Configuration modal logic now lives entirely in ui/settings.js
+  // (shared across all pages -- Hall family spec Part 2).
   </script>
 
             </div>
@@ -771,11 +521,11 @@
   <div id="logoCoordinatesRow" class="row" style="gap:12px;margin-top:8px;display:none;">
     <div style="flex:1;">
       <label style="display:block;font-size:0.9em;margin-bottom:4px;">Horizontal (X)</label>
-      <input type="number" id="logoHorizontal" min="0" max="98" value="88" style="width:100%;padding:4px;" />
+      <input type="number" id="logoHorizontal" min="0" max="100" value="88" style="width:100%;padding:4px;" />
     </div>
     <div style="flex:1;">
       <label style="display:block;font-size:0.9em;margin-bottom:4px;">Vertical (Y)</label>
-      <input type="number" id="logoVertical" min="0" max="100" value="10" style="width:100%;padding:4px;" />
+      <input type="number" id="logoVertical" min="1" max="100" value="10" style="width:100%;padding:4px;" />
     </div>
   </div>
 
@@ -833,7 +583,7 @@
        style="background:#222;color:#fff;padding:6px 10px;font-size:13px;
               display:flex;justify-content:space-between;align-items:center;cursor:move;">
     <span id="floatTitle">Live Preview</span>
-    <button onclick="closeFloatingPreview()"
+    <button onclick="closeFloatingPreview()" aria-label="Close preview"
             style="background:none;border:none;color:#fff;font-weight:bold;
                    cursor:pointer;font-size:16px;">✕</button>
   </div>
@@ -888,6 +638,8 @@ window.closeFloatingPreview = function(){
 
 <!-- Load Producer JS LAST -->
 <script src="/ui/dialogs.js?v=1"></script>
+<script src="/ui/settings.js?v=1"></script>
+  <script src="/ui/adminnav.js"></script>
 <script src="/ui/producer.js?v=R20_STREAM_LABELS"></script>
 
 <!-- Connection Monitoring -->
@@ -902,21 +654,10 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 3000;
 const HEARTBEAT_FAILURE_LIMIT = 3;
 
-function showConnectionBanner() {
-  const banner = document.getElementById("connection_banner");
-  if(banner && banner.style.display === 'none') {
-    banner.style.display = 'block';
-    document.body.style.paddingTop = '50px';
-  }
-}
-
-function hideConnectionBanner() {
-  const banner = document.getElementById("connection_banner");
-  if(banner && banner.style.display === 'block') {
-    banner.style.display = 'none';
-    document.body.style.paddingTop = '0';
-  }
-}
+// The persistent "connection lost" banner is gone. The heartbeat still records reachability in
+// window.__lumaConnection for diagnostics; an operation that really fails reports its own error.
+function showConnectionBanner() { window.__lumaConnection = {reachable:false, since:Date.now()}; }
+function hideConnectionBanner() { window.__lumaConnection = {reachable:true, since:Date.now()}; }
 
 function startConnectionMonitoring() {
   if(heartbeatInterval) return;

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script src="/ui/theme-boot.js"></script>
+  <link rel="stylesheet" href="/ui/family.css">
+  <link rel="stylesheet" href="/ui/remote.css">
+  <meta charset="utf-8"/>
+  <title>LumaSuite</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <link rel="icon" type="image/x-icon" href="/ui/favicon.ico">
+</head>
+<body class="remote user-page">
+  <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
+
+  <header class="remote-header">
+    <img id="company_logo" src="/ui/companylogo.png" alt="Hall Research">
+    <h1>LumaSuite</h1>
+    <span id="who" class="who"></span>
+    <button id="signout" class="secondary" type="button" hidden>Sign out</button>
+  </header>
+
+  <main class="remote-main">
+    <p id="loading" class="remote-loading" role="status">Loading...</p>
+
+    <div id="mode_tabs" class="mode-tabs" role="tablist" aria-label="Routing interface" hidden>
+      <button id="tab_standard" class="mode-tab" role="tab" type="button" aria-selected="true" data-view="standard">Routing</button>
+      <button id="tab_matrix" class="mode-tab" role="tab" type="button" aria-selected="false" data-view="matrix">Matrix</button>
+    </div>
+
+    <p id="no_routing" class="remote-empty" role="status" hidden>Your account is not set up to route. Ask an administrator.</p>
+
+    <div id="content" hidden>
+      <div class="user-toolbar">
+        <span id="selection_count" class="selection-count" aria-live="polite"></span>
+        <label class="toggle user-toggle" id="afv_toggle_label">
+          <input type="checkbox" id="afv_toggle" class="switch-input" checked>
+          <span class="label">Audio follows video</span>
+          <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+        </label>
+        <label class="toggle user-toggle" id="preview_toggle_label">
+          <input type="checkbox" id="preview_toggle" class="switch-input" checked>
+          <span class="label">Preview</span>
+          <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+        </label>
+      </div>
+      <section class="panel" id="panel_sources" aria-labelledby="h_sources">
+        <h2 id="h_sources">1 &middot; Choose a source</h2>
+        <p class="hint">What do you want to route?</p>
+        <div id="sources" class="pick-grid"></div>
+      </section>
+
+      <section class="panel" id="panel_displays" aria-labelledby="h_displays">
+        <div class="panel-head">
+          <h2 id="h_displays">2 &middot; Choose displays</h2>
+          <button id="clear_targets" class="secondary small" type="button" hidden>Clear selection</button>
+        </div>
+        <p class="hint">Where do you want to route it? Choose one or more.</p>
+        <div id="displays"></div>
+      </section>
+    </div>
+
+    <div id="matrix_content" hidden>
+      <div class="user-toolbar">
+        <div class="mx-modes" role="radiogroup" aria-label="What a click routes">
+          <label class="mx-mode"><input type="radio" name="mx_mode" id="mx_mode_av" value="av" checked> <span>Audio + Video</span></label>
+          <label class="mx-mode"><input type="radio" name="mx_mode" id="mx_mode_video" value="video"> <span>Video</span></label>
+          <label class="mx-mode"><input type="radio" name="mx_mode" id="mx_mode_audio" value="audio"> <span>Audio</span></label>
+        </div>
+        <label class="toggle user-toggle" id="preview_toggle_label_m">
+          <input type="checkbox" id="preview_toggle_m" class="switch-input" checked>
+          <span class="label">Preview</span>
+          <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+        </label>
+      </div>
+      <p id="mx_hint" class="hint mx-hint"></p>
+      <div class="mx-scroll" id="mx_scroll"><table class="mx-table" id="mx_table"></table></div>
+      <div id="mx_preview" class="mx-preview" hidden></div>
+    </div>
+  </main>
+
+  <div class="action-bar" id="action_bar">
+    <div class="summary" id="summary" aria-live="polite">Choose a source and at least one display.</div>
+    <button id="route_btn" class="btn-route" type="button" disabled>Route</button>
+  </div>
+
+  <script src="/ui/csrf.js"></script>
+  <script src="/ui/dialogs.js"></script>
+  <script src="/ui/remember.js"></script>
+  <script src="/ui/user.js"></script>
+</body>
+</html>
