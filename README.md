@@ -1,6 +1,6 @@
 # LumaSuite
 
-**Current Version: 1.1.0**
+**Current Version: 1.1.1**
 
 LumaSuite discovers, configures, routes and firmware-upgrades **LumaStream** HDMI-over-IP
 encoders and decoders (`HW-LUMA-E****` / `HW-LUMA-D****`) and **Atlona AT-OME-CS31** HDMI matrix

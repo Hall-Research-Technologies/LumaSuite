@@ -121,4 +121,4 @@ part of CI, so a release must have it run on the artifact that is actually going
 - **Publishing**: only a `v*` tag push publishes a GitHub Release, from all four `release-*` artifacts. A manual run or
   a push to `main` builds and uploads artifacts but publishes nothing. Tags are never created by the workflow, and a tag build stops at once unless the tag is `v` plus the version in `lumaserver.py` (the one authoritative version). The macOS build stamps that version into the bundle's `Info.plist`; the Windows build writes it into the executable's version resource.
 
-For a manual build of a release, tag the commit (for example `v1.1.0`) only when the release is approved.
+For a manual build of a release, tag the commit (for example `v1.1.1`) only when the release is approved.

@@ -43,6 +43,7 @@ EVENT_LABELS = {
     "route": "Routed a source to a display",
     "route_group": "Routed a source to a display group",
     "route_multi": "Routed a source to several displays",
+    "unroute": "Unrouted displays",
     "route_matrix": "Routed from the matrix",
     "route.refused_offline": "A route was refused because a device is offline",
     "device.aliases_changed": "Device names changed",

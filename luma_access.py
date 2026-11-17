@@ -68,6 +68,7 @@ ROUTES: dict = {
     "/api/user/route": Access.USER,
     "/api/user/route_group": Access.USER,
     "/api/user/route_multi": Access.USER,
+    "/api/user/unroute": Access.USER,
     "/api/user/route_check": Access.USER,
     "/api/user/matrix": Access.USER,
     "/api/user/preview": Access.USER,

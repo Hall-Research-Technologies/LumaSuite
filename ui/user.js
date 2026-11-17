@@ -692,9 +692,13 @@
     remember('targets', state.targets.map(targetKey).join('|'));
   }
 
+  // Clear selection forgets the source and every display, group and wall chosen, and the bookmarks
+  // of both. It is only a choice on the page: nothing is sent to a device and nothing is unrouted.
   function clearTargets() {
-    if (!state.targets.length) return;
+    if (!state.targets.length && !state.source) return;
     state.targets = [];
+    state.source = '';
+    remember('source', '');
     rememberTargets();
     render();
   }
@@ -719,9 +723,17 @@
     var summary = $('summary');
     var button = $('route_btn');
     var clear = $('clear_targets');
+    var unroute = $('unroute_btn');
     var count = $('selection_count');
     summary.replaceChildren();
-    if (clear) clear.hidden = !state.targets.length;
+    if (clear) clear.disabled = !state.targets.length && !state.source;
+    // Unroute needs only destinations: displays and groups, one or many. A video wall is not part of
+    // it, so a chosen wall holds it back. It is held back while those displays are being written to.
+    if (unroute) {
+      var hasWall = state.targets.some(function (t) { return t.kind === 'wall'; });
+      var busy = state.targets.some(function (t) { return state.routing[targetKey(t)]; });
+      unroute.disabled = !state.targets.length || hasWall || busy;
+    }
     if (count) count.textContent = state.targets.length ? chosenWords() + ' chosen' : '';
     var source = state.source ? nameOf(state.sources, state.source) : '';
     if (source && state.targets.length) {
@@ -796,6 +808,62 @@
   function routeNow() {
     if (!state.source || !state.targets.length) return;
     routeTo(state.source, state.targets.slice());
+  }
+
+  // The Unroute button: put every chosen display and group into the unrouted state. It needs no
+  // source. It follows the same life as a route (claim the targets, one request, mark each
+  // outcome, never lock the page) and reads back nothing of its own: the server verifies each
+  // display from the device and the page marks only what the server says.
+  function unrouteNow() {
+    var chosen = state.targets.filter(function (t) { return t.kind !== 'wall' && !state.routing[targetKey(t)]; });
+    if (!chosen.length) return Promise.resolve();
+    var opener = focusToken();
+    var token = ++routeSeq;
+    var sent = {source: '', chosen: chosen, token: token,
+                displays: chosen.filter(function (t) { return t.kind === 'display'; }).map(function (t) { return t.id; }),
+                groups: chosen.filter(function (t) { return t.kind === 'group'; }).map(function (t) { return t.id; }),
+                walls: []};
+    state.inflight++;
+    chosen.forEach(function (t) {
+      var key = targetKey(t);
+      state.routing[key] = true;
+      routeToken[key] = token;
+      delete state.outcome[key];
+      paintCardState(key);
+    });
+    renderAction();
+    function release() {
+      state.inflight--;
+      chosen.forEach(function (t) { delete state.routing[targetKey(t)]; paintCardState(targetKey(t)); });
+      renderAction();
+    }
+    return api('/api/user/unroute', {method: 'POST', body: {displays: sent.displays, groups: sent.groups}})
+      .then(function (answer) {
+        release();
+        var body = answer.body || {};
+        if (!body.results) {
+          chosen.forEach(function (t) { if (mine(sent, targetKey(t))) state.outcome[targetKey(t)] = 'failed'; paintCardState(targetKey(t)); });
+          say(failureText(answer.res, body), 'error');
+          return;
+        }
+        applyTargets(sent, body);
+        if (body.unrouted === body.total) {
+          say(body.total === 1 ? 'Unrouted' : body.summary, 'ok');
+          return;
+        }
+        say(body.summary, 'error');
+        var rows = body.results.filter(function (r) { return !r.ok; })
+          .map(function (r) { return {label: r.name, value: resultWords(r)}; });
+        if (window.lumaConfirm && rows.length) {
+          var closed = window.lumaConfirm({title: 'Some displays were not unrouted', message: body.summary + '.',
+                                           summary: rows, confirmText: 'OK', cancelText: null});
+          if (closed && typeof closed.then === 'function') return closed.then(function () { restoreFocus(opener); });
+        }
+      }, function () {
+        release();
+        chosen.forEach(function (t) { if (mine(sent, targetKey(t))) state.outcome[targetKey(t)] = 'failed'; paintCardState(targetKey(t)); });
+        say('Could not reach LumaSuite', 'error');
+      }).then(function () { return scheduleRefresh(sent.displays); });
   }
 
   // The one routing action. Both the Route button and a drop end here, so there is
@@ -1386,6 +1454,7 @@
   function start() {
     watchVisibility();
     $('route_btn').addEventListener('click', routeNow);
+    $('unroute_btn').addEventListener('click', unrouteNow);
     $('clear_targets').addEventListener('click', clearTargets);
     // Bound as soon as the control exists, not after the saved value loads.
     var afv = $('afv_toggle');

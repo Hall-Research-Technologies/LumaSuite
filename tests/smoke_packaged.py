@@ -85,7 +85,7 @@ try:
     status, body = wait_for(PORT_LOCAL, "/api/app_version")
     check("the packaged application starts and answers", status == 200, str(status))
     version = json.loads(body or b"{}").get("version") if status == 200 else None
-    check("it reports the version it was built from", version == "1.1.0", str(version))
+    check("it reports the version it was built from", version == "1.1.1", str(version))
 
     for path in ("/", "/ui/matrix.html", "/ui/wall.html", "/ui/producer.html", "/ui/manual.html",
                  "/ui/user.html", "/ui/admin_users.html", "/ui/login.html", "/login", "/user", "/admin/users",

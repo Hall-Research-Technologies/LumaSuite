@@ -32,7 +32,7 @@ just device provisioning.
 
 ## 2. Version / release state
 
-**VERIFIED FROM SOURCE.** Current version: **1.1.0**. The one authoritative version is
+**VERIFIED FROM SOURCE.** Current version: **1.1.1**. The one authoritative version is
 `__version__` in `lumaserver.py`. Everything that shows a version reads it: the launcher
 (`app_launcher.py` declares the same value and `tests/test_release_consistency.py` pins the
 two together), `GET /api/app_version`, the Settings Application block, the User Guide

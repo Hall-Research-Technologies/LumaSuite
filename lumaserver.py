@@ -114,7 +114,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 # --- CSV Export Endpoint for Device Manager ---
 
@@ -8190,6 +8190,49 @@ def _route_av_for_users(decoder_ip, encoder_ip):
         _observe_cache.invalidate("matrix")
 
 
+def _unroute_for_users(decoder_ip):
+    """A restricted User's Unroute: one display, video and audio subscribed to nothing, verified.
+
+    The engine is `luma_breakaway.unroute`, built on the device calls measured on hardware. A
+    switcher has no audio path and no cleared-stream call has been observed on one, so it is
+    refused and never written to. The cache follows what the decoder reported afterwards.
+    """
+    try:
+        with cache_lock:
+            is_switcher = (cache_units.get(decoder_ip, {}).get("type") or "").lower() == "switcher"
+        if is_switcher:
+            return {"ok": False, "status": "refused", "reason": "not_supported"}
+        timeout = float(CONFIG.get("TIMEOUT", 3.0))
+        outcome = luma_breakaway.unroute(
+            lambda method, params: _ws_call_auth(decoder_ip, method, params, timeout),
+            password=CONFIG.get("password", "password"))
+        after = outcome.get("after")
+        if isinstance(after, dict):
+            with cache_lock:
+                unit = cache_units.get(decoder_ip)
+                if isinstance(unit, dict):
+                    dec = unit["dec"] if isinstance(unit.get("dec"), dict) else {}
+                    unit["dec"] = dec
+                    dec.setdefault("video", {})["streamname"] = after.get("video", "")
+                    audio = dec.setdefault("audio", {})
+                    audio["streamname"] = after.get("audio", "")
+                    if isinstance(after.get("follow"), bool):
+                        audio["followvideoenable"] = after["follow"]
+                    audio["ip"] = after.get("audio_address", "")
+                    if outcome.get("ok"):
+                        unit.pop("routed_encoder_ip", None)
+                        unit.pop("routed_streamname", None)
+            _persist_units_cache()
+        if outcome.get("ok"):
+            logging.info("[unroute] %s verified (%d write(s))", decoder_ip, len(outcome.get("writes") or []))
+        else:
+            logging.warning("[unroute] %s: %s (%s, rollback %s)", decoder_ip, outcome.get("reason"),
+                            outcome.get("status"), outcome.get("rollback"))
+        return outcome
+    finally:
+        _observe_cache.invalidate("matrix")
+
+
 def _verify_route_for_users(decoder_ip, encoder_ip):
     """Ask a display, read-only, whether it now holds this source's video stream.
 
@@ -8307,7 +8350,8 @@ REMOTE = luma_wiring.RemoteSystem(
     destination_check=_remote_destination_check,
     walls=luma_walls.WallDirectory(_wall_directory, _vw_device_id),
     route_wall=_route_wall_for_users, route_mode=_route_mode_for_users,
-    identify=_identify_for_route, verify_route=_verify_route_for_users)
+    identify=_identify_for_route, verify_route=_verify_route_for_users,
+    unroute=_unroute_for_users)
 
 
 def start_remote_access():

@@ -98,7 +98,7 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
              observe, remote_enabled, set_remote_state, remote_config,
              locks, tls, cert_paths, tls_context_for, certificate_state,
              preview_fetch, user_shell, walls=None, route_wall=None, route_mode=None,
-             identify=None, verify_route=None):
+             identify=None, verify_route=None, unroute=None):
     """Attach the remote-access API.
 
     Everything the module needs is passed in rather than imported from the
@@ -1359,6 +1359,8 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
 
     #: What one request may name. Bounded before anything is resolved, so a hostile
     #: list costs a 400 and not a loop.
+    #: The one plane that has no source: every display in the request is put into the unrouted state.
+    UNROUTE_PLANE = "unroute"
     MULTI_MAX_DISPLAYS = 64
     MULTI_MAX_GROUPS = 16
     MULTI_MAX_WALLS = 16
@@ -1527,6 +1529,76 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
                                                else unit_word + "s"),
             "results": rows})
 
+    @app.route("/api/user/unroute", methods=["POST"])
+    def api_user_unroute():
+        """Unroute permitted displays and groups: destinations only, no source.
+
+        The same selection model as a route: individual displays and Display Groups, any mix.
+        The whole request is authorised before anything is written (one identity the account
+        holds no grant for refuses all of it), groups are resolved to members now, each physical
+        display is written once, and each display is its own operation: lock, re-check the
+        account, verify the hardware identity, write, read back. One that fails, is offline or is
+        busy does not stop the others, and the answer counts what really became of each.
+        Video walls are not part of this request.
+        """
+        data = luma_request.json_object()
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "displays and groups required"}), 400
+        display_ids = _bounded_list(data.get("displays"), MULTI_MAX_DISPLAYS,
+                                    luma_projection.canonical_identity)
+        group_ids = _bounded_list(data.get("groups"), MULTI_MAX_GROUPS,
+                                  lambda g: g.strip().lower())
+        if display_ids is None or group_ids is None:
+            return jsonify({"ok": False, "error": "displays and groups required"}), 400
+        if data.get("walls"):
+            return jsonify({"ok": False, "reason": "not_supported",
+                            "error": "A video wall cannot be unrouted from here."}), 400
+        if not display_ids and not group_ids:
+            return jsonify({"ok": False, "error": "choose at least one display or group"}), 400
+        if unroute is None:
+            return jsonify({"ok": False, "reason": "not_supported",
+                            "error": "That is not available."}), 404
+
+        def _check(account):
+            if not account.permissions.may_use_interface("standard"):
+                return "interface_not_permitted"
+            for identity in display_ids:
+                if not account.permissions.may_control_destination(identity):
+                    return "destination_not_permitted"
+            for group_id in group_ids:
+                if not account.permissions.may_control_group(group_id):
+                    return "group_not_permitted"
+            return None
+
+        refusal = _revalidate(_check, "/api/user/unroute")          # before any wait
+        if refusal is not None:
+            return refusal
+        ordered, missing = _resolve_destinations(display_ids, group_ids)
+        if missing is not None:
+            return jsonify({"ok": False, "error": "That group is not available."}), 404
+        if len(ordered) > MULTI_MAX_DESTINATIONS:
+            return jsonify({"ok": False, "error": "too many displays in one request"}), 400
+        summary = _run_batch("/api/user/unroute", _check, None, ordered, [], UNROUTE_PLANE,
+                             _display_names(), group_ids=group_ids)
+        store.audit("unroute", actor=_current_account(), detail={
+            "groups": group_ids, "routed": summary["routed"], "total": summary["total"],
+            "results": [{"display": r.get("display"), "ok": r.get("ok"), "result": r.get("result")}
+                        for r in summary["results"]]})
+        rows = []
+        for r in summary["results"]:
+            row = {"index": r["index"], "name": r.get("name") or "Display",
+                   "ok": bool(r.get("ok")), "result": r.get("result") or "failed"}
+            row.update(_declined_fields(r))
+            rows.append(row)
+        return jsonify({
+            "ok": summary["ok"], "unrouted": summary["routed"], "total": summary["total"],
+            "timing": summary["timing"],
+            "targets": _target_states(display_ids, group_ids, [], ordered, summary["results"],
+                                      UNROUTE_PLANE),
+            "summary": "%d of %d %s unrouted" % (summary["routed"], summary["total"],
+                                                 "display" if summary["total"] == 1 else "displays"),
+            "results": rows})
+
     _WALL_PREFIX = "wall:"
 
     def _state_of(row, plane):
@@ -1540,7 +1612,7 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
         if row.get("ok"):
             return "verified"
         if (row.get("result") == "not_verified" and plane != luma_user_matrix.MODE_AUDIO
-                and row.get("kind") != "wall"):
+                and plane != UNROUTE_PLANE and row.get("kind") != "wall"):
             return "unconfirmed"
         return "failed"
 
@@ -1751,7 +1823,31 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
                     "result": "unreachable" if reason == "identity_unconfirmed" else "failed",
                     "reason": reason, "display": identity, "name": _name(identity)}
 
+        def unroute_run(identity):
+            def run():
+                decoder_ip = _address_index().get(identity)
+                if not decoder_ip:
+                    return {"ok": False, "result": "not_found", "display": identity,
+                            "name": _name(identity)}
+                if _is_offline(identity):
+                    return {"ok": False, "result": "offline", "display": identity,
+                            "name": _name(identity)}
+                reason = _confirm_identity(decoder_ip, identity)
+                if reason:
+                    return _not_confirmed(identity, reason)
+                outcome = unroute(decoder_ip)
+                status = outcome.get("status") or ("verified" if outcome.get("ok") else "failed")
+                if status == "refused":
+                    status = "failed"
+                return {"ok": bool(outcome.get("ok")), "result": status,
+                        "reason": outcome.get("reason") or "", "audio": "unchanged",
+                        "display": identity, "name": _name(identity)}
+            return run
+
         def display_run(identity):
+            if plane == UNROUTE_PLANE:
+                return unroute_run(identity)
+
             def run():
                 address = _address_index()
                 encoder_ip = address.get(source_id)

@@ -363,11 +363,74 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     find(h, 'displays', D2).click();
     assert.strictEqual(find(h, 'displays', D2).attrs['aria-pressed'], 'false');
     assert.strictEqual(h.byId.selection_count.textContent, '1 display and 1 group chosen');
-    assert.strictEqual(h.byId.clear_targets.hidden, false);
+    assert.ok(!h.byId.clear_targets.disabled, 'Clear selection is offered once anything is chosen');
     h.byId.clear_targets.click();
     assert.strictEqual(h.byId.selection_count.textContent, '');
-    assert.strictEqual(h.byId.clear_targets.hidden, true);
+    assert.ok(h.byId.clear_targets.disabled, 'and has nothing to do again');
     [D1, GRP].forEach(id => assert.strictEqual(find(h, 'displays', id).attrs['aria-pressed'], 'false', id));
+  });
+
+  await scenario('Clear selection forgets the source as well, and sends nothing to any device', async () => {
+    const h = harness({routes: baseRoutes()});
+    await settle();
+    assert.ok(h.byId.clear_targets.disabled, 'nothing chosen, nothing to clear');
+    find(h, 'sources', SRC_A).click();
+    assert.ok(!h.byId.clear_targets.disabled, 'a source alone is a selection');
+    find(h, 'displays', D1).click();
+    find(h, 'displays', GRP).click();
+    assert.ok(!h.byId.route_btn.disabled);
+    const before = h.requests.length;
+    h.byId.clear_targets.click();
+    assert.strictEqual(find(h, 'sources', SRC_A).attrs['aria-pressed'], 'false', 'the source is cleared');
+    [D1, GRP].forEach(id => assert.strictEqual(find(h, 'displays', id).attrs['aria-pressed'], 'false', id));
+    assert.ok(h.byId.route_btn.disabled, 'Route needs a fresh choice');
+    assert.strictEqual(h.requests.filter(r => r.method !== 'GET').length, 0, 'no write of any kind');
+    assert.ok(h.requests.length >= before);
+  });
+
+  await scenario('the action bar carries Clear selection, Unroute and Route in that order', async () => {
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'ui', 'user.html'), 'utf8');
+    const bar = html.slice(html.indexOf('id="action_bar"'), html.indexOf('<script src="/ui/csrf.js"'));
+    const order = ['clear_targets', 'unroute_btn', 'route_btn'].map(id => bar.indexOf('id="' + id + '"'));
+    assert.ok(order.every(n => n > 0) && order[0] < order[1] && order[1] < order[2], 'bar order ' + order);
+  });
+
+  await scenario('Unroute needs only destinations, sends displays and groups and no source, and Clear selection never sends', async () => {
+    const answer = {ok: true, unrouted: 2, total: 2, summary: '2 of 2 displays unrouted', results: [
+      {index: 0, name: 'One', ok: true, result: 'verified'}, {index: 1, name: 'Two', ok: true, result: 'verified'}],
+      targets: [{kind: 'display', index: 0, state: 'verified'}, {kind: 'group', index: 0, state: 'verified'}]};
+    const h = harness({routes: baseRoutes({'POST /api/user/unroute': {status: 200, body: answer}})});
+    await settle();
+    assert.ok(h.byId.unroute_btn.disabled, 'nothing chosen, nothing to unroute');
+    find(h, 'displays', D1).click();                    // no source chosen at all
+    assert.ok(!h.byId.unroute_btn.disabled, 'a destination alone is enough');
+    assert.ok(h.byId.route_btn.disabled, 'while Route still needs a source');
+    find(h, 'displays', GRP).click();
+    const before = h.requests.length;
+    h.byId.unroute_btn.click();
+    await settle();
+    const posts = h.requests.slice(before).filter(r => r.method === 'POST');
+    assert.strictEqual(posts.length, 1);
+    assert.strictEqual(posts[0].url, '/api/user/unroute');
+    assert.deepStrictEqual(posts[0].body, {displays: [D1], groups: [GRP]}, 'no source, no address');
+    assert.strictEqual(posts[0].headers['X-LumaSuite-CSRF'], 'csrf-token-1');
+    assert.ok(h.toasts.some(t => t[1] === 'ok'), 'success is reported once the server verified it');
+    const afterUnroute = h.requests.length;
+    h.byId.clear_targets.click();
+    assert.strictEqual(h.requests.slice(afterUnroute).filter(r => r.method !== 'GET').length, 0, 'Clear selection writes nothing');
+  });
+
+  await scenario('a chosen video wall holds Unroute back, and a failed display is reported, not hidden', async () => {
+    const failed = {ok: false, unrouted: 0, total: 1, summary: '0 of 1 display unrouted', results: [
+      {index: 0, name: 'One', ok: false, result: 'not_verified'}],
+      targets: [{kind: 'display', index: 0, state: 'failed'}]};
+    const h = harness({routes: baseRoutes({'POST /api/user/unroute': {status: 200, body: failed}})});
+    await settle();
+    find(h, 'displays', D1).click();
+    h.byId.unroute_btn.click();
+    await settle();
+    assert.ok(h.toasts.some(t => t[1] === 'error'), 'a failure is an error, never a success');
+    assert.ok(!h.toasts.some(t => t[1] === 'ok'));
   });
 
   await scenario('Route needs a source and at least one display or group, and sends them in the order chosen', async () => {
@@ -428,6 +491,7 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     assert.strictEqual(mem.data.targets, 'display:' + D1 + '|group:' + GRP + '|display:' + D2);
     h.byId.clear_targets.click();
     assert.strictEqual(mem.data.targets, undefined, 'clearing forgets the bookmark');
+    assert.ok(!mem.data.source, 'and the source bookmark');
   });
 
   await scenario('the old single-display bookmark is read once and retired', async () => {

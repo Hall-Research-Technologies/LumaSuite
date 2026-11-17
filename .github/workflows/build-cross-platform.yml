@@ -172,6 +172,8 @@ jobs:
           python tests/test_thumbnail.py
           python tests/test_firmware_check_now.py
           python tests/test_user_multi.py
+          python tests/test_user_unroute.py
+          python tests/test_unroute_engine.py
           python tests/test_user_walls.py
           python tests/test_user_matrix.py
           python tests/test_account_lifecycle.py

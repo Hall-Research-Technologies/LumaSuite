@@ -1,4 +1,22 @@
-# LumaSuite v1.1.0 Release Notes
+# LumaSuite v1.1.1 Release Notes
+LumaSuite v1.1.1 corrects defects found in hardware acceptance of the v1.1.0 candidate, which was never published. It carries everything described for v1.1.0 below, plus the changes here.
+
+## What changed since the v1.1.0 candidate
+
+- **Remote Access navigation:** the Remote Access item appears when it is turned on and disappears when it is turned off, without refreshing. If HTTPS is chosen and no usable certificate exists, you choose Create Certificate, Change to HTTP or Cancel; nothing is created or downgraded silently.
+- **Per-unit credentials:** the credential that authenticates a unit is remembered for that unit and used for every later authenticated operation, until you change it or the unit refuses it. A mixed installation works; passwords are never shown.
+- **Routing does not freeze the page:** routes to several displays or Display Groups run independently and each shows pending, verified or failed. Displays that are not members of a chosen Display Group are never touched.
+- **Clear selection and Unroute:** Clear selection changes no device. Unroute needs no source: it sets the chosen displays, or every display of a chosen group, to no stream, and reads each display back. A video switcher is refused, and a video wall is refused.
+- **Security qualification:** all 565 security mutation checks were run and every one is caught.
+
+### Hardware status of Unroute
+
+The `none` stream value was observed on one decoder: video and then audio set to `none`, read back, and restored. That is the case with audio held on its own (audio follows video off). Unroute with audio following video is covered by simulated-device tests only.
+
+---
+
+# Earlier: v1.1.0 release notes (not published)
+
 LumaSuite v1.1.0 adds optional Remote Access with accounts, so people can route sources to displays from a phone or another computer without being given the full LumaSuite interface. It also adds Display Groups, a Matrix for Users, saved Video Walls as User destinations, verified routing, an optional fixed local port, a rebuilt Device Manager table and third-party licence notices inside the application.
 
 Nothing changes until an administrator turns Remote Access on. Existing devices, routes, video walls and settings are untouched.
@@ -70,10 +88,10 @@ Nothing changes until an administrator turns Remote Access on. LumaSuite's own l
 
 | Platform | Download | Status |
 |---|---|---|
-| Windows x86-64 | `LumaSuite-v1.1.0-windows-x86_64.zip` (`LumaSuite.exe` with `LICENSE`, `THIRD_PARTY_NOTICES.md`, `REBUILD.md`, a `licenses` folder with the LGPL and GPL texts, and the pystray 0.19.5 source in `third_party`) | Tested on Windows 11. Physical LumaStream equipment was used to test this release's routing, Video Wall and Production Studio features in earlier builds of the release; the final build was tested with simulated devices. |
-| macOS Intel | `LumaSuite-v1.1.0-macos-x86_64.zip` | Built by the release workflow. Not run on a Mac by Hall Research. |
-| macOS Apple Silicon | `LumaSuite-v1.1.0-macos-arm64.zip` | As above. |
-| Linux x86-64 | `LumaSuite-v1.1.0-linux-x86_64.tar.gz` | Built on Ubuntu only; needs a desktop session. Not used on a desktop by Hall Research. |
+| Windows x86-64 | `LumaSuite-v1.1.1-windows-x86_64.zip` (`LumaSuite.exe` with `LICENSE`, `THIRD_PARTY_NOTICES.md`, `REBUILD.md`, a `licenses` folder with the LGPL and GPL texts, and the pystray 0.19.5 source in `third_party`) | Tested on Windows 11. Physical LumaStream equipment was used to test this release's routing, Video Wall and Production Studio features in earlier builds of the release; the final build was tested with simulated devices. |
+| macOS Intel | `LumaSuite-v1.1.1-macos-x86_64.zip` | Built by the release workflow. Not run on a Mac by Hall Research. |
+| macOS Apple Silicon | `LumaSuite-v1.1.1-macos-arm64.zip` | As above. |
+| Linux x86-64 | `LumaSuite-v1.1.1-linux-x86_64.tar.gz` | Built on Ubuntu only; needs a desktop session. Not used on a desktop by Hall Research. |
 
 The macOS builds are one architecture each. Windows on Arm, 32-bit systems and Linux on Arm are not provided. The minimum macOS and Linux versions have not been established. None of the downloads is code signed, so Windows SmartScreen and macOS Gatekeeper ask you to confirm the first time.
 

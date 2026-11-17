@@ -129,6 +129,10 @@ body.remote input[type="text"], body.remote input[type="password"] {
 .action-bar .summary .muted { color: var(--text-muted); }
 .btn-route { min-height: var(--touch-target); padding: 0 22px; font-size: 16px; font-weight: 600;
              border-radius: 9px; cursor: pointer; }
+/* Clear selection and Unroute sit beside Route, the same height, quieter: secondary, never ghost. */
+.btn-action { min-height: var(--touch-target); padding: 0 18px; font-size: 14px; font-weight: 600;
+              border-radius: 9px; cursor: pointer; }
+.btn-action:disabled { cursor: not-allowed; }
 
 .result-list { margin: 8px 0 0; padding: 0; list-style: none; font-size: 13px; }
 .result-list li { padding: 3px 0; display: flex; gap: 8px; }
@@ -143,7 +147,7 @@ body.remote input[type="text"], body.remote input[type="password"] {
   .remote-header img { height: 28px; }
   .action-bar { flex-wrap: wrap; padding-left: 12px; padding-right: 12px; }
   .action-bar .summary { flex-basis: 100%; }
-  .btn-route { flex: 1; }
+  .btn-route, .btn-action { flex: 1; }
 }
 @media (min-width: 1200px) { .pick-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .pick, .btn-route { transition: none; } }
@@ -168,7 +172,7 @@ body.remote input[type="text"], body.remote input[type="password"] {
 button.small { min-height: 30px; padding: 0 12px; font-size: 13px; }
 /* a chosen card says so in words and shape as well as colour */
 .pick[aria-pressed="true"] .pick-name::before { content: "\2713\00a0"; }
-.pick:focus-visible, .btn-route:focus-visible, button.small:focus-visible {
+.pick:focus-visible, .btn-route:focus-visible, .btn-action:focus-visible, button.small:focus-visible {
   outline: 2px solid var(--action-primary); outline-offset: 2px; }
 
 /* ---- routing interface tabs: Routing | Matrix (a selected tab is filled) ---- */

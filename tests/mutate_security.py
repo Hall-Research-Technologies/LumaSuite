@@ -795,6 +795,11 @@ MUTATIONS = [
      "        results.append(dict(outcome, index=index))",
      "        results.append(dict(outcome, index=index))" + NL + "        if not outcome.get(" + Q + "ok" + Q + "): break",
      "one failed display stops every display after it",
+     [py("test_display_groups.py", "SequentialRunTests")]),
+    ("groups.parallel-entry-failure-escapes", "luma_groups.py",
+     "            outcome = {\"ok\": False, \"reason\": \"error\"}\n        return dict(outcome, index=index, t_start=started",
+     "            raise\n        return dict(outcome, index=index, t_start=started",
+     "one display that raises in a parallel route fails the whole batch instead of only itself",
      [py("test_group_scale.py", "SizeTests")]),
 
     # ---- where a remote caller may make the server connect ----------------------
@@ -1829,13 +1834,13 @@ AV_MUTATIONS = [
      "the administrator's endpoint accepts the restricted User's route as a mode",
      [py(AV, "BreakawayIsPreservedTests")]),
     ("av.engine-cache-audio-not-recorded", "lumaserver.py",
-     '                audio["streamname"] = after.get("audio", "")\n',
-     "                pass\n",
+     '\n                audio["streamname"] = after.get("audio", "")\n',
+     "\n                pass\n",
      "the matrix draws a User's audio dot on the source the display held before the route",
      [py(AV, "TheCacheAgreesWithTheDeviceTests")]),
     ("av.engine-cache-follow-not-recorded", "lumaserver.py",
-     '                    audio["followvideoenable"] = after["follow"]\n',
-     "                    pass\n",
+     '\n                    audio["followvideoenable"] = after["follow"]\n                audio["ip"]',
+     '\n                    pass\n                audio["ip"]',
      "the cache forgets whether the display's audio follows its video after a route",
      [py(AV, "TheCacheAgreesWithTheDeviceTests")]),
     ("av.rollback-writes-audio-that-follows", "luma_breakaway.py",
@@ -2093,8 +2098,8 @@ MUTATIONS += RESTORE_SESSION_MUTATIONS
 SENTENCE_SUITE = py("test_user_av_convergence.py", "TheSentenceReachesEverySurfaceTests")
 REFUSAL_SENTENCE_MUTATIONS = [
     ("refusal.multi-rows-drop-the-sentence", "luma_remote_api.py",
-     "            row.update(_declined_fields(r))\n",
-     "",
+     'total=r.get("total", 0))\n            row.update(_declined_fields(r))\n',
+     'total=r.get("total", 0))\n',
      "a drop, a multi-select and the Matrix say nothing about why the engine declined",
      [SENTENCE_SUITE]),
     ("refusal.group-rows-drop-the-sentence", "luma_remote_api.py",
@@ -2388,6 +2393,10 @@ def main():
     parser.add_argument("--check", action="store_true", help="verify every anchor, run nothing")
     parser.add_argument("--coverage", action="store_true", help="every suite is broken by at least one mutation")
     parser.add_argument("--out", help="directory for each suite's full output")
+    parser.add_argument("--skip-baseline", action="store_true",
+                        help="do not run each suite clean first (a sharded sweep runs --baseline-only once instead)")
+    parser.add_argument("--baseline-only", action="store_true", help="run every suite clean, mutate nothing")
+    parser.add_argument("--shard", help="K/N: run only mutations whose position modulo N equals K (parallel trees)")
     args = parser.parse_args()
 
     if not (args.check):
@@ -2407,6 +2416,9 @@ def main():
     if args.routing:
         mine = {m[0] for m in ROUTING_MUTATIONS}
         selected = [m for m in selected if m[0] in mine]
+    if args.shard:
+        k, n = (int(x) for x in args.shard.split("/"))
+        selected = [m for i, m in enumerate(selected) if i % n == k]
     ids = [m[0] for m in MUTATIONS]
     assert len(ids) == len(set(ids)), "duplicate mutation ids"
 
@@ -2430,11 +2442,22 @@ def main():
     for m in selected:
         for label, command in m[5]:
             suites[label] = command
-    for label, command in sorted(suites.items()):
+    if args.baseline_only:
+        suites = {label: command for m in MUTATIONS for label, command in m[5]}
+    failed = []
+    for label, command in ([] if args.skip_baseline else sorted(suites.items())):
         code, _ = run_suite(command, out_dir, "baseline")
         if code != 0:
             print("BASELINE FAILS: %s -- a mutation cannot be judged against a failing suite" % label)
-            return 3
+            failed.append(label)
+            if not args.baseline_only:
+                return 3
+        elif args.baseline_only:
+            print("baseline ok  %s" % label)
+        sys.stdout.flush()
+    if args.baseline_only:
+        print("%d suites, %d failing clean" % (len(suites), len(failed)))
+        return 1 if failed else 0
 
     survivors, caught, seen_failing = [], [], set()
     for m in selected:

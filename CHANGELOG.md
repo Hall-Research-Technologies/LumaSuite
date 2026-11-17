@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.1 - 2026-11-17
+
+Corrects defects found in hardware acceptance of the unpublished v1.1.0 candidate. Remote Access, Display Groups,
+video walls and settings are as described under v1.1.0 below; nothing changes until an administrator turns Remote Access on.
+
+### Fixed
+
+- Remote Access: the Remote Access navigation item follows the setting without a page refresh. Turning HTTPS on with no usable certificate now offers Create Certificate, Change to HTTP or Cancel instead of starting broken HTTPS.
+- Each unit keeps the credential that last authenticated it and uses it for discovery, sign-in, upload, proxy, routing, Preview, walls and Production Studio. A stale credential is replaced when the unit refuses it.
+- Routing: a route no longer locks the whole page. Several routes can be in flight; each display shows pending, verified or failed. Displays and Display Groups can be chosen together, and a display that is not a member of a chosen group is never written.
+- Routing page: Clear selection forgets the chosen source, displays and groups and sends nothing to a device.
+- Routing page: Unroute clears what the chosen displays or Display Groups are showing, with no source needed.
+- Security test coverage: all 565 security mutation checks now run and are caught.
+
 ## v1.1.0 - 2026-11-11
 
 Adds optional Remote Access with accounts, Display Groups, verified routing, a rebuilt Device Manager table,
