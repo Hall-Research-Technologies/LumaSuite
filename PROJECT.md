@@ -2300,3 +2300,29 @@ The new setting never reads or writes Remote Access's port, adapter, transport, 
 **Logging.** INFO events only (conflict, alternate chosen, port changed, restart); nothing periodic; no secrets.
 
 **Tests.** `tests/test_local_port.py` (controller, file, routes; real loopback sockets), `tests/test_launcher_port.py` + `tests/launcher_port_driver.py` (the real `AppWindow` under a withdrawn Tk root, driven with `btn.invoke()`; skipped loudly when Tk cannot initialise), `tests/port_settings_test.js` (render path and request contract), mutations `port.*` in `tests/mutate_security.py`.
+
+
+## 38. Restricted routing: no page-wide lock, and a route is only ever what it has been shown to be
+
+Found on hardware against the v1.1.0 draft: after one route the Routing and Matrix pages refused every further route until
+verification and a full state read had finished, and a display that was merely slow to report the stream it had taken was
+drawn as a failure (a red mark) and then corrected by the next refresh. Both were in `ui/user.js`; the server was already
+parallel and per-display locked.
+
+- **The page holds only what it is writing to.** `state.routing` is per target (display, group, wall, matrix row); there is
+  no page-wide busy flag. A second route to a *different* target goes straight out; a second route to the *same* target
+  waits for the first (`Still routing`). The server's per-display locks remain the authority.
+- **One state read per burst.** `scheduleRefresh` runs when the last route in flight finishes, not after each one. Cards are
+  updated in place (`paintCardState`); `render()` skips a rebuild when what the cards are drawn from has not changed.
+- **Three states per destination, from the server.** `/api/user/route_multi` returns `targets` -- one per thing chosen, named
+  by *position* in the list the page sent (the response carries no identity) -- each `verified`, `unconfirmed` or `failed`.
+  `unconfirmed` is a video route whose read-back answered with another stream (`not_verified`); a group is the worst of its
+  members. Audio-only routes and walls are never `unconfirmed`.
+- **The later look is read-only.** `POST /api/user/route_check` (USER) takes the same grants a route needs, confirms each
+  display's identity, and reads the encoder's stream and the decoder's selected stream. It writes nothing and takes no lock.
+  The page looks at 1.5 s, 3 s and 5 s after the answer; a display that never reports the stream is then a verified failure.
+  A later route to the same target replaces an earlier one's outcome (`routeToken`), so a late look cannot undo it.
+- **Unconfirmed is drawn as neither success nor failure** (`route-pending`, `Confirming…`; matrix cell `pending`). Only a
+  verified failure is red.
+- Measurement tooling: `tests/bench_routing.py` (server, against `_devicesim`) and `tests/bench_user_ui.js` (the page, with
+  answers delayed by the server figures). Real-hardware timings are a separate live step.

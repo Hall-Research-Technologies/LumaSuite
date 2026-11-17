@@ -227,7 +227,11 @@ class RequestShapeTests(Fixture):
         client = self.signed_in(sources=[A], destinations=[D1], groups=[self.g1["id"]])
         text = self.multi(client, A, [D1], [self.g1["id"]]).get_data(as_text=True)
         body = self.multi(client, A, [D1], [self.g1["id"]]).get_json()
-        self.assertEqual(set(body), {"ok", "routed", "total", "summary", "results", "timing"})
+        self.assertEqual(set(body), {"ok", "routed", "total", "summary", "results", "timing", "targets"})
+        # `targets` says what became of each thing chosen, by position in the list sent: no identity.
+        for target in body["targets"]:
+            self.assertEqual(set(target), {"kind", "index", "state"})
+            self.assertIn(target["state"], ("verified", "unconfirmed", "failed"))
         self.assertEqual(set(body["timing"]), {"workers", "first_start_ms", "last_start_ms", "first_end_ms",
                                                "last_end_ms", "start_spread_ms"})
         for row in body["results"]:

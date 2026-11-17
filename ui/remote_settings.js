@@ -575,7 +575,31 @@
     });
   }
 
+  // HTTPS with no usable certificate is a decision, not a failure to report afterwards. Three
+  // honest answers, none of them taken for the operator: create a certificate (the existing
+  // flow -- it does not turn anything on by itself), carry on over HTTP (which then asks its own
+  // plaintext question), or change nothing. Cancel is only ever Cancel.
+  function certificateDecision() {
+    return ask({title: 'HTTPS needs a certificate',
+      message: 'Remote access is set to HTTPS, but there is no usable certificate for this network. ' +
+        'Create one now, or switch to HTTP, which does not encrypt sign-in details. Nothing has ' +
+        'been turned on.',
+      confirmText: 'Create Certificate', cancelText: 'Cancel',
+      secondary: {text: 'Change to HTTP', value: 'http'}});
+  }
+
   function turnOn() {
+    if (els.transport.value === 'https' && certificateKind(lastState && lastState.certificate) === 'required') {
+      return certificateDecision().then(function (choice) {
+        if (choice === 'http') { els.transport.value = 'http'; return turnOnConfirmed(); }
+        if (choice === true) return generateCertificate();
+        return null;
+      });
+    }
+    return turnOnConfirmed();
+  }
+
+  function turnOnConfirmed() {
     var transport = els.transport.value;
     var option = els.adapter.options[els.adapter.selectedIndex];
     var summary = [{label: 'Network', value: option ? option.textContent : ''},

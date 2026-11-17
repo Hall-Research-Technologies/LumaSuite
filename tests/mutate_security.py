@@ -48,6 +48,14 @@ def node(file):
     return ("node:" + file, ["node", os.path.join("tests", file)])
 
 
+# route_multi and route_check carry near-identical grant checks, so an anchor inside either has to
+# begin in text only the one has: route_multi's check follows its "walls are not available" refusal.
+MULTI_CHECK_HEAD = ("error\": \"Video walls are not available.\"}), 404\n\n        def _check(account):\n"
+                    "            if not account.permissions.may_use_interface(interface):\n"
+                    "                return \"interface_not_permitted\"\n")
+MULTI_CHECK_BODY = MULTI_CHECK_HEAD + ("            if not account.permissions.may_use_source(source_id):\n"
+                                      "                return \"source_not_permitted\"\n")
+
 # (id, file, anchor, replacement, what it breaks, suites that must notice)
 MUTATIONS = [
     # ---- who is local -----------------------------------------------------------------
@@ -949,13 +957,13 @@ MUTATIONS = [
      "the routing page builds markup from device text",
      [node("user_page_test.js")]),
     ("ui.route-single-flight", "ui/user.js",
-     "    if (state.busy || !source || !chosen.length) return;",
-     "    if (!source || !chosen.length) return;",
-     "a second click while a route is in flight sends a second request",
-     [node("user_page_test.js")]),
+     "    var free = chosen.filter(function (t) { return !state.routing[targetKey(t)]; });",
+     "    var free = chosen.slice();",
+     "a target that is still being written to is sent a second request",
+     [node("user_page_test.js"), node("user_route_states_test.js")]),
     ("ui.group-left-out-of-request", "ui/user.js",
-     "    var groups = chosen.filter(function (t) { return t.kind === 'group'; })",
-     "    var groups = [].filter(function (t) { return t.kind === 'group'; })",
+     "                groups: free.filter(function (t) { return t.kind === 'group'; }).map(function (t) { return t.id; }),",
+     "                groups: [],",
      "a chosen group is left out of the request",
      [node("user_page_test.js")]),
     ("ui.status-code-shown", "ui/user.js",
@@ -1192,22 +1200,34 @@ MUTATIONS = [
      "a display that is in a chosen group and chosen on its own is routed twice",
      [py("test_user_multi.py", "DestinationResolutionTests")]),
     ("multi.source-grant-skipped", "luma_remote_api.py",
+     MULTI_CHECK_HEAD +
      "            if not account.permissions.may_use_source(source_id):\n"
      "                return \"source_not_permitted\"\n"
      "            for identity in display_ids:",
+     MULTI_CHECK_HEAD +
      "            for identity in display_ids:",
      "a source the account was not given is routed",
      [py("test_user_multi.py", "PermissionTests", "HandlerSecondLineTests")]),
     ("multi.display-grant-skipped", "luma_remote_api.py",
+     MULTI_CHECK_BODY +
      "            for identity in display_ids:\n"
      "                if not account.permissions.may_control_destination(identity):",
+     MULTI_CHECK_BODY +
      "            for identity in []:\n"
      "                if not account.permissions.may_control_destination(identity):",
      "a display the account was not given is routed (a group member picked on its own)",
      [py("test_user_multi.py", "PermissionTests", "HandlerSecondLineTests")]),
     ("multi.group-grant-skipped", "luma_remote_api.py",
+     MULTI_CHECK_BODY +
+     "            for identity in display_ids:\n"
+     "                if not account.permissions.may_control_destination(identity):\n"
+     "                    return \"destination_not_permitted\"\n"
      "            for group_id in group_ids:\n"
      "                if not account.permissions.may_control_group(group_id):",
+     MULTI_CHECK_BODY +
+     "            for identity in display_ids:\n"
+     "                if not account.permissions.may_control_destination(identity):\n"
+     "                    return \"destination_not_permitted\"\n"
      "            for group_id in []:\n"
      "                if not account.permissions.may_control_group(group_id):",
      "a group the account was not given is routed because it holds a granted display",
@@ -1392,7 +1412,7 @@ MUTATIONS = [
      "the matrix is not told which units are offline",
      [py("test_user_walls.py", "TheRealRoutesTests")]),
     ("userpage.wall-omitted-from-request", "ui/user.js",
-     "    if (walls.length) body.walls = walls;",
+     "      if (sent.walls.length) body.walls = sent.walls;",
      "",
      "routing to a wall sends no wall",
      [node("user_page_test.js")]),
@@ -1410,11 +1430,6 @@ MUTATIONS = [
      "      if (!online) return;\n      button.setAttribute('draggable', 'true');",
      "      button.setAttribute('draggable', 'true');",
      "an offline source can be dragged",
-     [node("user_page_test.js")]),
-    ("userpage.drop-ignores-busy", "ui/user.js",
-     "    return !!(state.drag && !state.busy && kind !== 'source');",
-     "    return !!(state.drag && kind !== 'source');",
-     "a destination accepts a drop while a route is in flight",
      [node("user_page_test.js")]),
     ("userpage.drop-routes-the-selection-not-the-target", "ui/user.js",
      "      routeTo(held.source, [{kind: kind, id: item.id}]);",
@@ -1447,7 +1462,7 @@ MUTATIONS = [
      "a slow device is asked again before it has answered",
      [node("user_page_test.js")]),
     ("userpage.route-does-not-refresh-pictures", "ui/user.js",
-     "      refreshNow(displayIds.map(function (id) { return 'display:' + id; }));",
+     "      refreshNow(ids.map(function (id) { return 'display:' + id; }));",
      "",
      "a route leaves the routed display's old picture on screen until the next tick",
      [node("user_page_test.js")]),
@@ -1747,9 +1762,11 @@ TORTURE_MUTATIONS = [
      "the cache forgets whether a display's audio follows its video",
      [py("test_user_av_convergence.py", "TheCacheAgreesWithTheDeviceTests")]),
     ("torture.display-grant-never-checked", "luma_remote_api.py",
+     MULTI_CHECK_HEAD +
      '            if not account.permissions.may_use_source(source_id):\n'
      '                return "source_not_permitted"\n'
      '            for identity in display_ids:',
+     MULTI_CHECK_HEAD +
      '            if not account.permissions.may_use_source(source_id):\n'
      '                return "source_not_permitted"\n'
      '            for identity in ():',

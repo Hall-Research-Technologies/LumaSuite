@@ -78,10 +78,8 @@ ROUTING_MUTATIONS = [
      "one failure marks every member failed (the sequential runner)",
      [py("test_display_groups.py", "SequentialRunTests")]),
     ("ui.route-sends-address", "ui/user.js",
-     "    var body = {source: source, displays: displays, groups: groups," + NL +
-     "                audio_follows_video: state.audioFollowsVideo !== false};",
-     "    var body = {source: source, displays: displays, groups: groups, ip: '198.51.100.1'," + NL +
-     "                audio_follows_video: state.audioFollowsVideo !== false};",
+     "    var body = {source: source, displays: sent.displays, groups: sent.groups};",
+     "    var body = {source: source, displays: sent.displays, groups: sent.groups, ip: '198.51.100.1'};",
      "the routing page sends an address",
      [STANDARD_PAGE]),
     ("route.user-endpoint-reads-mode", "luma_remote_api.py",
@@ -296,8 +294,8 @@ ROUTING_MUTATIONS = [
      "the group endpoint routes audio whatever the preference says",
      [PREF]),
     ("ui.afv-not-sent", "ui/user.js",
-     "                audio_follows_video: state.audioFollowsVideo !== false};",
-     "                };",
+     "      body.audio_follows_video = state.audioFollowsVideo !== false;",
+     "      body.audio_follows_video = undefined;",
      "the routing page never tells the server what the toggle says",
      [STANDARD_PAGE]),
     ("ui.afv-defaults-off", "ui/user.js",

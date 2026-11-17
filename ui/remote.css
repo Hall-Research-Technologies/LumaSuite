@@ -97,6 +97,8 @@ body.remote input[type="text"], body.remote input[type="password"] {
   background: var(--selected-tint-strong, var(--state-selection)) !important; }
 .pick.route-ok { box-shadow: inset 0 -3px 0 var(--state-success); }
 .pick.route-failed { box-shadow: inset 0 -3px 0 var(--state-error); }
+/* Accepted by the display and not yet confirmed: neither success nor failure, so neither colour. */
+.pick.route-pending { box-shadow: inset 0 -3px 0 var(--state-info-text); }
 .pick.offline .pick-sub { color: var(--state-warning-text); }
 .pick.routing { cursor: progress; }
 .pick.routing .pick-sub { color: var(--state-info-text); }
@@ -205,6 +207,8 @@ button.small { min-height: 30px; padding: 0 12px; font-size: 13px; }
 .mx-cell:disabled, .mx-cell[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
 .mx-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mx-cell.pending { cursor: progress; opacity: 1; border-color: var(--state-info-text) !important; }
+/* Only ever a verified failure, on the cell that was pressed. */
+.mx-cell.failed { border-color: var(--state-error) !important; }
 .mx-ring { position: relative; display: inline-flex; align-items: center; justify-content: center;
            width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--text-muted);
            box-sizing: border-box; }

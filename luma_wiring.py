@@ -39,7 +39,7 @@ class RemoteSystem:
 
     def __init__(self, app, *, data_dir, ui_dir, default_port, load_cache, route_av,
                  observe, preview_fetch, destination_check=None, walls=None,
-                 route_wall=None, route_mode=None, identify=None):
+                 route_wall=None, route_mode=None, identify=None, verify_route=None):
         self.app = app
         self.data_dir = Path(data_dir)
         self.ui_dir = Path(ui_dir)
@@ -78,7 +78,7 @@ class RemoteSystem:
             tls_context_for=self.tls_context, certificate_state=self.certificate_state,
             preview_fetch=preview_fetch, user_shell=self._user_shell,
             walls=walls, route_wall=route_wall, route_mode=route_mode,
-            identify=identify)
+            identify=identify, verify_route=verify_route)
         self._register_pages()
 
     # ---------------------------------------------------------------- state

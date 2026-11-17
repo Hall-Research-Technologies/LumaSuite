@@ -291,7 +291,7 @@ const cardAt = (h, host, kind, id) => h.byId[host].querySelectorAll('[data-kind]
     cardAt(h, 'displays', 'display', D1).click();
     h.byId.route_btn.focus();
     h.byId.route_btn.click();
-    assert.strictEqual(h.byId.route_btn.disabled, true, 'the button is disabled while the route runs');
+    assert.strictEqual(h.byId.route_btn.disabled, false, 'Route is not withdrawn while the route runs');
     await settle();
     assert.strictEqual(h.dialogs.length, 0, 'no dialog opened');
     assert.strictEqual(h.document.activeElement, h.byId.route_btn);

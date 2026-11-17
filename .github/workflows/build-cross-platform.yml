@@ -148,6 +148,7 @@ jobs:
           python tests/test_server_hardening.py
           python tests/test_remote_access_api.py
           python tests/test_certificate_identity.py
+          python tests/test_working_credential.py
           python tests/test_frontend_contract.py
           python tests/test_fence.py
           python tests/test_preview_proxy.py
@@ -203,6 +204,7 @@ jobs:
           python tests/test_update_production_identity.py
           python tests/test_release_guard.py
           python tests/test_licence_package.py
+          python tests/test_route_states.py
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -236,6 +238,7 @@ jobs:
           node tests/user_page_test.js
           node tests/user_matrix_page_test.js
           node tests/user_focus_test.js
+          node tests/user_route_states_test.js
           node tests/admin_routing_interface_test.js
           node tests/remote_pages_test.js
           node tests/port_settings_test.js

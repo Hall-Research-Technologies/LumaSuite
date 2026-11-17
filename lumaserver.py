@@ -2767,13 +2767,50 @@ def _is_credential_rejection(response) -> bool:
     code = error.get("code")
     return ("auth" in message) or ("password" in message) or (code in (-32001, -32002))
 
+_CRED_MAC_RE = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
+
+def _credential_key(ip: str) -> str:
+    """What the working credential belongs to: the unit's MAC when the inventory knows it,
+    and the address only when it does not. An address says where a unit answered today; a
+    different unit that takes a reused address must not inherit the previous unit's
+    credential, and a unit that moved must not lose its own. Never takes the credential lock
+    (the cache lock is a different lock and is never held together with it)."""
+    mac = ""
+    try:
+        with cache_lock:
+            unit = cache_units.get(ip)
+            if isinstance(unit, dict):
+                mac = _normalize_mac(str(unit.get("mac") or ""))
+    except Exception:
+        mac = ""
+    return ("mac:" + mac) if _CRED_MAC_RE.fullmatch(mac or "") else ("ip:" + str(ip))
+
+def _persisted_credential_source(ip: str) -> Optional[str]:
+    """The slot recorded on the unit's own inventory record by an earlier run, so a restart
+    does not forget which credential a unit accepts. A slot name only, never a value."""
+    try:
+        with cache_lock:
+            unit = cache_units.get(ip)
+            source = unit.get("password_source") if isinstance(unit, dict) else None
+    except Exception:
+        return None
+    return source if source in ("primary", "fallback") else None
+
 def _known_credential_source(ip: str) -> Optional[str]:
+    key = _credential_key(ip)
     with _device_credential_lock:
-        return _device_credential_cache.get(ip)
+        known = _device_credential_cache.get(key)
+    if known is None:
+        known = _persisted_credential_source(ip)
+        if known is not None:
+            with _device_credential_lock:
+                _device_credential_cache.setdefault(key, known)
+    return known
 
 def _remember_credential_source(ip: str, source: str) -> None:
+    key = _credential_key(ip)
     with _device_credential_lock:
-        _device_credential_cache[ip] = source
+        _device_credential_cache[key] = source
     # Best-effort: surface it on the cached unit record too, so /api/cache
     # and /api/scan responses carry it for the UI (Part 4.6) without a
     # separate endpoint. Never fails the caller if the unit isn't cached.
@@ -2793,8 +2830,9 @@ def _forget_credential_source_as_failed(ip: str) -> None:
     # after a device's credentials/settings change back. This is never a
     # permanent lockout: nothing anywhere checks "failed" to skip an
     # attempt, it is a display value only.
+    key = _credential_key(ip)
     with _device_credential_lock:
-        _device_credential_cache.pop(ip, None)
+        _device_credential_cache.pop(key, None)
     try:
         with cache_lock:
             if ip in cache_units:
@@ -2834,6 +2872,38 @@ def _fallback_usable() -> bool:
     if not fallback_val.strip():
         return False
     return fallback_val != str(CONFIG.get("password", "password"))
+
+def _http_credential_candidates(ip: str) -> List[Tuple[str, str]]:
+    """Ordered (slot, value) credentials to present over HTTP to this unit: the one that last
+    worked first, then the other configured one. The WebSocket paths already resolve this way;
+    the HTTP paths (slate and logo uploads, the firmware login) minted their bearer from the
+    primary alone, so a unit that only accepts the fallback could be discovered and controlled
+    but never given a logo. Values are returned to the caller and never logged."""
+    known = _known_credential_source(ip)
+    first = known if known in ("primary", "fallback") else "primary"
+    if first == "fallback" and not _fallback_usable():
+        first = "primary"
+    order = [first]
+    other = "fallback" if first == "primary" else "primary"
+    if other == "primary" or _fallback_usable():
+        order.append(other)
+    seen, out = set(), []
+    for slot in order:
+        value = _credential_value(slot)
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append((slot, value))
+    return out
+
+def _note_http_credential(ip: str, slot: str) -> None:
+    """An HTTP call proved this slot for this unit (an HTTP success is as good as a WebSocket one)."""
+    if slot in ("primary", "fallback"):
+        _remember_credential_source(ip, slot)
+
+# The producer routes live in their own module and cannot import this one; they find the
+# resolver here, so there is one definition of which credential a unit is given.
+APP.config['LUMA_HTTP_CREDENTIALS'] = (_http_credential_candidates, _note_http_credential)
 
 def _resolve_ws_auth_response(ip: str, method: str, params: Optional[Any], timeout: float,
                                forced_id: Optional[str] = None,
@@ -2876,7 +2946,14 @@ def _resolve_ws_auth_response(ip: str, method: str, params: Optional[Any], timeo
         _audit_device_request(ip, method, params, "no_credential_shape")
         return result
 
-    if honor_caller_password_override and "password" in base_params:
+    if (honor_caller_password_override and "password" in base_params
+            and base_params["password"] in (_credential_value("primary"), _credential_value("fallback"))):
+        # The page's own idea of "the current password" is one of the two configured
+        # credentials, which overrides nothing: it is the page not knowing which one THIS unit
+        # accepts. Sent verbatim it was refused by every unit that answers to the other one
+        # (the Reboot button on a fallback unit). Resolve it like any other call.
+        base_params.pop("password")
+    elif honor_caller_password_override and "password" in base_params:
         override_value = base_params.pop("password")
         response = attempt(override_value)
         if response is not None and not _is_credential_rejection(response):
@@ -6003,13 +6080,19 @@ def _discover_switcher_upload_forms(ip: str, session: requests.Session, attempts
 def _login_and_session(ip: str, session: requests.Session) -> bool:
     url = _http_base(ip) + CONFIG["login_path"]
     headers = {"Accept":"application/json"}; headers.update(CONFIG.get("extra_headers",{}))
-    payload = {"username": CONFIG["username"], "password": CONFIG["password"]}
     try:
-        r = session.post(url, json=payload, timeout=CONFIG["TIMEOUT"], verify=CONFIG["http_verify_tls"], headers=headers)
-        logging.info(f"[login] {ip} -> {r.status_code}")
-        return r.status_code in (200,204)
+        for slot, value in _http_credential_candidates(ip):
+            payload = {"username": CONFIG["username"], "password": value}
+            r = session.post(url, json=payload, timeout=CONFIG["TIMEOUT"], verify=CONFIG["http_verify_tls"], headers=headers)
+            logging.info(f"[login] {ip} -> {r.status_code}")
+            if r.status_code in (200, 204):
+                _note_http_credential(ip, slot)
+                return True
+            if r.status_code not in (401, 403):
+                return False        # not a credential refusal: another password would not help
+        return False
     except requests.RequestException as e:
-        logging.warning(f"[login] {ip} exc {e}")
+        logging.warning(f"[login] {ip} exc {e.__class__.__name__}")
         return False
 
 def _upload_fw(ip: str, firmware_path: str, session: requests.Session) -> Tuple[bool,str]:
@@ -6837,15 +6920,20 @@ def _slate_ips_from_request(raw_ips) -> List[str]:
 
 def _slate_upload_one(ip: str, filename: str, blob: bytes, mimetype: str, timeout: float = 15.0) -> Dict[str, Any]:
     username = CONFIG.get("username", "admin") or "admin"
-    password = CONFIG.get("password", "password") or "password"
     url = f"http://{ip}/upload/priv"
-    headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=0)}"}
     files = {"preImage": (filename, blob, mimetype)}
     try:
-        resp = requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
-        if resp.status_code in (401, 403):
-            headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=2)}"}
+        resp = None
+        for slot, password in _http_credential_candidates(ip):
+            headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=0)}"}
             resp = requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
+            if resp.status_code in (401, 403):
+                headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=2)}"}
+                resp = requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
+            if resp.status_code not in (401, 403):
+                if 200 <= resp.status_code < 300:
+                    _note_http_credential(ip, slot)
+                break               # answered for a reason other than the credential
         ok = 200 <= resp.status_code < 300
         detail = (resp.text or "")[:240]
         return {"ok": ok, "status": resp.status_code, "detail": detail}
@@ -8102,6 +8190,62 @@ def _route_av_for_users(decoder_ip, encoder_ip):
         _observe_cache.invalidate("matrix")
 
 
+def _verify_route_for_users(decoder_ip, encoder_ip):
+    """Ask a display, read-only, whether it now holds this source's video stream.
+
+    A route that was written but whose read-back did not agree in time is `not_verified`:
+    some displays take longer than the read-back window to report a stream they have already
+    taken. This is the later look. It writes nothing and reads exactly what the route's own
+    read-back read -- the encoder's stream name and the decoder's selected stream -- so a
+    display that really did not take the route is still reported as one that did not.
+
+    Returns {"status": "verified" | "not_verified" | "unreachable"}. The cache follows the
+    device, as it does after a route, but only when the display agrees.
+    """
+    timeout = float(CONFIG.get("TIMEOUT", 3.0))
+    try:
+        enc = _ws_call_auth(encoder_ip, "VideoMultiIpStream.Get", {}, timeout)
+        wanted = ((enc or {}).get("result") or {}).get("streamname") if isinstance(enc, dict) else None
+    except Exception as e:
+        logging.info(f"[route_check] encoder read failed: {type(e).__name__}")
+        wanted = None
+    wanted = str(wanted or "").strip()
+    if not wanted:
+        return {"status": "unreachable"}
+    with cache_lock:
+        is_switcher = (cache_units.get(decoder_ip, {}).get("type") or "").lower() == "switcher"
+    try:
+        if is_switcher:
+            held = _ws_get_selected_stream_switcher(decoder_ip, timeout)
+        else:
+            resp = _ws_call_auth(decoder_ip, "SelectVideoStream.Get",
+                                 {"password": CONFIG.get("password", "password")}, timeout)
+            held = ((resp or {}).get("result") or {}).get("streamname") if isinstance(resp, dict) else None
+    except Exception as e:
+        logging.info(f"[route_check] display read failed: {type(e).__name__}")
+        held = None
+    if not isinstance(held, str):
+        return {"status": "unreachable"}            # it did not answer; an empty name is an answer
+    held = held.strip()
+    with cache_lock:
+        unit = cache_units.get(decoder_ip)
+        if isinstance(unit, dict):
+            dec = unit["dec"] if isinstance(unit.get("dec"), dict) else {}
+            unit["dec"] = dec
+            video = dec["video"] if isinstance(dec.get("video"), dict) else {}
+            dec["video"] = video
+            if held:
+                video["streamname"] = held
+            if held == wanted:
+                unit["routed_encoder_ip"] = encoder_ip
+                unit["routed_streamname"] = wanted
+    if held == wanted:
+        _persist_units_cache()
+        _observe_cache.invalidate("matrix")
+        return {"status": "verified"}
+    return {"status": "not_verified"}
+
+
 def _route_mode_for_users(decoder_ip, mode, encoder_ip):
     """Video-only or audio-only for a matrix User, through the administrator's engine.
 
@@ -8163,7 +8307,7 @@ REMOTE = luma_wiring.RemoteSystem(
     destination_check=_remote_destination_check,
     walls=luma_walls.WallDirectory(_wall_directory, _vw_device_id),
     route_wall=_route_wall_for_users, route_mode=_route_mode_for_users,
-    identify=_identify_for_route)
+    identify=_identify_for_route, verify_route=_verify_route_for_users)
 
 
 def start_remote_access():

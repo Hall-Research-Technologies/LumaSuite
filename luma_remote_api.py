@@ -98,7 +98,7 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
              observe, remote_enabled, set_remote_state, remote_config,
              locks, tls, cert_paths, tls_context_for, certificate_state,
              preview_fetch, user_shell, walls=None, route_wall=None, route_mode=None,
-             identify=None):
+             identify=None, verify_route=None):
     """Attach the remote-access API.
 
     Everything the module needs is passed in rather than imported from the
@@ -383,6 +383,8 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
         if tls_error:
             # Never start in the clear because TLS could not be arranged.
             return jsonify({"ok": False, "error": tls_error,
+                            "needs_certificate": True,
+                            "reason": "no_usable_certificate",
                             "certificate": certificate_state()}), 400
 
         # A certificate for one address, about to be served on another.
@@ -1518,12 +1520,148 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
         return jsonify({
             "ok": summary["ok"], "routed": summary["routed"], "total": summary["total"],
             "timing": summary["timing"],
+            "targets": _target_states(display_ids, group_ids, wall_ids, ordered, summary["results"],
+                                      plane),
             "summary": "%d of %d %s routed" % (summary["routed"], summary["total"],
                                                unit_word if summary["total"] == 1
                                                else unit_word + "s"),
             "results": rows})
 
     _WALL_PREFIX = "wall:"
+
+    def _state_of(row, plane):
+        """One destination's honest state: verified, unconfirmed or failed.
+
+        `unconfirmed` is a route that was written and whose read-back did not agree *yet*
+        (the device answered, with another stream). It is not a failure and is not shown as
+        one: the page looks again, read-only, and only then calls it verified or failed. An
+        audio-only route has no video stream to look at again, so it is not offered one.
+        """
+        if row.get("ok"):
+            return "verified"
+        if (row.get("result") == "not_verified" and plane != luma_user_matrix.MODE_AUDIO
+                and row.get("kind") != "wall"):
+            return "unconfirmed"
+        return "failed"
+
+    def _worst(states):
+        for word in ("failed", "unconfirmed"):
+            if word in states:
+                return word
+        return "verified"
+
+    def _target_states(display_ids, group_ids, wall_ids, ordered, results, plane):
+        """What became of each thing the person chose, for the page to mark individually.
+
+        The page never has to guess which row belonged to which choice. A target is named by
+        its position in the list the page sent for its kind (the page sends each choice once)
+        -- never by an identity, because a restricted response carries none. A group is the
+        worst of its members. Rows are in the order of `ordered` (displays, then each group's members,
+        each once) followed by the walls, which is how the batch was built.
+        """
+        by_display = {}
+        for position, identity in enumerate(ordered):
+            if position < len(results):
+                by_display[identity] = _state_of(results[position], plane)
+        targets = [{"kind": "display", "index": n,
+                    "state": by_display.get(identity, "failed")}
+                   for n, identity in enumerate(display_ids)]
+        for n, group_id in enumerate(group_ids):
+            group = groups.get(group_id)
+            members = list((group or {}).get("members") or [])
+            targets.append({"kind": "group", "index": n,
+                            "state": _worst([by_display.get(m, "failed") for m in members]
+                                            or ["failed"])})
+        for n in range(len(wall_ids)):
+            at = len(ordered) + n
+            targets.append({"kind": "wall", "index": n,
+                            "state": _state_of(results[at], plane) if at < len(results) else "failed"})
+        return targets
+
+    @app.route("/api/user/route_check", methods=["POST"])
+    def api_user_route_check():
+        """Look again, read-only, at displays a route reported as not yet confirmed.
+
+        Writes nothing and takes no lock: it is the same read-back a route makes, asked a
+        little later, so a display that was merely slow to report the stream it had taken is
+        confirmed and one that really did not take it is reported as that. The caller needs
+        exactly the grants a route to the same destinations needs -- this is not a way to
+        look at displays or sources an account may not use -- and each display's identity is
+        confirmed before it is read, as it is before a write. Walls are not looked at again.
+        """
+        if verify_route is None:
+            return jsonify({"ok": False, "reason": "not_supported",
+                            "error": "That is not available."}), 404
+        data = luma_request.json_object()
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "source, displays and groups required"}), 400
+        source_id = luma_projection.canonical_identity(data.get("source"))
+        display_ids = _bounded_list(data.get("displays"), MULTI_MAX_DISPLAYS,
+                                    luma_projection.canonical_identity)
+        group_ids = _bounded_list(data.get("groups"), MULTI_MAX_GROUPS,
+                                  lambda g: g.strip().lower())
+        interface = data.get("interface", "standard")
+        if (not source_id or display_ids is None or group_ids is None
+                or interface not in ("standard", "matrix")
+                or (not display_ids and not group_ids)):
+            return jsonify({"ok": False, "error": "source, displays and groups required"}), 400
+
+        def _check(account):
+            if not account.permissions.may_use_interface(interface):
+                return "interface_not_permitted"
+            if not account.permissions.may_use_source(source_id):
+                return "source_not_permitted"
+            for identity in display_ids:
+                if not account.permissions.may_control_destination(identity):
+                    return "destination_not_permitted"
+            for group_id in group_ids:
+                if not account.permissions.may_control_group(group_id):
+                    return "group_not_permitted"
+            return None
+
+        refusal = _revalidate(_check, "/api/user/route_check")
+        if refusal is not None:
+            return refusal
+        ordered, missing = _resolve_destinations(display_ids, group_ids)
+        if missing is not None:
+            return jsonify({"ok": False, "error": "That group is not available."}), 404
+        if len(ordered) > MULTI_MAX_DESTINATIONS:
+            return jsonify({"ok": False, "error": "too many displays in one request"}), 400
+
+        def look(index, identity):
+            refusal = _revalidate(_check, "/api/user/route_check")
+            if refusal is not None:
+                return {"ok": False, "result": "refused"}
+            address = _address_index()
+            encoder_ip, decoder_ip = address.get(source_id), address.get(identity)
+            if not encoder_ip or not decoder_ip:
+                return {"ok": False, "result": "not_found"}
+            if _is_offline(identity) or _is_offline(source_id):
+                return {"ok": False, "result": "offline"}
+            if _confirm_identity(decoder_ip, identity) or _confirm_identity(encoder_ip, source_id):
+                return {"ok": False, "result": "failed"}
+            seen = verify_route(decoder_ip, encoder_ip) or {}
+            status = seen.get("status")
+            return {"ok": status == "verified",
+                    "result": status if status in ("verified", "not_verified", "unreachable")
+                    else "failed"}
+
+        # Reads only, so no route engine and no lock: a bounded pool, in the order asked.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max(1, min(6, len(ordered)))) as pool:
+            futures = [pool.submit(copy_current_request_context(
+                lambda i=i, who=who: look(i, who))) for i, who in enumerate(ordered)]
+            looked = []
+            for future in futures:
+                try:
+                    looked.append(future.result())
+                except Exception:
+                    looked.append({"ok": False, "result": "failed"})
+        plane = luma_user_matrix.MODE_VIDEO
+        targets = _target_states(display_ids, group_ids, [], ordered, looked, plane)
+        # `unconfirmed` is still the answer while the display disagrees: how many looks are
+        # worth taking before calling it a failure is the page's budget, not the server's.
+        return jsonify({"ok": all(t["state"] == "verified" for t in targets), "targets": targets})
 
     #: What a person is told when the engine declined before writing anything.
     _REFUSED_SENTENCES = {

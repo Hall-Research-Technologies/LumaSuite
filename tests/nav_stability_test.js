@@ -23,17 +23,19 @@ function page(store, session, opts = {}) {
     querySelector: sel => (sel === '.nav-tabs' ? tabs : (sel.includes('header_gear') ? gear : null)),
     getElementById: find, createElement: t => new Node(t)};
   const live = {session, fetchFails: !!opts.fetchFails};
-  const sandbox = {document: doc, location: {pathname: '/ui/index.html', replace() {}}, Promise, JSON,
+  const listeners = {};
+  const nav = {replaced: null};
+  const sandbox = {document: doc, location: {pathname: opts.path || '/ui/index.html', replace(u) { nav.replaced = u; }}, Promise, JSON,
     localStorage: {getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); },
                    removeItem: k => { delete store[k]; }},
     fetch: () => (live.fetchFails ? Promise.reject(new Error('down'))
                                   : Promise.resolve({ok: true, json: () => Promise.resolve(live.session)})),
     window: {lumaSession: () => (opts.never ? new Promise(() => {}) : Promise.resolve(live.session)),
-             lumaForgetCsrf() {}, addEventListener() {}}};
+             lumaForgetCsrf() {}, addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); }}};
   sandbox.window.window = sandbox.window;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  return {tabs, header, live, find, window: sandbox.window};
+  return {tabs, header, live, find, window: sandbox.window, listeners, nav};
 }
 const ADMIN_REMOTE = {role: 'admin', local: false, username: 'root', remote_enabled: true};
 
@@ -102,6 +104,43 @@ const ADMIN_REMOTE = {role: 'admin', local: false, username: 'root', remote_enab
   p = page(store, ADMIN_REMOTE, {never: true});
   p.window.lumaForgetShell();
   assert.ok(!('luma.shell.v1' in store));
+
+  // Another tab of the same browser learns the answer first: this one follows without a request.
+  const fire = (pg, oldValue, newValue) => (pg.listeners.storage || []).forEach(fn => fn({key: 'luma.shell.v1', oldValue, newValue}));
+  const shellOn = JSON.stringify({admin: true, remote: true, local: true, username: ''});
+  const shellOff = JSON.stringify({admin: true, remote: false, local: true, username: ''});
+  p = page({}, {}, {never: true});
+  assert.strictEqual(p.find('nav_remote_access'), null);
+  fire(p, null, shellOn);
+  assert.ok(p.find('nav_remote_access'), 'another tab turned Remote Access on: the tab appears with no reload');
+  fire(p, shellOn, shellOff);
+  assert.strictEqual(p.find('nav_remote_access'), null, 'another tab turned it off: the tab goes');
+  assert.strictEqual(p.nav.replaced, null, 'and a page that is not in the area stays where it is');
+  fire(p, shellOn, 'not json');
+  fire(p, shellOn, null);
+  assert.strictEqual(p.find('nav_remote_access'), null, 'an unreadable or removed entry changes nothing');
+  p = page({}, {}, {never: true});
+  const before = p.tabs.children.length;
+  (p.listeners.storage || []).forEach(fn => fn({key: 'some.other.key', newValue: shellOn}));
+  assert.strictEqual(p.tabs.children.length, before, 'only the shell key is listened for');
+
+  // On a page of the Remote Access area when it is turned off: leave it for the main page.
+  store['luma.shell.v1'] = shellOn;
+  p = page(store, {...ADMIN_REMOTE, remote_enabled: false, local: true, username: ''}, {path: '/admin/users', never: true});
+  assert.ok(p.find('nav_remote_access'), 'while it is on, the area keeps its tab');
+  p.live.session = {role: 'admin', local: true, remote_enabled: false};
+  await p.window.lumaRefreshNav(); await tick();
+  assert.strictEqual(p.nav.replaced, '/', 'turned off while on that page: move to the main page');
+  p = page({}, {}, {path: '/admin/users', never: true});
+  fire(p, shellOn, shellOff);
+  assert.strictEqual(p.nav.replaced, '/', 'turned off from another tab: the same');
+
+  // Opening the area directly while Remote Access is already off is not a transition.
+  store['luma.shell.v1'] = shellOff;
+  p = page(store, {role: 'admin', local: true, remote_enabled: false}, {path: '/admin/users'});
+  await tick();
+  assert.strictEqual(p.nav.replaced, null, 'no transition, no redirect');
+  assert.ok(p.find('nav_remote_access'), 'the area still shows where the operator is');
 
   // Storage that throws must not break the shell.
   const broken = page({}, ADMIN_REMOTE);
