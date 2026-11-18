@@ -9,7 +9,14 @@
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const {openPage, stateBody, sleep} = require('./_user_page');
+const {openPage, stateBody, sleep: wallSleep} = require('./_user_page');
+
+// Work in these scenarios is a chain of promise and zero/one-millisecond timer hops. How many hops a loaded
+// machine completes in N milliseconds varies by an order of magnitude, so a bare N ms wait was a guess that
+// failed on a slow CI runner. Wait for the elapsed time AND for enough event-loop turns for the chain to
+// run, so the wait scales with the load instead of racing it.
+const turns = async n => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
+async function sleep(ms) { await wallSleep(ms); await turns(2000); await wallSleep(5); await turns(2000); }
 
 let passed = 0;
 async function scenario(name, fn) {
@@ -81,7 +88,10 @@ const modalRows = page => ((page.confirms[0] && page.confirms[0].summary) || [])
     const before = stateReads(page);
     ['dsp-1', 'dsp-2', 'dsp-3', 'dsp-4'].forEach(id => page.drop('src-a', 'display', id));
     a.release();
-    await sleep(60);
+    // Wait for the read itself, not for a guess at how soon a loaded machine gets to it (a fixed 60 ms
+    // failed on a slow CI runner with no read yet), then keep the window in which a second read would show.
+    for (let i = 0; i < 300 && stateReads(page) - before < 1; i++) await wallSleep(10);
+    await wallSleep(60);
     assert.strictEqual(page.routeRequests().length, 4);
     assert.strictEqual(stateReads(page) - before, 1, 'one read for the whole burst');
     page.stop();
