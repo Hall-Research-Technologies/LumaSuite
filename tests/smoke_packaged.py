@@ -61,7 +61,7 @@ def stop(proc):
     kill_tree(proc)
 
 
-def wait_for(port, path, seconds=60):
+def wait_for(port, path, seconds=120):
     deadline = time.time() + seconds
     while time.time() < deadline:
         status, body, _ = get(port, path)
@@ -69,6 +69,32 @@ def wait_for(port, path, seconds=60):
             return status, body
         time.sleep(0.5)
     return None, b""
+
+
+def get_json(port, path, seconds=90):
+    """Ask until the endpoint gives a real answer: HTTP 200 and a JSON object, or the deadline.
+
+    /api/remote_access lists the network adapters, which the application does by running PowerShell
+    on every call (bounded at 25 s by the product itself). Measured on a cold start that is 3 to 7
+    seconds a call, so the default 5 s read timeout of get() turns a slow answer into "no answer" --
+    which is what a failure of two checks once looked like. The readiness signal is the answer
+    itself, so each attempt is allowed longer than the product's own bound and the last status is
+    returned, never guessed.
+    """
+    deadline = time.time() + seconds
+    last = (None, {})
+    while True:
+        status, body, _ = get(port, path, timeout=40)
+        try:
+            parsed = json.loads(body) if status == 200 else None
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return status, parsed
+        last = (status, {})
+        if time.time() > deadline:
+            return last
+        time.sleep(0.5)
 
 
 results = []
@@ -120,10 +146,9 @@ try:
     code, data, _ = get(PORT_LOCAL, "/api/auth/session")
     session = json.loads(data or b"{}")
     check("the local operator is recognised as local", code == 200 and session.get("local") is True, repr(session))
-    code, data, _ = get(PORT_LOCAL, "/api/remote_access")
-    remote = json.loads(data or b"{}")
+    code, remote = get_json(PORT_LOCAL, "/api/remote_access")
     check("remote access is off by default", code == 200 and remote.get("enabled") is False and remote.get("has_admin") is False,
-          repr({k: remote.get(k) for k in ("enabled", "has_admin")}))
+          "HTTP %s %s" % (code, repr({k: remote.get(k) for k in ("enabled", "has_admin")})))
     check("the certificate generator is available in the package", (remote.get("certificate") or {}).get("can_generate") is True,
           repr(remote.get("certificate")))
     code, data, _ = get(PORT_LOCAL, "/api/bootstrap/state")

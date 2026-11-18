@@ -7,6 +7,7 @@ is turned off at the end. Nothing is written to any device (there are none in th
 import http.cookiejar
 import json
 import os
+import re
 import ssl
 import subprocess
 import sys
@@ -151,7 +152,25 @@ try:
     code, raw, _ = user.call("GET", "/user")
     check("the user reaches the routing page", code == 200 and b"LumaSuite" in raw, code)
     code, body, _ = user.call("GET", "/api/user/state")
-    check("the user sees an empty, allowlisted state", code == 200 and set(body) == {"ok", "role", "username", "sources", "destinations", "groups"}, body)
+    # The exact projection (luma_projection.user_state plus the three keys the route adds): rev is a
+    # permission digest, routing is two interface booleans, observed is the shared refresh's own age
+    # (fresh / age_s / refreshing), walls is the permitted saved walls. None carries a device identity.
+    check("the user sees an empty, allowlisted state",
+          code == 200 and set(body) == {"ok", "role", "username", "sources", "destinations", "groups", "walls",
+                                        "rev", "routing", "observed"}
+          and body["sources"] == [] and body["destinations"] == [] and body["groups"] == [] and body["walls"] == [],
+          body)
+    check("the user state's shape is exactly the intended one",
+          body.get("role") == "user" and body.get("username") == "smokeuser"
+          and isinstance(body.get("rev"), str) and re.fullmatch(r"[0-9a-f]{8,64}|all", body["rev"]) is not None
+          and set(body.get("routing") or {}) == {"standard", "matrix"}
+          and all(isinstance(v, bool) for v in body["routing"].values())
+          and set(body.get("observed") or {}) <= {"fresh", "age_s", "refreshing"}, body)
+    flat = json.dumps(body)
+    check("and no address, hardware address or credential-like value appears in it",
+          not re.search(r"\d{1,3}(\.\d{1,3}){3}", flat)
+          and not re.search(r"(?i)[0-9a-f]{2}([:-][0-9a-f]{2}){5}", flat)
+          and not re.search(r"(?i)password|passwd|secret|token|session|cookie|private", flat), flat)
     for path in ("/ui/index.html", "/ui/settings.js", "/ui/admin_users.js", "/api/config", "/api/admin/users", "/api/cache"):
         code, _, _ = user.call("GET", path)
         check("the user cannot reach " + path, code == 403, code)

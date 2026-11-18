@@ -205,6 +205,7 @@ jobs:
           python tests/test_log_hygiene.py
           python tests/test_update_production_identity.py
           python tests/test_release_guard.py
+          python tests/test_inspect_release.py
           python tests/test_licence_package.py
           python tests/test_route_states.py
 
