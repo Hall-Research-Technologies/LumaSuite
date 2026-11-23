@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Build script to create standalone executables for Windows, macOS, and Linux
-Run: python build_executable.py
+Build script to create the standalone applications LumaSuite distributes: Windows x86-64 and macOS
+Apple Silicon (arm64), and only those. There is no macOS Intel build, no universal binary and no Linux
+build; a request for one is refused rather than produced.
+Run: python build_executable.py            (the platform it is run on)
+     python build_executable.py windows | macos
 """
 
 import os
@@ -158,6 +161,19 @@ def install_build_dependencies():
     run_command([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
     run_command([sys.executable, '-m', 'pip', 'install', '-r', str(selected)])
 
+def assert_windows_package_contents(exe_path):
+    """Fail the build unless the packaged executable's table of contents carries the licence material and
+    nothing forbidden. Zero entries read is itself a failure: a guard that parsed nothing proves nothing."""
+    sys.path.insert(0, str(PROJECT_DIR / 'tools'))
+    import release_guard
+    try:
+        count = release_guard.inspect_executable(str(exe_path), get_app_version())
+    except release_guard.GuardError as exc:
+        print(f"Error: the packaged executable failed its contents check: {exc}")
+        sys.exit(1)
+    print(f"[OK] executable table of contents checked: {count} entries, licence material present")
+
+
 def build_windows():
     """Build Windows .exe"""
     print("\n" + "="*60)
@@ -239,6 +255,10 @@ def build_windows():
 
     run_command(pyinstaller_cmd)
 
+    # The licence, the notices and the pystray GPL/LGPL texts must be INSIDE the executable, read from its
+    # own table of contents. "PyInstaller completed successfully" says nothing about what it packed.
+    assert_windows_package_contents(dist_target / 'LumaSuite.exe')
+
     # Clean up temp folder
     print("Cleaning up temporary UI folder...")
     _remove_path(ui_temp)
@@ -267,16 +287,24 @@ def stamp_macos_version(app_path: Path, version_str: str) -> bool:
     return True
 
 
+def resolve_macos_arch(requested, machine):
+    """The one macOS architecture this project builds. An Intel host, an x86_64 or universal request, or
+    anything unrecognised is an error: nothing in the release machinery produces, names or offers it."""
+    machine = (machine or '').lower()
+    if machine not in ('arm64', 'aarch64'):
+        raise SystemExit("Error: the macOS build runs on Apple Silicon only (this machine reports %r)" % machine)
+    if requested and requested.lower() != 'arm64':
+        raise SystemExit("Error: only arm64 is built for macOS (PYI_MACOS_ARCH=%r)" % requested)
+    return 'arm64'
+
+
 def build_mac():
-    """Build macOS .app for a specific architecture (arm64 or x86_64)."""
+    """Build the macOS .app for Apple Silicon (arm64). It is the only macOS architecture distributed."""
     if platform.system() != 'Darwin':
         print("macOS build must be run on macOS. Skipping.")
         return
     print("\n" + "="*60)
-    target_arch = os.environ.get('PYI_MACOS_ARCH')
-    if not target_arch:
-        machine = platform.machine().lower()
-        target_arch = 'arm64' if 'arm' in machine else 'x86_64'
+    target_arch = resolve_macos_arch(os.environ.get('PYI_MACOS_ARCH'), platform.machine())
     print(f"Building macOS .app ({target_arch})")
     print("="*60)
     
@@ -372,153 +400,14 @@ def build_mac():
     else:
         print("Error: no Info.plist found to stamp with the version")
         sys.exit(1)
+    # Editing Info.plist after PyInstaller signed the bundle leaves a signature that no longer verifies, and
+    # Apple Silicon will not run code whose signature does not verify. Sign again, ad hoc: no identity is
+    # involved, so the bundle is still NOT Developer ID signed and NOT notarised (see README).
+    app_bundle = str(dist_target / 'LumaSuite.app')
+    run_command(['codesign', '--force', '--deep', '--sign', '-', app_bundle])
+    run_command(['codesign', '--verify', '--deep', '--strict', app_bundle])
     print(f"[OK] macOS .app built successfully ({target_arch})")
     print(f"  Location: {PROJECT_DIR / 'dist' / 'macOS' / 'LumaSuite.app'}")
-
-def build_linux():
-    """Build Linux binary"""
-    if platform.system() != 'Linux':
-        print("Linux build must be run on Linux. Skipping.")
-        return
-    print("\n" + "="*60)
-    print("Building Linux binary")
-    print("="*60)
-
-    add_data_sep = ':'
-    ui_src = PROJECT_DIR / 'ui'
-    ui_temp = PROJECT_DIR / 'ui_temp_build_linux'
-    dist_target = PROJECT_DIR / 'dist' / 'Linux'
-    build_target = PROJECT_DIR / 'build' / 'Linux'
-    hallway_logo = PROJECT_DIR / 'hallway.png'
-    footer_logo = PROJECT_DIR / 'atlona.png'
-    
-    # Look for PNG icon for Linux
-    icon_arg = None
-    if (PROJECT_DIR / 'ui' / 'companylogo.png').exists():
-        icon_arg = f"--icon={PROJECT_DIR / 'ui' / 'companylogo.png'}"
-
-    if not ui_src.exists():
-        print(f"Error: UI folder not found at {ui_src}")
-        sys.exit(1)
-
-    if not hallway_logo.exists():
-        print(f"Warning: hallway.png not found at {hallway_logo}")
-    if not footer_logo.exists():
-        print(f"Warning: footer logo not found at {footer_logo}")
-
-    _remove_path(build_target)
-    _remove_path(dist_target / 'LumaSuite')
-    _remove_path(ui_temp)
-    shutil.copytree(ui_src, ui_temp, ignore=shutil.ignore_patterns('*.zip', 'logos', 'logos/*', 'imagestream', 'imagestream/*', 'localdata', 'localdata/*'))
-
-    pyinstaller_cmd = [
-        sys.executable, '-m', 'PyInstaller',
-        '--clean',
-        '--onefile',
-        '--windowed',
-        '--name=LumaSuite',
-        '--add-data', f"{ui_temp}{add_data_sep}ui",
-        '--add-data', f"{hallway_logo}{add_data_sep}.",
-        '--add-data', f"{footer_logo}{add_data_sep}.",
-        '--add-data', f"{LICENSES_DIR}{add_data_sep}licenses",
-        '--add-data', f"{NOTICES_FILE}{add_data_sep}.",
-        '--add-data', f"{LICENSE_FILE}{add_data_sep}.",
-        '--distpath=dist/Linux',
-        '--workpath=build/Linux',
-        '--specpath=build/Linux',
-        '--hidden-import=flask',
-        '--hidden-import=werkzeug',
-        '--hidden-import=cryptography',
-        '--hidden-import=cryptography.hazmat.primitives.ciphers.aead',
-        '--collect-submodules=cryptography.hazmat',
-        '--hidden-import=requests',
-        '--hidden-import=PIL',
-        '--hidden-import=PIL.Image',
-        '--hidden-import=PIL.ImageTk',
-        '--collect-submodules=PIL',
-        '--collect-data=PIL',
-        '--hidden-import=pystray',
-        '--hidden-import=pystray._xlib',
-        '--hidden-import=psutil',
-        str(LAUNCHER)
-    ]
-    if icon_arg:
-        pyinstaller_cmd.insert(6, icon_arg)
-
-    run_command(pyinstaller_cmd)
-    _remove_path(ui_temp)
-
-    # Add a desktop launcher and icon for Linux desktops.
-    linux_dist = PROJECT_DIR / 'dist' / 'Linux'
-    icon_src = PROJECT_DIR / 'ui' / 'companylogo.png'
-    icon_dst = linux_dist / 'LumaSuite.png'
-    desktop_file = linux_dist / 'LumaSuite.desktop'
-
-    if icon_src.exists():
-        shutil.copy2(icon_src, icon_dst)
-
-    desktop_content = """[Desktop Entry]
-Type=Application
-Name=LumaSuite
-Comment=LumaSuite control launcher
-Exec=./LumaSuite
-Icon=LumaSuite
-Terminal=false
-Categories=Network;Utility;
-"""
-    desktop_file.write_text(desktop_content, encoding='utf-8')
-    os.chmod(desktop_file, 0o755)
-
-    run_script = linux_dist / 'run-lumasuite.sh'
-    run_script.write_text("""#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-chmod +x "$SCRIPT_DIR/LumaSuite"
-exec "$SCRIPT_DIR/LumaSuite"
-""", encoding='utf-8')
-    os.chmod(run_script, 0o755)
-
-    install_script = linux_dist / 'install-lumasuite-desktop.sh'
-    install_script.write_text("""#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP="$SCRIPT_DIR/LumaSuite"
-ICON="$SCRIPT_DIR/LumaSuite.png"
-DESKTOP_FILE="$HOME/.local/share/applications/lumasuite.desktop"
-
-mkdir -p "$HOME/.local/share/applications"
-mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
-
-chmod +x "$APP"
-if [[ -f "$ICON" ]]; then
-  cp "$ICON" "$HOME/.local/share/icons/hicolor/256x256/apps/lumasuite.png"
-fi
-
-cat > "$DESKTOP_FILE" <<EOF
-[Desktop Entry]
-Type=Application
-Name=LumaSuite
-Comment=LumaSuite control launcher
-Exec=$APP
-Icon=lumasuite
-Terminal=false
-Categories=Network;Utility;
-EOF
-
-chmod +x "$DESKTOP_FILE"
-if command -v gio >/dev/null 2>&1; then
-  gio set "$DESKTOP_FILE" metadata::trusted true || true
-fi
-update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
-gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
-
-echo "Installed launcher: $DESKTOP_FILE"
-echo "You can now open LumaSuite from Show Applications."
-""", encoding='utf-8')
-    os.chmod(install_script, 0o755)
-
-    print("[OK] Linux binary built successfully")
-    print(f"  Location: {PROJECT_DIR / 'dist' / 'Linux' / 'LumaSuite'}")
 
 def main():
     print("LumaServer Standalone Build Script")
@@ -555,11 +444,9 @@ def main():
             build_windows()
         elif target == 'mac' or target == 'macos':
             build_mac()
-        elif target == 'linux':
-            build_linux()
         else:
             print(f"Unknown platform: {target}")
-            print("Supported: windows, mac, linux")
+            print("Supported: windows, macos (Apple Silicon). Linux and macOS Intel are not built.")
             sys.exit(1)
     else:
         # Build for current platform
@@ -567,11 +454,9 @@ def main():
             build_windows()
         elif system == 'Darwin':
             build_mac()
-        elif system == 'Linux':
-            build_linux()
         else:
             print(f"Unsupported platform: {system}")
-            print("Supported: Windows, macOS, Linux")
+            print("Supported: Windows (x86-64), macOS (Apple Silicon)")
             sys.exit(1)
     
     print("\n" + "="*60)

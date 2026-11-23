@@ -285,9 +285,27 @@
     $('direct_enabled').checked = enabled;
     $('direct_link_box').hidden = !enabled;
     $('direct_link').value = body.link || '';
-    $('direct_note').textContent = body.link ? (body.note || '')
+    var moved = body.address_moved && body.link ? body.address_moved : null;
+    $('direct_note').textContent = moved
+      ? moved.message + ' The link above is for ' + moved.from + ', where it works until Remote Access is moved; it changes to ' +
+        moved.to + ' when it is.'
+      : body.link ? (body.note || '')
       : (enabled ? (body.note || 'The link cannot be shown on this computer. Regenerate it to get a new one.') : '');
     $('direct_copy').disabled = !body.link;
+    // The address remote access serves changed after this link was handed out. Said in words and
+    // kept until acknowledged: the notice is dismissible, the fact that old copies of the link
+    // point elsewhere is not, which is why acknowledging records the address rather than hiding a box.
+    var changed = !!(body.address_changed && body.link);
+    $('direct_address').hidden = !changed;
+    if (changed) $('direct_address_text').textContent = directAddressText(body.issued_origin, body.link_origin);
+  }
+
+  function directAddressText(oldOrigin, newOrigin) {
+    return 'This link was last handed out for ' + oldOrigin + '. Remote access now serves ' + newOrigin +
+      ', so the link shown here is already the new address. The code in it has not changed: it works at ' +
+      'the new address, and nobody can reach the old one because nothing is listening there any more. ' +
+      'Send the new link to anyone who has the old one. If the old address may now belong to a different ' +
+      'device, use Regenerate instead.';
   }
 
   function loadDirect() {
@@ -549,6 +567,7 @@
     $('direct_enabled').addEventListener('change', function () {
       directAction($('direct_enabled').checked ? 'enable' : 'disable');
     });
+    $('direct_address_ack').addEventListener('click', function () { directAction('acknowledge_address'); });
     $('direct_copy').addEventListener('click', function () {
       var value = $('direct_link').value;
       if (!value) return;

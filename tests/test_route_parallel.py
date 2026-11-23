@@ -189,7 +189,8 @@ class StartSpreadTests(Fixture):
             source = handle.read()
         code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
         self.assertNotIn("run_sequential", code, "a handler still sequences destinations itself")
-        self.assertEqual(len(re.findall(r"_run_batch\(\"/api/user/", code)), 2)
+        # route_multi, route_group and unroute: each destination operation goes through the one batch engine
+        self.assertEqual(len(re.findall(r"_run_batch\(\"/api/user/", code)), 3)
         self.assertEqual(len(re.findall(r"luma_groups\.run_parallel\(", code)), 1)
 
 

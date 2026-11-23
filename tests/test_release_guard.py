@@ -60,7 +60,7 @@ class IdentityTests(unittest.TestCase):
 
 
 def make_assets(directory, tag="v1.1.0", skip=None, extra=None, windows_extra=None, junk=None, drop=None, tamper=None):
-    """Build the four archives the workflow builds, with the real licence/notice/pystray files beside the app."""
+    """Build the two archives the workflow builds (Windows x86-64, macOS arm64), with the real licence/notice/pystray files beside the app."""
     import shutil
     blob = os.urandom(1024 * 1100)
     work = tempfile.mkdtemp(prefix="stage-")
@@ -68,22 +68,19 @@ def make_assets(directory, tag="v1.1.0", skip=None, extra=None, windows_extra=No
         for name in guard.expected_assets(tag):
             if name == skip:
                 continue
-            platform_name = "windows" if "windows" in name else "macos" if "macos" in name else "linux"
+            platform_name = "windows" if "windows" in name else "macos"
             dist = os.path.join(work, "dist-" + name)
             os.makedirs(dist)
             if platform_name == "windows":
                 with open(os.path.join(dist, "LumaSuite.exe"), "wb") as h:
                     h.write(blob)
-            elif platform_name == "macos":
+            else:
                 os.makedirs(os.path.join(dist, "LumaSuite.app", "Contents", "MacOS"))
                 with open(os.path.join(dist, "LumaSuite.app", "Contents", "MacOS", "LumaSuite"), "wb") as h:
                     h.write(blob)
                 os.makedirs(os.path.join(dist, "LumaSuite.app", "Contents", "Resources", "certifi"))
                 with open(os.path.join(dist, "LumaSuite.app", "Contents", "Resources", "certifi", "cacert.pem"), "wb") as h:
                     h.write(b"public CA bundle")
-            else:
-                with open(os.path.join(dist, "LumaSuite"), "wb") as h:
-                    h.write(blob)
             out = os.path.join(work, "out-" + name)
             guard.stage(platform_name, dist, out, root=ROOT)
             if windows_extra and platform_name == "windows":
@@ -123,7 +120,7 @@ class InspectTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_the_four_exact_assets_pass(self):
+    def test_the_two_exact_assets_pass(self):
         make_assets(self.dir)
         self.assertEqual(guard.inspect_assets(self.dir, "v1.1.0"), guard.expected_assets("v1.1.0"))
 
@@ -133,7 +130,7 @@ class InspectTests(unittest.TestCase):
             guard.inspect_assets(self.dir, "v1.1.0")
 
     def test_a_missing_asset_is_refused(self):
-        make_assets(self.dir, skip="LumaSuite-v1.1.0-linux-x86_64.tar.gz")
+        make_assets(self.dir, skip="LumaSuite-v1.1.0-macos-arm64.zip")
         with self.assertRaises(guard.GuardError):
             guard.inspect_assets(self.dir, "v1.1.0")
 

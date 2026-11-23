@@ -368,3 +368,69 @@ def _roll_back(dec, before, sleep):
         if attempt + 1 < VERIFY_ATTEMPTS:
             sleep(VERIFY_PAUSE_SECONDS)
     return "incomplete"
+
+
+#: What a LumaStream decoder reports, and accepts, for "subscribed to nothing". Measured on a
+#: HW-LUMA-D4111: SelectVideoStream.Set {selecttype 0, streamname "none"} is answered with an empty
+#: address and reads back the same; SelectAudioStream.Set the same with the follow flag unchanged.
+#: The device's own web page also treats a reported "none" as a state. Restored and re-read to the
+#: starting state afterwards.
+NONE_STREAM = "none"
+
+
+def _is_none(name) -> bool:
+    return isinstance(name, str) and name.strip().lower() == NONE_STREAM
+
+
+def unroute(decoder_rpc, *, password, sleep=time.sleep) -> dict:
+    """Put one decoder into the verified unrouted state: video and audio subscribed to nothing.
+
+    READ -> WRITE ONLY WHAT DIFFERS -> VERIFY FROM THE DEVICE -> ROLL BACK ON FAILURE.
+    Needs no source. A display that follows video has its audio cleared by the video write, so
+    only the video is written and the audio is then required to read back cleared (which is
+    hardware-dependent and therefore verified, never assumed). A decoder already unrouted is a
+    verified no-op that writes nothing. Returns the same shape as `route`.
+    """
+    out = {"ok": False, "status": "failed", "mode": "unroute", "reason": "", "error": "",
+           "before": None, "after": None, "writes": [], "rollback": None,
+           "video_stream": "", "audio_stream": ""}
+    dec = Decoder(decoder_rpc, password, sleep)
+    before = dec.state()
+    if before is None:
+        out.update(status="unreachable", reason="decoder_unreachable",
+                   error="The display did not answer.")
+        return out
+    out["before"] = before
+    video_set = not _is_none(before["video"])
+    audio_set = before["follow"] is not True and not _is_none(before["audio"])         and before["audio_address"] not in _NO_ADDRESS
+    if before["follow"] is None and not _is_none(before["audio"]):
+        # The follow flag was not reported: writing the audio would have to guess it.
+        audio_set = False
+    ok = True
+    if video_set:
+        ok = dec.set_video(NONE_STREAM)
+    if ok and audio_set:
+        ok = dec.set_audio(NONE_STREAM, before["follow"] is True)
+    out["writes"] = list(dec.writes)
+    after = None
+    if ok:
+        for attempt in range(VERIFY_ATTEMPTS):
+            after = dec.state()
+            if (after is not None and _is_none(after["video"])
+                    and after["video_address"] in _NO_ADDRESS
+                    and (_is_none(after["audio"]) or after["audio_address"] in _NO_ADDRESS)):
+                out.update(ok=True, status="verified", after=after, video_stream=NONE_STREAM,
+                           audio_stream=after["audio"])
+                return out
+            if attempt + 1 < VERIFY_ATTEMPTS:
+                sleep(VERIFY_PAUSE_SECONDS)
+    out["after"] = after
+    if dec.writes:
+        # Something was written and the display does not hold the unrouted state: put it back.
+        out["rollback"] = _roll_back(dec, before, sleep)
+        out["writes"] = list(dec.writes)
+    out.update(status="not_verified" if ok else "failed",
+               reason="readback_mismatch" if ok else "set_failed",
+               error="The display did not report the unrouted state." if ok
+               else "The display refused the change.")
+    return out

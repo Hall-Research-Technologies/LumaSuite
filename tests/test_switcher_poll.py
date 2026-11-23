@@ -53,6 +53,12 @@ class SwitcherBase(Base):
         with self.m.cache_lock:
             return self.m.cache_units[SW][luma_liveness.FIELD]["misses"]
 
+    def let_its_back_off_elapse(self):
+        """A unit that has missed its reads is looked at again on a back-off schedule, not on the very next
+        sweep (see test_offline_polling.py); this is time passing, so that the sweep under test looks at it."""
+        with self.m.cache_lock:
+            self.m.cache_units[SW][luma_liveness.FIELD]["ts"] -= 3600
+
 
 class ReadOnceTests(SwitcherBase):
     def test_a_switcher_is_read_at_least_once_per_refresh_and_not_more(self):
@@ -123,6 +129,7 @@ class SilentSwitcherTests(SwitcherBase):
         self.sweeps(luma_liveness.MISS_LIMIT)
         self.assertFalse(self.online())
         self.dev.unreachable.discard(SW)
+        self.let_its_back_off_elapse()
         self.sweeps(1)
         self.assertTrue(self.online())
         self.assertEqual(self.misses(), 0)

@@ -179,17 +179,19 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     find(h, 'displays', D1).click();
     const before = h.requests.length;
     h.byId.route_btn.click();
-    assert.strictEqual(h.byId.route_btn.disabled, true, 'the button is disabled while a route is in flight');
-    h.byId.route_btn.click();                                    // a disabled button ignores this...
-    h.byId.route_btn.fire('click');                              // ...but a queued event is still delivered
+    // Nothing locks the page while a route runs: Route stays available, because a route to some
+    // other display must be able to go. A second press on the SAME targets is what is held back.
+    assert.strictEqual(h.byId.route_btn.disabled, false, 'Route is not withdrawn while a route is in flight');
+    h.byId.route_btn.click();
+    h.byId.route_btn.fire('click');
     await settle();
     const posts = h.requests.slice(before).filter(r => r.method === 'POST');
-    assert.strictEqual(posts.length, 1, 'single flight: one request, not two');
+    assert.strictEqual(posts.length, 1, 'one request per target: the same display is never written twice at once');
     assert.strictEqual(posts[0].url, '/api/user/route_multi');
     assert.deepStrictEqual(posts[0].body, {source: SRC_A, displays: [D1], groups: [], audio_follows_video: true});
     assert.strictEqual(posts[0].headers['X-LumaSuite-CSRF'], 'csrf-token-1');
     assert.ok(!/\d+\.\d+\.\d+\.\d+/.test(JSON.stringify(posts[0].body)), 'no address in the request');
-    assert.deepStrictEqual(h.toasts[0], ['Routed', 'ok']);
+    assert.ok(h.toasts.some(t => t[0] === 'Routed' && t[1] === 'ok'), 'the route is reported once it is verified');
   });
 
   await scenario('a display group is routed by its opaque id, in the same request shape', async () => {
@@ -361,11 +363,74 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     find(h, 'displays', D2).click();
     assert.strictEqual(find(h, 'displays', D2).attrs['aria-pressed'], 'false');
     assert.strictEqual(h.byId.selection_count.textContent, '1 display and 1 group chosen');
-    assert.strictEqual(h.byId.clear_targets.hidden, false);
+    assert.ok(!h.byId.clear_targets.disabled, 'Clear selection is offered once anything is chosen');
     h.byId.clear_targets.click();
     assert.strictEqual(h.byId.selection_count.textContent, '');
-    assert.strictEqual(h.byId.clear_targets.hidden, true);
+    assert.ok(h.byId.clear_targets.disabled, 'and has nothing to do again');
     [D1, GRP].forEach(id => assert.strictEqual(find(h, 'displays', id).attrs['aria-pressed'], 'false', id));
+  });
+
+  await scenario('Clear selection forgets the source as well, and sends nothing to any device', async () => {
+    const h = harness({routes: baseRoutes()});
+    await settle();
+    assert.ok(h.byId.clear_targets.disabled, 'nothing chosen, nothing to clear');
+    find(h, 'sources', SRC_A).click();
+    assert.ok(!h.byId.clear_targets.disabled, 'a source alone is a selection');
+    find(h, 'displays', D1).click();
+    find(h, 'displays', GRP).click();
+    assert.ok(!h.byId.route_btn.disabled);
+    const before = h.requests.length;
+    h.byId.clear_targets.click();
+    assert.strictEqual(find(h, 'sources', SRC_A).attrs['aria-pressed'], 'false', 'the source is cleared');
+    [D1, GRP].forEach(id => assert.strictEqual(find(h, 'displays', id).attrs['aria-pressed'], 'false', id));
+    assert.ok(h.byId.route_btn.disabled, 'Route needs a fresh choice');
+    assert.strictEqual(h.requests.filter(r => r.method !== 'GET').length, 0, 'no write of any kind');
+    assert.ok(h.requests.length >= before);
+  });
+
+  await scenario('the action bar carries Clear selection, Unroute and Route in that order', async () => {
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'ui', 'user.html'), 'utf8');
+    const bar = html.slice(html.indexOf('id="action_bar"'), html.indexOf('<script src="/ui/csrf.js"'));
+    const order = ['clear_targets', 'unroute_btn', 'route_btn'].map(id => bar.indexOf('id="' + id + '"'));
+    assert.ok(order.every(n => n > 0) && order[0] < order[1] && order[1] < order[2], 'bar order ' + order);
+  });
+
+  await scenario('Unroute needs only destinations, sends displays and groups and no source, and Clear selection never sends', async () => {
+    const answer = {ok: true, unrouted: 2, total: 2, summary: '2 of 2 displays unrouted', results: [
+      {index: 0, name: 'One', ok: true, result: 'verified'}, {index: 1, name: 'Two', ok: true, result: 'verified'}],
+      targets: [{kind: 'display', index: 0, state: 'verified'}, {kind: 'group', index: 0, state: 'verified'}]};
+    const h = harness({routes: baseRoutes({'POST /api/user/unroute': {status: 200, body: answer}})});
+    await settle();
+    assert.ok(h.byId.unroute_btn.disabled, 'nothing chosen, nothing to unroute');
+    find(h, 'displays', D1).click();                    // no source chosen at all
+    assert.ok(!h.byId.unroute_btn.disabled, 'a destination alone is enough');
+    assert.ok(h.byId.route_btn.disabled, 'while Route still needs a source');
+    find(h, 'displays', GRP).click();
+    const before = h.requests.length;
+    h.byId.unroute_btn.click();
+    await settle();
+    const posts = h.requests.slice(before).filter(r => r.method === 'POST');
+    assert.strictEqual(posts.length, 1);
+    assert.strictEqual(posts[0].url, '/api/user/unroute');
+    assert.deepStrictEqual(posts[0].body, {displays: [D1], groups: [GRP]}, 'no source, no address');
+    assert.strictEqual(posts[0].headers['X-LumaSuite-CSRF'], 'csrf-token-1');
+    assert.ok(h.toasts.some(t => t[1] === 'ok'), 'success is reported once the server verified it');
+    const afterUnroute = h.requests.length;
+    h.byId.clear_targets.click();
+    assert.strictEqual(h.requests.slice(afterUnroute).filter(r => r.method !== 'GET').length, 0, 'Clear selection writes nothing');
+  });
+
+  await scenario('a chosen video wall holds Unroute back, and a failed display is reported, not hidden', async () => {
+    const failed = {ok: false, unrouted: 0, total: 1, summary: '0 of 1 display unrouted', results: [
+      {index: 0, name: 'One', ok: false, result: 'not_verified'}],
+      targets: [{kind: 'display', index: 0, state: 'failed'}]};
+    const h = harness({routes: baseRoutes({'POST /api/user/unroute': {status: 200, body: failed}})});
+    await settle();
+    find(h, 'displays', D1).click();
+    h.byId.unroute_btn.click();
+    await settle();
+    assert.ok(h.toasts.some(t => t[1] === 'error'), 'a failure is an error, never a success');
+    assert.ok(!h.toasts.some(t => t[1] === 'ok'));
   });
 
   await scenario('Route needs a source and at least one display or group, and sends them in the order chosen', async () => {
@@ -426,6 +491,7 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     assert.strictEqual(mem.data.targets, 'display:' + D1 + '|group:' + GRP + '|display:' + D2);
     h.byId.clear_targets.click();
     assert.strictEqual(mem.data.targets, undefined, 'clearing forgets the bookmark');
+    assert.ok(!mem.data.source, 'and the source bookmark');
   });
 
   await scenario('the old single-display bookmark is read once and retired', async () => {
@@ -997,7 +1063,7 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     assert.ok(!JSON.stringify(posts(h)).includes('99:99:99'));
   });
 
-  await scenario('a destination stops accepting a drag that is already under way once a route is in flight', async () => {
+  await scenario('a destination being routed to stops accepting a drag; every other destination still accepts one', async () => {
     let release;
     const held = new Promise(r => { release = r; });
     const h = harness({routes: baseRoutes({'POST /api/user/route_multi': () => held.then(() => ({status: 200, body: OK_ONE}))})});
@@ -1008,13 +1074,13 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     assert.strictEqual(before.defaultPrevented, true, 'precondition: an idle page accepts it');
     h.byId.route_btn.click();                                      // ...and then a route starts
     const during = find(h, 'displays', D2).fire('dragover', {dataTransfer: dt()});
-    assert.strictEqual(during.defaultPrevented, false, 'busy: the destination refuses');
-    assert.ok(!find(h, 'displays', D2).classList.contains('drop-over'));
+    assert.strictEqual(during.defaultPrevented, true, 'another display is not held up by a route to this one');
+    assert.ok(find(h, 'displays', D2).classList.contains('drop-over'));
     release();
     await settle(8);
   });
 
-  await scenario('a drop while a route is in flight is ignored: one request at a time', async () => {
+  await scenario('a drop on another display goes straight out; a drop on the display being routed to is held back', async () => {
     let release;
     const held = new Promise(r => { release = r; });
     const h = harness({routes: baseRoutes({'POST /api/user/route_multi': () => held.then(() => ({status: 200, body: OK_ONE}))})});
@@ -1023,11 +1089,14 @@ const find = (h, id, dataId) => cards(h, id).filter(c => c.attrs['data-id'] === 
     h.byId.route_btn.click();
     dragSource(h, SRC_A);
     const over = find(h, 'displays', D2).fire('dragover', {dataTransfer: dt()});
-    assert.strictEqual(over.defaultPrevented, false, 'busy: the drop is refused');
+    assert.strictEqual(over.defaultPrevented, true, 'another display accepts the drop');
     find(h, 'displays', D2).fire('drop', {dataTransfer: dt()});
+    assert.strictEqual(posts(h).length, 2, 'the second route did not wait for the first');
+    dragSource(h, SRC_A);
+    find(h, 'displays', D1).fire('drop', {dataTransfer: dt()});     // D1 is mid-route
+    assert.strictEqual(posts(h).length, 2, 'the display being written to is not written to twice at once');
     release();
     await settle(8);
-    assert.strictEqual(posts(h).length, 1);
   });
 
   await scenario('routing in progress and the outcome are shown on the destination that was dropped on', async () => {

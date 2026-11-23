@@ -47,8 +47,8 @@ class RouteClassificationFenceTests(unittest.TestCase):
     def test_user_routes_are_exactly_the_projected_endpoints(self):
         user = sorted(r for r, a in luma_access.ROUTES.items() if a is Access.USER)
         self.assertEqual(user, ["/api/user/matrix", "/api/user/preview", "/api/user/revision", "/api/user/route",
-                                "/api/user/route_group", "/api/user/route_multi",
-                                "/api/user/state"])
+                                "/api/user/route_check", "/api/user/route_group", "/api/user/route_multi",
+                                "/api/user/state", "/api/user/unroute"])
         for rule in user:
             self.assertTrue(rule.startswith("/api/user/"), rule)
 

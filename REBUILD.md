@@ -36,5 +36,5 @@ The folder `third_party/pystray-0.19.5/` ships beside `LumaSuite.exe` in the rel
    built executable's archive for it.
 
 This builds for your own use. Section 7 of `LICENSE` still governs distributing a Modified Version of LumaSuite; the
-LGPL governs distributing pystray and your changes to it. macOS and Linux builds use `build_executable.py macos` or
-`linux` with the same steps; those platforms have not been exercised by Hall Research.
+LGPL governs distributing pystray and your changes to it. The macOS (Apple Silicon) build uses `build_executable.py macos` with the same steps;
+that platform has not been exercised by Hall Research. Only Windows x86-64 and macOS Apple Silicon are distributed.
