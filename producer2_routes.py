@@ -116,10 +116,30 @@ def _choose_slot_file(kind, slot, ext_pref=None):
     return abs_path, web_url, chosen
 
 def _forward_file(ip, field_name, file_tuple, url_path, username="admin", password=None, timeout=15, trim_padding=False):
-    headers = {"Authorization": f"Bearer {_mint_bearer(username, password, trim_padding=trim_padding)}"}
+    """POST a file to the unit.
+
+    A password the caller supplied is an explicit override and is sent once. Otherwise the
+    credential is the unit's own: the one that last worked, then the other configured one, and
+    only on an HTTP 401/403 -- anything else is not about the credential. The candidates come
+    from the server's resolver (one definition of which credential a unit is given) and the
+    one that works is recorded for the next call."""
     files = { field_name: file_tuple }  # ("filename.ext", bytes, "image/png")
     url = f"http://{ip}{url_path}"
-    return requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
+    if password:
+        headers = {"Authorization": f"Bearer {_mint_bearer(username, password, trim_padding=trim_padding)}"}
+        return requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
+    hook = current_app.config.get('LUMA_HTTP_CREDENTIALS') if current_app else None
+    candidates, note = (hook if hook else (None, None))
+    slots = candidates(ip) if candidates else [("primary", None)]
+    response = None
+    for slot, value in slots:
+        headers = {"Authorization": f"Bearer {_mint_bearer(username, value, trim_padding=trim_padding)}"}
+        response = requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
+        if response.status_code not in (401, 403):
+            if note and 200 <= response.status_code < 300:
+                note(ip, slot)
+            break
+    return response
 
 # ---------- Routes ----------
 @producer2_bp.get("/assets")
@@ -155,8 +175,9 @@ def push_image():
         slot = str(data.get("slot") or "").strip()
         ext  = (data.get("ext") or "").strip().lower() or None
         username = (data.get("username") or "admin").strip()
-        cfg = current_app.config.get('LUMA_CONFIG', {}) if current_app else {}
-        password = (data.get("password") or cfg.get('password','')).strip()
+        # An explicit password in the request is an override; absent, the unit's own working
+        # credential is resolved at send time (see _forward_file).
+        password = str(data.get("password") or "").strip()
         if not ip or not slot:
             return jsonify({"ok": False, "error": "missing ip or slot"}), 400
 
@@ -205,8 +226,9 @@ def push_logo():
         slot = str(data.get("slot") or "").strip()
         ext  = (data.get("ext") or "").strip().lower() or None
         username = (data.get("username") or "admin").strip()
-        cfg = current_app.config.get('LUMA_CONFIG', {}) if current_app else {}
-        password = (data.get("password") or cfg.get('password','')).strip()
+        # An explicit password in the request is an override; absent, the unit's own working
+        # credential is resolved at send time (see _forward_file).
+        password = str(data.get("password") or "").strip()
         if not ip or not slot:
             return jsonify({"ok": False, "error": "missing ip or slot"}), 400
 

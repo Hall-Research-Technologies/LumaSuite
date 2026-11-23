@@ -482,6 +482,8 @@ class TheRealRoutesTests(unittest.TestCase):
         self.assertTrue(luma_projection.is_online(self.app.unit(DISPLAY_1["ip"])))
         self.assertTrue(luma_projection.is_online(self.app.unit(SOURCE_A["ip"])))
         self.app.devices.unreachable.clear()
+        with self.m.cache_lock:          # time passes: a unit that missed twice is looked at again on a back-off schedule
+            self.m.cache_units[DISPLAY_2["ip"]][luma_liveness.FIELD]["ts"] -= 3600
         self.m._refresh_matrix_state_core()
         self.assertTrue(luma_projection.is_online(self.app.unit(DISPLAY_2["ip"])), "answered again: back at once")
         self.assertEqual(self.app.devices.writes(), [], "reading liveness writes nothing")

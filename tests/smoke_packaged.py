@@ -1,5 +1,6 @@
-# Run by hand against a packaged build:  python tests/smoke_packaged.py <path to the executable>
-# Not part of unittest discovery (it launches the artifact), and not run in CI.
+# Run against a packaged build:  python tests/smoke_packaged.py <path to the executable>
+# Not part of unittest discovery or run_tests.py (it launches the artifact). The release workflow runs it on
+# the executable extracted from each distributed zip, on both distributed platforms.
 """Start the packaged artifact and ask it questions. "PyInstaller completed successfully" is
 not evidence that anything runs: a missing data file or an uncollected import builds cleanly and
 fails only when a person opens it.
@@ -9,6 +10,7 @@ from a developer's real runtime files is migrated into it, and its browser launc
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,17 @@ import urllib.error
 import urllib.request
 
 EXE = sys.argv[1]
+
+
+def _source_version():
+    """The version the packaged artifact must report: read from lumaserver.py, never typed here."""
+    import re
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lumaserver.py")
+    with open(path, encoding="utf-8") as handle:
+        return re.search(r'^__version__ = "([^"]+)"', handle.read(), re.M).group(1)
+
+
+SOURCE_VERSION = _source_version()
 
 
 def kill_tree(proc):
@@ -61,7 +74,7 @@ def stop(proc):
     kill_tree(proc)
 
 
-def wait_for(port, path, seconds=60):
+def wait_for(port, path, seconds=120):
     deadline = time.time() + seconds
     while time.time() < deadline:
         status, body, _ = get(port, path)
@@ -69,6 +82,32 @@ def wait_for(port, path, seconds=60):
             return status, body
         time.sleep(0.5)
     return None, b""
+
+
+def get_json(port, path, seconds=90):
+    """Ask until the endpoint gives a real answer: HTTP 200 and a JSON object, or the deadline.
+
+    /api/remote_access lists the network adapters, which the application does by running PowerShell
+    on every call (bounded at 25 s by the product itself). Measured on a cold start that is 3 to 7
+    seconds a call, so the default 5 s read timeout of get() turns a slow answer into "no answer" --
+    which is what a failure of two checks once looked like. The readiness signal is the answer
+    itself, so each attempt is allowed longer than the product's own bound and the last status is
+    returned, never guessed.
+    """
+    deadline = time.time() + seconds
+    last = (None, {})
+    while True:
+        status, body, _ = get(port, path, timeout=40)
+        try:
+            parsed = json.loads(body) if status == 200 else None
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return status, parsed
+        last = (status, {})
+        if time.time() > deadline:
+            return last
+        time.sleep(0.5)
 
 
 results = []
@@ -85,7 +124,8 @@ try:
     status, body = wait_for(PORT_LOCAL, "/api/app_version")
     check("the packaged application starts and answers", status == 200, str(status))
     version = json.loads(body or b"{}").get("version") if status == 200 else None
-    check("it reports the version it was built from", version == "1.1.0", str(version))
+    check("it reports the version it was built from (lumaserver.py, the one authoritative version)",
+          version == SOURCE_VERSION, "%s != %s" % (version, SOURCE_VERSION))
 
     for path in ("/", "/ui/matrix.html", "/ui/wall.html", "/ui/producer.html", "/ui/manual.html",
                  "/ui/user.html", "/ui/admin_users.html", "/ui/login.html", "/login", "/user", "/admin/users",
@@ -95,6 +135,21 @@ try:
                  "/ui/companylogo.png"):
         code, data, _ = get(PORT_LOCAL, path)
         check("page or asset: " + path, code == 200 and len(data) > 20, "HTTP %s, %d bytes" % (code, len(data)))
+
+    # The User Guide's screenshots are inside the package: every picture the guide names is served as
+    # an image, the guide is not an empty shell, and it asks for its version from the running server.
+    code, guide, _ = get(PORT_LOCAL, "/ui/manual.html")
+    guide_text = (guide or b"").decode("utf-8", "replace")
+    pictures = re.findall(r'<img\b[^>]*\bsrc="(guide/[^"]+)"', guide_text)
+    check("the User Guide names its screenshots", code == 200 and len(pictures) >= 25, "%s pictures" % len(pictures))
+    broken = []
+    for picture in pictures:
+        code, data, headers = get(PORT_LOCAL, "/ui/" + picture)
+        if code != 200 or not (data or b"").startswith(b"\x89PNG") or "image/png" not in str(headers.get("Content-Type", "")):
+            broken.append("%s: HTTP %s" % (picture, code))
+    check("every screenshot in the User Guide is served from the package as a PNG", not broken, "; ".join(broken[:5]))
+    check("the User Guide asks the server for its version and does not carry one", "/api/app_version" in guide_text
+          and SOURCE_VERSION not in re.sub(r"<script.*?</script>", "", guide_text, flags=re.S))
 
     # The local application port block: the launcher registered its controller, so the packaged
     # build answers with real data (a source run that was not started by the launcher says "not available").
@@ -120,10 +175,9 @@ try:
     code, data, _ = get(PORT_LOCAL, "/api/auth/session")
     session = json.loads(data or b"{}")
     check("the local operator is recognised as local", code == 200 and session.get("local") is True, repr(session))
-    code, data, _ = get(PORT_LOCAL, "/api/remote_access")
-    remote = json.loads(data or b"{}")
+    code, remote = get_json(PORT_LOCAL, "/api/remote_access")
     check("remote access is off by default", code == 200 and remote.get("enabled") is False and remote.get("has_admin") is False,
-          repr({k: remote.get(k) for k in ("enabled", "has_admin")}))
+          "HTTP %s %s" % (code, repr({k: remote.get(k) for k in ("enabled", "has_admin")})))
     check("the certificate generator is available in the package", (remote.get("certificate") or {}).get("can_generate") is True,
           repr(remote.get("certificate")))
     code, data, _ = get(PORT_LOCAL, "/api/bootstrap/state")

@@ -107,7 +107,7 @@ class ReleaseConsistencyTests(unittest.TestCase):
     def test_a_release_tag_must_be_v_plus_the_application_version(self):
         workflow = text(".github", "workflows", "build-cross-platform.yml")
         step = workflow[workflow.index("Tag must be v plus the application version"):]
-        step = step[:step.index("- name: Install Linux GUI deps")]
+        step = step[:step.index("- name: The interpreter is the architecture this row claims")]
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", step)
         self.assertIn("lumaserver.py", step)
         # the tag reaches the check through the environment, never interpolated into the script

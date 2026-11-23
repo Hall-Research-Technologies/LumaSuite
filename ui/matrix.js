@@ -247,6 +247,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // Fetch units from backend and split into encoders/decoders
+  let inventoryEpoch = null;
   async function fetchUnits() {
     // Always fetch fresh data (no cache)
     console.debug('[fetchUnits] Fetching /api/cache ...');
@@ -254,6 +255,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const data = await res.json();
     console.debug('[fetchUnits] Response:', data);
     let units = (data.units || []);
+    // The inventory revision this page was built from; sent back with a route so a request
+    // made from a cleared inventory is refused rather than acted on.
+    inventoryEpoch = typeof data.inventory_epoch === 'string' ? data.inventory_epoch : null;
     
     // Check both type and role fields for encoder/decoder/switcher classification
     const typeOrRole = (u) => `${(u.type||'')} ${(u.role||'')} ${(u.model||'')}`.toLowerCase();
@@ -589,6 +593,7 @@ function routeCellHtml(dec, enc) {
         let lastError = '';
         const sendRoute = async targetIp => {
           const postData = { decoder_ip: targetIp, encoder_ip: encIp, mode: routeMode };
+          if (inventoryEpoch) postData.inventory_epoch = inventoryEpoch;
           console.debug('[sendRoute] POST /api/route_matrix', postData);
           try {
             const resp = await fetch('/api/route_matrix', {

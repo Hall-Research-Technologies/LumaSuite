@@ -27,9 +27,12 @@
     source: '',                       // selected source id (exactly one)
     targets: [],                      // [{kind: 'display'|'group'|'wall', id}] in the order chosen
     drag: null,                       // {source: id} while a source is being dragged
-    outcome: {},                      // target key -> 'ok' | 'failed', from the last route
-    busy: false,
-    routing: {},                      // target key -> true while a route is in flight
+    // target key -> 'ok' | 'pending' | 'failed'. `pending` is a route the device accepted and has not
+    // confirmed yet (it is being looked at again); it is never drawn as a failure. An outcome is
+    // replaced only by the next route to that same target, never wiped by a route to another.
+    outcome: {},
+    inflight: 0,                      // route requests on the wire; there is no page-wide lock
+    routing: {},                      // target key -> true while a route to THAT target is in flight
     directLink: false,
     preview: true,                    // pictures on; the person's choice, remembered
     // "Audio follows video": a routing preference for Standard Routing, not a permission. On, a
@@ -42,7 +45,7 @@
     // (or an account from before the setting existed) has Standard only.
     interfaces: {standard: true, matrix: false},
     view: 'standard', viewChosen: false,
-    matrix: null, mode: 'av', mxPending: ''
+    matrix: null, mode: 'av', mxPending: {}, mxLast: {}
   };
   var REVISION_MS = 20000;
   var SHOT_MS = 5000;                 // how often pictures on screen are re-fetched
@@ -249,6 +252,53 @@
     return null;
   }
 
+  // What the line under a card's name says. A route in flight and a route not yet confirmed say so
+  // in words: neither is a result.
+  function cardSub(kind, item, online) {
+    var key = kind + ':' + item.id;
+    if (state.routing[key]) return 'Routing…';
+    if (state.outcome[key] === 'pending') return 'Confirming…';
+    var multi = kind === 'group' || kind === 'wall';
+    if (kind === 'source') return online ? 'Online' : 'Offline';
+    if (multi) {
+      var sub = plural(item.members, 'display', 'displays') + ' · ' + describeShowing(item.showing);
+      if (!online) return plural(item.members, 'display', 'displays') + ' · Offline';
+      if (item.degraded) sub += ' · ' + (item.members - item.online_members) + ' offline';
+      return sub;
+    }
+    return online ? describeShowing(item.showing) : 'Offline';
+  }
+
+  // The four route marks on a card. Only a verified result is drawn as success and only a verified
+  // failure as failure; a route in flight or awaiting confirmation is neither.
+  function markCard(node, key) {
+    node.classList.toggle('routing', !!state.routing[key]);
+    node.classList.toggle('route-pending', !state.routing[key] && state.outcome[key] === 'pending');
+    node.classList.toggle('route-ok', !state.routing[key] && state.outcome[key] === 'ok');
+    node.classList.toggle('route-failed', !state.routing[key] && state.outcome[key] === 'failed');
+  }
+
+  // Update one card in place. A route finishing is not a reason to rebuild every card, lose the
+  // person's place, or cancel another card's pending state.
+  function paintCardState(key) {
+    var nodes = document.querySelectorAll('[data-kind]');
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      if (node.getAttribute('data-kind') + ':' + node.getAttribute('data-id') !== key) continue;
+      markCard(node, key);
+      var item = findItem(node.getAttribute('data-kind'), node.getAttribute('data-id'));
+      var line = node.querySelector('.pick-sub');
+      if (item && line) line.textContent = cardSub(node.getAttribute('data-kind'), item, isAvailable(node.getAttribute('data-kind'), item));
+    }
+    if (state.view === 'matrix' && state.matrix) {
+      Object.keys(state.mxPending).forEach(function (row) {
+        // Settled: nothing in flight and a verified answer (not still awaiting confirmation).
+        if (!state.routing[row] && state.outcome[row] && state.outcome[row] !== 'pending') delete state.mxPending[row];
+      });
+      renderMatrix();
+    }
+  }
+
   function card(kind, item) {
     var multi = kind === 'group' || kind === 'wall';
     var button = el('button', 'pick' + (multi ? ' group' : '') + (kind === 'wall' ? ' wall' : ''));
@@ -275,19 +325,8 @@
     body.appendChild(el('span', 'pick-name', item.name));
 
     var online = isAvailable(kind, item);
-    var sub;
-    if (kind === 'source') {
-      sub = online ? 'Online' : 'Offline';
-    } else if (multi) {
-      sub = plural(item.members, 'display', 'displays') + ' · ' + describeShowing(item.showing);
-      if (!online) sub = plural(item.members, 'display', 'displays') + ' · Offline';
-      else if (item.degraded) sub += ' · ' + (item.members - item.online_members) + ' offline';
-    } else {
-      sub = online ? describeShowing(item.showing) : 'Offline';
-    }
     var key = kind + ':' + item.id;
-    if (state.routing[key]) sub = 'Routing…';
-    body.appendChild(el('span', 'pick-sub', sub));
+    body.appendChild(el('span', 'pick-sub', cardSub(kind, item, online)));
     button.appendChild(body);
 
     if (!online) {
@@ -298,9 +337,7 @@
       button.setAttribute('aria-disabled', 'true');
     }
     if (multi && item.degraded && online) button.classList.add('degraded');
-    if (state.routing[key]) button.classList.add('routing');
-    if (state.outcome[key] === 'ok') button.classList.add('route-ok');
-    if (state.outcome[key] === 'failed') button.classList.add('route-failed');
+    markCard(button, key);
 
     button.addEventListener('click', function () { if (online) choose(kind, item.id); });
     wireDrag(button, kind, item, online);
@@ -315,7 +352,7 @@
   // button calls, which sends the one request the server authorises and verifies.
   // Nothing is routed by an ordinary click, and Route + keyboard work unchanged.
   function canDrop(kind) {
-    return !!(state.drag && !state.busy && kind !== 'source');
+    return !!(state.drag && kind !== 'source');
   }
 
   function clearDragMarks() {
@@ -331,7 +368,6 @@
       if (!online) return;
       button.setAttribute('draggable', 'true');
       button.addEventListener('dragstart', function (event) {
-        if (state.busy) { if (event.preventDefault) event.preventDefault(); return; }
         state.drag = {source: item.id};
         button.classList.add('dragging');
         if (event.dataTransfer) {
@@ -375,7 +411,7 @@
       var held = state.drag;
       state.drag = null;
       clearDragMarks();
-      if (!held || !online || state.busy) return;
+      if (!held || !online) return;
       var src = findItem('source', held.source);
       if (!src || !src.online) { say('That source is not available.', 'error'); return; }
       state.source = held.source;
@@ -421,10 +457,22 @@
     }
   }
 
+  // What the cards are drawn from. When it has not changed there is nothing to redraw, and a
+  // refresh that found the same answer must not rebuild every card.
+  var lastRender = '';
+  function renderSignature() {
+    // Route marks are not in it: they are painted in place on the card they belong to.
+    return JSON.stringify([state.sources, state.displays, state.groups, state.walls, state.source,
+                           state.targets, state.preview, state.view]);
+  }
+
   function render() {
     // Standard routing's cards exist only while it is the interface in front of the
     // person: a hidden page must not ask devices for pictures nobody can see.
     if (state.view !== 'standard') return;
+    var signature = renderSignature();
+    if (signature === lastRender && $('displays').firstChild) { renderAction(); return; }
+    lastRender = signature;
     var held = focusToken();         // the cards are rebuilt below; focus must outlive that
     renderSources();
     renderDisplays();
@@ -625,7 +673,6 @@
   // One source; any number of displays and display groups. Choosing the same card
   // again removes it. Nothing is chosen on the person's behalf.
   function choose(kind, id) {
-    if (state.busy) return;
     var item = findItem(kind, id);
     if (!item || !isAvailable(kind, item)) return;          // offline or no longer listed
     if (kind === 'source') {
@@ -645,9 +692,13 @@
     remember('targets', state.targets.map(targetKey).join('|'));
   }
 
+  // Clear selection forgets the source and every display, group and wall chosen, and the bookmarks
+  // of both. It is only a choice on the page: nothing is sent to a device and nothing is unrouted.
   function clearTargets() {
-    if (state.busy || !state.targets.length) return;
+    if (!state.targets.length && !state.source) return;
     state.targets = [];
+    state.source = '';
+    remember('source', '');
     rememberTargets();
     render();
   }
@@ -672,15 +723,18 @@
     var summary = $('summary');
     var button = $('route_btn');
     var clear = $('clear_targets');
+    var unroute = $('unroute_btn');
     var count = $('selection_count');
     summary.replaceChildren();
-    if (clear) clear.hidden = !state.targets.length;
-    if (count) count.textContent = state.targets.length ? chosenWords() + ' chosen' : '';
-    if (state.busy) {
-      summary.textContent = 'Working…';
-      button.disabled = true;
-      return;
+    if (clear) clear.disabled = !state.targets.length && !state.source;
+    // Unroute needs only destinations: displays and groups, one or many. A video wall is not part of
+    // it, so a chosen wall holds it back. It is held back while those displays are being written to.
+    if (unroute) {
+      var hasWall = state.targets.some(function (t) { return t.kind === 'wall'; });
+      var busy = state.targets.some(function (t) { return state.routing[targetKey(t)]; });
+      unroute.disabled = !state.targets.length || hasWall || busy;
     }
+    if (count) count.textContent = state.targets.length ? chosenWords() + ' chosen' : '';
     var source = state.source ? nameOf(state.sources, state.source) : '';
     if (source && state.targets.length) {
       var shown = chosenWords();
@@ -710,6 +764,8 @@
       summary.appendChild(el('strong', '', source));
       summary.appendChild(document.createTextNode(' to '));
       summary.appendChild(el('strong', '', shown));
+      // Routes already on their way are said, never a reason to hold this one back.
+      if (state.inflight > 0) summary.appendChild(el('span', 'muted', ' · ' + state.inflight + ' routing'));
       button.disabled = false;
     } else {
       // Say what is still missing; the action is never withdrawn.
@@ -721,13 +777,30 @@
   }
 
   // ------------------------------------------------------------ routing
-  function setBusy(on) { state.busy = on; renderAction(); }
+  // ---- one route's life ---------------------------------------------------------------------
+  //
+  // A route is a request, then a confirmation, and neither locks the page. The only thing a route
+  // holds is the targets it is writing to: a second route to the same display waits for the first
+  // (the server would serialise them anyway); a route to any other display, group or matrix cell
+  // goes straight out. After the answer the page looks again, read-only, at any display that had
+  // not yet reported the stream it was given, and only then calls the route verified or failed.
+  var CONFIRM_DELAYS_MS = [1500, 3000, 5000];
+  var refreshWanted = {};            // display ids whose picture to fetch once state is read again
+  var refreshing = false;
+  var refreshAgain = false;
 
-  function refreshAfter(displayIds) {
-    return refresh().then(function () {
-      // The pictures of what each routed display shows now are fetched at once and
-      // the five-second cadence starts again from here: no settle delay, no extra timer.
-      refreshNow(displayIds.map(function (id) { return 'display:' + id; }));
+  // One read of the state after routes settle, however many routes there were: not one per route.
+  function scheduleRefresh(displayIds) {
+    (displayIds || []).forEach(function (id) { refreshWanted[id] = true; });
+    if (state.inflight > 0) return Promise.resolve();      // the last route to finish does it
+    if (refreshing) { refreshAgain = true; return Promise.resolve(); }
+    refreshing = true;
+    var ids = Object.keys(refreshWanted);
+    refreshWanted = {};
+    return refresh().catch(function () { /* the next refresh retries */ }).then(function () {
+      refreshing = false;
+      refreshNow(ids.map(function (id) { return 'display:' + id; }));
+      if (refreshAgain) { refreshAgain = false; return scheduleRefresh([]); }
     });
   }
 
@@ -737,71 +810,228 @@
     routeTo(state.source, state.targets.slice());
   }
 
+  // The Unroute button: put every chosen display and group into the unrouted state. It needs no
+  // source. It follows the same life as a route (claim the targets, one request, mark each
+  // outcome, never lock the page) and reads back nothing of its own: the server verifies each
+  // display from the device and the page marks only what the server says.
+  function unrouteNow() {
+    var chosen = state.targets.filter(function (t) { return t.kind !== 'wall' && !state.routing[targetKey(t)]; });
+    if (!chosen.length) return Promise.resolve();
+    var opener = focusToken();
+    var token = ++routeSeq;
+    var sent = {source: '', chosen: chosen, token: token,
+                displays: chosen.filter(function (t) { return t.kind === 'display'; }).map(function (t) { return t.id; }),
+                groups: chosen.filter(function (t) { return t.kind === 'group'; }).map(function (t) { return t.id; }),
+                walls: []};
+    state.inflight++;
+    chosen.forEach(function (t) {
+      var key = targetKey(t);
+      state.routing[key] = true;
+      routeToken[key] = token;
+      delete state.outcome[key];
+      paintCardState(key);
+    });
+    renderAction();
+    function release() {
+      state.inflight--;
+      chosen.forEach(function (t) { delete state.routing[targetKey(t)]; paintCardState(targetKey(t)); });
+      renderAction();
+    }
+    return api('/api/user/unroute', {method: 'POST', body: {displays: sent.displays, groups: sent.groups}})
+      .then(function (answer) {
+        release();
+        var body = answer.body || {};
+        if (!body.results) {
+          chosen.forEach(function (t) { if (mine(sent, targetKey(t))) state.outcome[targetKey(t)] = 'failed'; paintCardState(targetKey(t)); });
+          say(failureText(answer.res, body), 'error');
+          return;
+        }
+        applyTargets(sent, body);
+        if (body.unrouted === body.total) {
+          say(body.total === 1 ? 'Unrouted' : body.summary, 'ok');
+          return;
+        }
+        say(body.summary, 'error');
+        var rows = body.results.filter(function (r) { return !r.ok; })
+          .map(function (r) { return {label: r.name, value: resultWords(r)}; });
+        if (window.lumaConfirm && rows.length) {
+          var closed = window.lumaConfirm({title: 'Some displays were not unrouted', message: body.summary + '.',
+                                           summary: rows, confirmText: 'OK', cancelText: null});
+          if (closed && typeof closed.then === 'function') return closed.then(function () { restoreFocus(opener); });
+        }
+      }, function () {
+        release();
+        chosen.forEach(function (t) { if (mine(sent, targetKey(t))) state.outcome[targetKey(t)] = 'failed'; paintCardState(targetKey(t)); });
+        say('Could not reach LumaSuite', 'error');
+      }).then(function () { return scheduleRefresh(sent.displays); });
+  }
+
   // The one routing action. Both the Route button and a drop end here, so there is
   // one request shape and one authorisation path; the page never sequences writes.
-  function routeTo(source, chosen) {
-    if (state.busy || !source || !chosen.length) return;
-    var opener = focusToken();       // the Route button is disabled while this runs
-    var displays = chosen.filter(function (t) { return t.kind === 'display'; })
-      .map(function (t) { return t.id; });
-    var groups = chosen.filter(function (t) { return t.kind === 'group'; })
-      .map(function (t) { return t.id; });
-    var walls = chosen.filter(function (t) { return t.kind === 'wall'; })
-      .map(function (t) { return t.id; });
-    // The single-flight claim is taken before anything is asked or sent.
-    setBusy(true);
-    state.outcome = {};
-    chosen.forEach(function (t) { state.routing[targetKey(t)] = true; });
-    render();
+  // `via` is how the Matrix asks: {interface: 'matrix', done: fn}.
+  var routeSeq = 0;
+  var routeToken = {};               // target key -> the route that last claimed it
+  function routeTo(source, chosen, via) {
+    if (!source || !chosen.length) return Promise.resolve();
+    // A target already being written to is left to finish; everything else goes now.
+    var free = chosen.filter(function (t) { return !state.routing[targetKey(t)]; });
+    if (!free.length) { say('Still routing. It will be ready in a moment.', 'error'); return Promise.resolve(); }
+    var opener = focusToken();
+    var matrix = !!(via && via.interface === 'matrix');
+    var token = ++routeSeq;
+    var sent = {source: source, chosen: free, token: token,
+                displays: free.filter(function (t) { return t.kind === 'display'; }).map(function (t) { return t.id; }),
+                groups: free.filter(function (t) { return t.kind === 'group'; }).map(function (t) { return t.id; }),
+                walls: free.filter(function (t) { return t.kind === 'wall'; }).map(function (t) { return t.id; }),
+                interface: matrix ? 'matrix' : 'standard'};
+    state.inflight++;
+    free.forEach(function (t) {
+      var key = targetKey(t);
+      state.routing[key] = true;
+      routeToken[key] = token;
+      delete state.outcome[key];
+    });
+    free.forEach(function (t) { paintCardState(targetKey(t)); });
     renderAction();
 
-    var body = {source: source, displays: displays, groups: groups,
-                audio_follows_video: state.audioFollowsVideo !== false};
-    if (walls.length) body.walls = walls;
-    api('/api/user/route_multi', {method: 'POST', body: body}).then(function (answer) {
-      return afterRoute(answer.res, answer.body || {}, displays, chosen, opener);
-    }).catch(function () {
+    var body = {source: source, displays: sent.displays, groups: sent.groups};
+    if (matrix) {
+      body.walls = sent.walls;
+      body.interface = 'matrix';
+      body.mode = state.mode;
+    } else {
+      body.audio_follows_video = state.audioFollowsVideo !== false;
+      if (sent.walls.length) body.walls = sent.walls;
+    }
+    // The request is over when the answer arrives: what a route holds is released there, before the
+    // confirmation (if one is needed) begins, so confirming one display never holds up another route.
+    function release() {
+      state.inflight--;
+      free.forEach(function (t) { delete state.routing[targetKey(t)]; });
+      free.forEach(function (t) { paintCardState(targetKey(t)); });
+      renderAction();
+    }
+    return api('/api/user/route_multi', {method: 'POST', body: body}).then(function (answer) {
+      release();
+      return afterRoute(answer.res, answer.body || {}, sent, opener);
+    }, function () {
+      release();
+      free.forEach(function (t) { if (routeToken[targetKey(t)] === token) state.outcome[targetKey(t)] = 'failed'; paintCardState(targetKey(t)); });
       say('Could not reach LumaSuite', 'error');
     }).then(function () {
-      chosen.forEach(function (t) { delete state.routing[targetKey(t)]; });
-      setBusy(false);
-      render();
       restoreFocus(opener);
+      return scheduleRefresh(sent.displays);
     });
   }
 
-  function afterRoute(res, body, displayIds, chosen, opener) {
-    if (!body.results) {                       // refused before anything was written
-      chosen.forEach(function (t) { state.outcome[targetKey(t)] = 'failed'; });
-      say(failureText(res, body), 'error');
-      return refresh();
-    }
-    var summary = body.summary || (body.routed + ' of ' + plural(body.total, 'display', 'displays') + ' routed');
-    chosen.forEach(function (t) { state.outcome[targetKey(t)] = body.ok ? 'ok' : 'failed'; });
-    if (body.ok) {
-      var unfollowed = body.results.some(function (r) { return r.audio === 'not_following'; });
-      var done = body.total === 1 ? 'Routed' : summary;
-      say(unfollowed ? done + '. A display is not set to follow video for audio.' : done, 'ok');
-    } else {
-      say(summary, 'error');
-      // The per-display outcome is something to read, not a passing message.
-      var rows = body.results.filter(function (r) { return !r.ok; }).map(function (r) {
-        return {label: r.name, value: resultWords(r)};
+  // Whether this route is still the latest word on a target. A later route to the same display
+  // replaces an earlier one's outcome, and a late answer about the earlier one must not undo it.
+  function mine(sent, key) { return routeToken[key] === sent.token; }
+
+  // Apply what the server says became of each thing chosen. `targets` names them by position in
+  // the list that was sent; an answer without it (an older server) marks all of them together.
+  function applyTargets(sent, body) {
+    var lists = {display: sent.displays, group: sent.groups, wall: sent.walls};
+    var unconfirmed = [];
+    if (Array.isArray(body.targets)) {
+      body.targets.forEach(function (row) {
+        var list = lists[row.kind] || [];
+        var id = list[row.index];
+        if (id === undefined) return;
+        var key = row.kind + ':' + id;
+        if (!mine(sent, key)) return;
+        state.outcome[key] = row.state === 'verified' ? 'ok' : row.state === 'unconfirmed' ? 'pending' : 'failed';
+        if (row.state === 'unconfirmed') unconfirmed.push(key);
       });
-      if (window.lumaConfirm && rows.length) {
-        // The dialog returns focus to whatever held it when it opened, which was the body
-        // if the control had been disabled by then. Naming the opener puts it back.
-        var closed = window.lumaConfirm({title: 'Some displays did not change',
-                                         message: summary + '.',
-                                         summary: rows, confirmText: 'OK', cancelText: null});
-        if (closed && typeof closed.then === 'function') {
-          closed.then(function () { restoreFocus(opener); });
-        }
+    } else {
+      sent.chosen.forEach(function (t) {
+        if (mine(sent, targetKey(t))) state.outcome[targetKey(t)] = body.ok ? 'ok' : 'failed';
+      });
+    }
+    sent.chosen.forEach(function (t) { paintCardState(targetKey(t)); });
+    return unconfirmed;
+  }
+
+  function afterRoute(res, body, sent, opener) {
+    if (!body.results) {                       // refused before anything was written
+      sent.chosen.forEach(function (t) {
+        if (mine(sent, targetKey(t))) state.outcome[targetKey(t)] = 'failed';
+        paintCardState(targetKey(t));
+      });
+      say(failureText(res, body), 'error');
+      return Promise.resolve();
+    }
+    var unconfirmed = applyTargets(sent, body);
+    if (!unconfirmed.length) return finish(body, opener, null);
+    // Not yet a failure and not yet a success: say what is happening, then look again.
+    say('Confirming ' + plural(unconfirmed.length, 'destination', 'destinations') + '…');
+    return confirmLater(sent, unconfirmed, 0).then(function (resolved) {
+      return finish(body, opener, resolved);
+    });
+  }
+
+  // Look again, read-only, at what was not confirmed. A display that now reports the stream is
+  // verified; one that never does is a verified failure -- the same sentence the route gave.
+  function confirmLater(sent, keys, attempt) {
+    if (attempt >= CONFIRM_DELAYS_MS.length) {
+      keys.forEach(function (key) { if (mine(sent, key)) state.outcome[key] = 'failed'; paintCardState(key); });
+      return Promise.resolve({verified: 0, stillFailed: keys.length});
+    }
+    return new Promise(function (resolve) { setTimeout(resolve, CONFIRM_DELAYS_MS[attempt]); }).then(function () {
+      var body = {source: sent.source, displays: sent.displays, groups: sent.groups, interface: sent.interface};
+      return api('/api/user/route_check', {method: 'POST', body: body});
+    }).then(function (answer) {
+      var again = answer.body || {};
+      var lists = {display: sent.displays, group: sent.groups};
+      var pending = [], verified = 0;
+      if (!answer.res.ok || !Array.isArray(again.targets)) return confirmLater(sent, keys, attempt + 1);
+      again.targets.forEach(function (row) {
+        var id = (lists[row.kind] || [])[row.index];
+        var key = row.kind + ':' + id;
+        if (keys.indexOf(key) < 0) return;
+        if (!mine(sent, key)) { verified++; return; }        // replaced by a newer route: not this one's to say
+        if (row.state === 'verified') { state.outcome[key] = 'ok'; verified++; }
+        else if (row.state === 'unconfirmed') pending.push(key);
+        else state.outcome[key] = 'failed';
+        paintCardState(key);
+      });
+      if (!pending.length) return {verified: verified, stillFailed: keys.length - verified};
+      return confirmLater(sent, pending, attempt + 1).then(function (rest) {
+        return {verified: verified + rest.verified, stillFailed: rest.stillFailed};
+      });
+    }).catch(function () { return confirmLater(sent, keys, attempt + 1); });
+  }
+
+  // The words, once there is a result. Counts are of what is now verified, not of what was sent.
+  // `looked` is null when nothing needed a second look, else {verified, stillFailed} from it.
+  function finish(body, opener, looked) {
+    var total = body.total;
+    var routed = body.routed + (looked ? looked.verified : 0);
+    var summary = looked
+      ? routed + ' of ' + plural(total, /destination/.test(body.summary || '') ? 'destination' : 'display',
+                                 /destination/.test(body.summary || '') ? 'destinations' : 'displays') + ' routed'
+      : body.summary || (body.routed + ' of ' + plural(body.total, 'display', 'displays') + ' routed');
+    if (routed === total) {
+      var unfollowed = body.results.some(function (r) { return r.audio === 'not_following'; });
+      var done = total === 1 ? 'Routed' : summary;
+      say(unfollowed ? done + '. A display is not set to follow video for audio.' : done, 'ok');
+      return Promise.resolve();
+    }
+    say(summary, 'error');
+    // The per-display outcome is something to read, not a passing message. A display that was
+    // being confirmed is listed only if it never was.
+    var rows = body.results.filter(function (r) {
+      return !r.ok && !(looked && r.result === 'not_verified' && !looked.stillFailed);
+    })
+      .map(function (r) { return {label: r.name, value: resultWords(r)}; });
+    if (window.lumaConfirm && rows.length) {
+      var closed = window.lumaConfirm({title: 'Some displays did not change', message: summary + '.',
+                                       summary: rows, confirmText: 'OK', cancelText: null});
+      if (closed && typeof closed.then === 'function') {
+        return closed.then(function () { restoreFocus(opener); });
       }
     }
-    // Selections stay as they were, as on the OmniSuite page: the same choice is
-    // usually repeated, and clearing it would be the page deciding for the person.
-    return refreshAfter(displayIds);
+    return Promise.resolve();
   }
 
   function resultWords(r) {
@@ -900,11 +1130,15 @@
     var usable = cellUsable(row, source);
     // Busy is said with aria-disabled, not `disabled`: a disabled button that holds focus
     // drops it to the page body, and the cell just pressed is the one that must keep it.
-    // matrixRoute() refuses a second press while a route is running, so nothing is lost.
+    // matrixRoute() refuses a second press on a row that is mid-route, so nothing is lost; every
+    // other row and column stays pressable while it runs.
     button.disabled = !usable;
-    button.setAttribute('aria-disabled', usable && !state.busy ? 'false' : 'true');
-    var pending = state.routing[rowKey(row)] && state.mxPending === source.id;
-    button.classList.toggle('pending', !!pending);
+    button.setAttribute('aria-disabled', usable && !state.routing[rowKey(row)] ? 'false' : 'true');
+    // Pending is a route in flight, or one the device accepted and has not confirmed yet. Failed is
+    // only ever a verified failure, on the cell that was pressed.
+    button.classList.toggle('pending', state.mxPending[rowKey(row)] === source.id);
+    button.classList.toggle('failed', state.outcome[rowKey(row)] === 'failed'
+      && state.mxLast[rowKey(row)] === source.id && state.mxPending[rowKey(row)] !== source.id);
     var held = [];
     if (cell.video !== 'none') held.push(cell.video === 'all' ? 'video routed' : 'video on some displays');
     if (cell.audio !== 'none') held.push(cell.audio === 'all' ? 'audio routed' : 'audio on some displays');
@@ -1012,7 +1246,10 @@
     });
     rows.forEach(function (row) {
       var sub = table.querySelector('[data-sub="' + CSS.escape(rowKey(row)) + '"]');
-      if (sub) sub.textContent = state.routing[rowKey(row)] ? 'Routing…' : stateWords(row);
+      if (sub) {
+        sub.textContent = state.routing[rowKey(row)] ? 'Routing…'
+          : state.outcome[rowKey(row)] === 'pending' ? 'Confirming…' : stateWords(row);
+      }
       sources.forEach(function (s) {
         var button = cellNode(table, row, s);
         if (button) paintCell(button, row, s);
@@ -1043,33 +1280,16 @@
   }
 
   function matrixRoute(row, sourceId) {
-    if (state.busy || !row || !sourceId) return;
+    if (!row || !sourceId) return;
     var source = null;
     ((state.matrix && state.matrix.sources) || []).forEach(function (s) { if (s.id === sourceId) source = s; });
     if (!source || !cellUsable(row, source)) return;
-    // One request, built from what the grid held a moment ago and re-authorised by the
-    // server. The single-flight claim is taken before anything is sent.
-    var chosen = [{kind: row.kind, id: row.id}];
-    var opener = focusToken();       // the cell pressed; it keeps focus unless the grid is rebuilt
-    setBusy(true);
-    state.outcome = {};
-    state.routing[rowKey(row)] = true;
-    state.mxPending = sourceId;
-    renderMatrix();
-    var body = {source: sourceId, interface: 'matrix', mode: state.mode,
-                displays: [], groups: [], walls: []};
-    body[row.kind === 'display' ? 'displays' : row.kind === 'group' ? 'groups' : 'walls'] = [row.id];
-    api('/api/user/route_multi', {method: 'POST', body: body}).then(function (answer) {
-      return afterRoute(answer.res, answer.body || {}, row.kind === 'display' ? [row.id] : [], chosen, opener);
-    }).catch(function () {
-      say('Could not reach LumaSuite', 'error');
-    }).then(function () {
-      delete state.routing[rowKey(row)];
-      state.mxPending = '';
-      setBusy(false);
-      render();
-      renderMatrix();                // restores the cell itself if the grid was rebuilt
-    });
+    // Only this row waits for its own route; any other cell goes straight out. The one request is
+    // built from what the grid held a moment ago and re-authorised by the server.
+    if (state.routing[rowKey(row)]) return;
+    state.mxPending[rowKey(row)] = sourceId;
+    state.mxLast[rowKey(row)] = sourceId;
+    routeTo(sourceId, [{kind: row.kind, id: row.id}], {interface: 'matrix'});
   }
 
   // A preview is one frame, asked for when the pointer rests on a routing cell (the dot) and
@@ -1196,7 +1416,7 @@
   // Ask whether this account's grants changed. Never a device read, never while the
   // tab is hidden, and a route in flight is left to finish and refresh itself.
   function checkRevision() {
-    if (document.hidden || state.busy || !state.rev) return Promise.resolve();
+    if (document.hidden || state.inflight > 0 || !state.rev) return Promise.resolve();
     return api('/api/user/revision').then(function (answer) {
       var body = answer.body || {};
       if (answer.res.ok && body.ok && body.rev && body.rev !== state.rev) return refresh();
@@ -1234,6 +1454,7 @@
   function start() {
     watchVisibility();
     $('route_btn').addEventListener('click', routeNow);
+    $('unroute_btn').addEventListener('click', unrouteNow);
     $('clear_targets').addEventListener('click', clearTargets);
     // Bound as soon as the control exists, not after the saved value loads.
     var afv = $('afv_toggle');

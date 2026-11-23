@@ -47,20 +47,27 @@ class AssetSelectionTests(unittest.TestCase):
     def pick(self, names, platform_name, machine):
         return lumaserver._pick_platform_asset(assets(names), platform_name, machine)
 
-    def test_the_workflow_produces_four_archives_and_each_platform_picks_its_own(self):
+    def test_the_workflow_produces_two_archives_and_each_platform_picks_its_own(self):
         names = workflow_asset_names()
         self.assertEqual(sorted(names), sorted([
-            "LumaSuite-v9.9.9-windows-x86_64.zip", "LumaSuite-v9.9.9-macos-x86_64.zip",
-            "LumaSuite-v9.9.9-macos-arm64.zip", "LumaSuite-v9.9.9-linux-x86_64.tar.gz"]))
+            "LumaSuite-v9.9.9-windows-x86_64.zip", "LumaSuite-v9.9.9-macos-arm64.zip"]))
         for order in (names, list(reversed(names))):
             self.assertEqual(self.pick(order, "win32", "AMD64"), BASE + "LumaSuite-v9.9.9-windows-x86_64.zip")
-            self.assertEqual(self.pick(order, "darwin", "x86_64"), BASE + "LumaSuite-v9.9.9-macos-x86_64.zip")
             self.assertEqual(self.pick(order, "darwin", "arm64"), BASE + "LumaSuite-v9.9.9-macos-arm64.zip")
-            self.assertEqual(self.pick(order, "linux", "x86_64"), BASE + "LumaSuite-v9.9.9-linux-x86_64.tar.gz")
+
+    def test_retired_platforms_are_offered_nothing_even_from_a_release_that_still_carries_their_archives(self):
+        # An old release (or a mistake) may still hold an Intel Mac or Linux archive. They are not
+        # distributed, so the updater never offers one.
+        old = ["LumaSuite-v9.9.9-windows-x86_64.zip", "LumaSuite-v9.9.9-macos-arm64.zip",
+               "LumaSuite-v9.9.9-macos-x86_64.zip", "LumaSuite-v9.9.9-linux-x86_64.tar.gz"]
+        self.assertIsNone(self.pick(old, "darwin", "x86_64"))
+        self.assertIsNone(self.pick(old, "linux", "x86_64"))
+        self.assertEqual(lumaserver._platform_asset_suffixes("darwin", "x86_64"), ())
+        self.assertEqual(lumaserver._platform_asset_suffixes("linux", "x86_64"), ())
 
     def test_every_asset_names_its_operating_system_and_architecture(self):
         for name in workflow_asset_names():
-            self.assertRegex(name, r"-(windows|macos|linux)-(x86_64|arm64)\.(zip|tar\.gz)$", name)
+            self.assertRegex(name, r"-(windows-x86_64|macos-arm64)\.zip$", name)
 
     def test_the_windows_archive_holds_the_executable_the_build_really_writes(self):
         workflow = read(".github", "workflows", "build-cross-platform.yml")

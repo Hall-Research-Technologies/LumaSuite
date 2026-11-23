@@ -28,6 +28,15 @@ MATRIX = py("test_user_matrix.py")
 PAGE = node("user_matrix_page_test.js")
 FOCUS = node("user_focus_test.js")
 NL = chr(10)
+# route_multi and route_check carry near-identical grant checks; an anchor inside either has to begin
+# in text only that one has. route_multi's follows its "walls are not available" refusal, route_check's
+# follows its own request-shape refusal.
+WALLS_REFUSAL = ('error": "Video walls are not available."}), 404' + NL + NL +
+                 '        def _check(account):' + NL)
+CHECK_REFUSAL = ('                or (not display_ids and not group_ids)):' + NL +
+                 '            return jsonify({"ok": False, "error": "source, displays and groups required"}), 400' + NL + NL +
+                 '        def _check(account):' + NL)
+CHECK = py("test_route_states.py", "RouteCheckAuthorisationTests", "RouteCheckSecondLineTests")
 
 MATRIX_MUTATIONS = [
     # ---- which interface an account holds ---------------------------------------------------
@@ -73,9 +82,9 @@ MATRIX_MUTATIONS = [
 
     # ---- the interface is checked on every request ------------------------------------------
     ("iface.route-multi-grant-unchecked", "luma_remote_api.py",
-     '            if not account.permissions.may_use_interface(interface):' + chr(10) +
+     WALLS_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + chr(10) +
      '                return "interface_not_permitted"',
-     '            if False:' + chr(10) +
+     WALLS_REFUSAL + '            if False:' + chr(10) +
      '                return "interface_not_permitted"',
      "routing through route_multi no longer needs the interface grant",
      [py("test_user_matrix.py", "InterfaceEnforcementTests", "AuthorisationTests")]),
@@ -189,13 +198,13 @@ MATRIX_MUTATIONS = [
      "an account with one interface is offered a second tab",
      [PAGE]),
     ("ui.matrix-cell-names-standard", "ui/user.js",
-     "    var body = {source: sourceId, interface: 'matrix', mode: state.mode,",
-     "    var body = {source: sourceId, interface: 'standard', mode: state.mode,",
+     "      body.interface = 'matrix';" + NL + "      body.mode = state.mode;",
+     "      body.interface = 'standard';" + NL + "      body.mode = state.mode;",
      "a Matrix click is sent as a Standard one",
      [PAGE]),
     ("ui.mode-ignored", "ui/user.js",
-     "    var body = {source: sourceId, interface: 'matrix', mode: state.mode,",
-     "    var body = {source: sourceId, interface: 'matrix', mode: 'av',",
+     "      body.interface = 'matrix';" + NL + "      body.mode = state.mode;",
+     "      body.interface = 'matrix';" + NL + "      body.mode = 'av';",
      "the Video and Audio choices are not sent",
      [PAGE]),
     ("ui.offline-cell-pressable", "ui/user.js",
@@ -234,11 +243,6 @@ MATRIX_MUTATIONS = [
      "    button.disabled = !usable || state.busy;",
      "the cell just pressed is disabled while its route runs, so it drops focus to the page",
      [FOCUS]),
-    ("focus.dialog-close-not-restored", "ui/user.js",
-     "          closed.then(function () { restoreFocus(opener); });",
-     "          closed.then(function () {});",
-     "the result dialog closes and the Route button that was disabled underneath it stays unfocused",
-     [FOCUS]),
     ("focus.standard-render-forgets", "ui/user.js",
      "    watchPreviews();" + NL + "    restoreFocus(held);" + NL + "  }",
      "    watchPreviews();" + NL + "  }",
@@ -249,11 +253,11 @@ MATRIX_MUTATIONS = [
      "  }" + NL + NL + "  function loadMatrix() {",
      "a rebuilt matrix grid is not given its focused cell back",
      [FOCUS]),
-    ("focus.route-end-forgets", "ui/user.js",
-     "      render();" + NL + "      restoreFocus(opener);" + NL + "    });",
-     "      render();" + NL + "    });",
-     "a Standard route finishes without returning focus to the control that started it",
-     [FOCUS]),
+    # Retired, not repointed: "focus.dialog-close-not-restored" and "focus.route-end-forgets" broke the two
+    # restoreFocus(opener) calls at the end of a Standard route. Routing no longer disables the Route button or
+    # replaces the page while a route runs, so focus is never stranded there; removing BOTH calls together was
+    # measured to leave user_focus_test.js green (13/13). They are a harmless second line behind render()'s own
+    # restoreFocus(held), and a mutation nothing can fail is noise that reads as a gap.
     ("focus.steals-from-the-person", "ui/user.js",
      "    if (!token || !focusStranded()) return;",
      "    if (!token) return;",
@@ -264,4 +268,48 @@ MATRIX_MUTATIONS = [
      "      if (have[0] === want[0]) return node;",
      "a control is found again by the first part of its identity only, so the wrong cell takes focus",
      [FOCUS]),
+    # ---- the second look is authorised exactly like a route ----------------------------------
+    ("check.interface-grant-skipped", "luma_remote_api.py",
+     CHECK_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + NL +
+     '                return "interface_not_permitted"',
+     CHECK_REFUSAL + '            if False:' + NL + '                return "interface_not_permitted"',
+     "the later look at a route no longer needs the interface grant", [CHECK]),
+    ("check.source-grant-skipped", "luma_remote_api.py",
+     CHECK_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + NL +
+     '                return "interface_not_permitted"' + NL +
+     '            if not account.permissions.may_use_source(source_id):' + NL +
+     '                return "source_not_permitted"',
+     CHECK_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + NL +
+     '                return "interface_not_permitted"',
+     "the later look reads a display routed from a source the account was not given", [CHECK]),
+    ("check.display-grant-skipped", "luma_remote_api.py",
+     CHECK_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + NL +
+     '                return "interface_not_permitted"' + NL +
+     '            if not account.permissions.may_use_source(source_id):' + NL +
+     '                return "source_not_permitted"' + NL +
+     '            for identity in display_ids:',
+     CHECK_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + NL +
+     '                return "interface_not_permitted"' + NL +
+     '            if not account.permissions.may_use_source(source_id):' + NL +
+     '                return "source_not_permitted"' + NL +
+     '            for identity in []:',
+     "the later look reads a display the account was not given", [CHECK]),
+    ("check.group-grant-skipped", "luma_remote_api.py",
+     CHECK_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + NL +
+     '                return "interface_not_permitted"' + NL +
+     '            if not account.permissions.may_use_source(source_id):' + NL +
+     '                return "source_not_permitted"' + NL +
+     '            for identity in display_ids:' + NL +
+     '                if not account.permissions.may_control_destination(identity):' + NL +
+     '                    return "destination_not_permitted"' + NL +
+     '            for group_id in group_ids:',
+     CHECK_REFUSAL + '            if not account.permissions.may_use_interface(interface):' + NL +
+     '                return "interface_not_permitted"' + NL +
+     '            if not account.permissions.may_use_source(source_id):' + NL +
+     '                return "source_not_permitted"' + NL +
+     '            for identity in display_ids:' + NL +
+     '                if not account.permissions.may_control_destination(identity):' + NL +
+     '                    return "destination_not_permitted"' + NL +
+     '            for group_id in []:',
+     "the later look reads the members of a group the account was not given", [CHECK]),
 ]

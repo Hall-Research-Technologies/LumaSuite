@@ -111,11 +111,27 @@
     accountControls(shell);
   }
 
+  // Remote Access area: the page this tab is showing belongs to it.
+  function onRemoteArea() {
+    return location.pathname.replace(/\/+$/, '') === REMOTE_PATH;
+  }
+
+  // Remote Access was just turned OFF (a definite answer, after it had been on) while this tab is
+  // on a page of that area. The page would only keep failing, so leave it for the main page.
+  // Only a transition does this: opening the area directly while it is off is not one.
+  function leaveIfWithdrawn(before, shell) {
+    if (before && before.remote && shell && !shell.remote && onRemoteArea()) {
+      location.replace('/');
+    }
+  }
+
   function settle(session) {
     if (!isDefinite(session)) return;       // no answer: keep what is shown
+    var before = readShell();
     var shell = shellOf(session);
     writeShell(shell);
     apply(shell);
+    leaveIfWithdrawn(before, shell);
   }
 
   function refreshNav() {
@@ -127,6 +143,20 @@
   // Settings calls this after turning Remote Access on or off, so the tab follows
   // without a reload.
   window.lumaRefreshNav = refreshNav;
+
+  // The same browser, another tab: whichever tab learns the answer writes it, and every other
+  // open tab follows without a reload or a request of its own. (`storage` fires only in OTHER
+  // documents, so a tab never reacts to its own write.)
+  window.addEventListener('storage', function (event) {
+    if (event.key !== SHELL_KEY) return;
+    var next = null;
+    try { next = event.newValue ? JSON.parse(event.newValue) : null; } catch (err) { next = null; }
+    if (!next || typeof next !== 'object') return;
+    var before = null;
+    try { before = event.oldValue ? JSON.parse(event.oldValue) : null; } catch (err) { before = null; }
+    apply(next);
+    leaveIfWithdrawn(before, next);
+  });
 
   // A page restored from the back-forward cache after signing out must not show
   // an administrator's data: reload it so the gate answers.

@@ -82,6 +82,36 @@ class EnablingTests(Fixture):
         self.assertFalse(self.s.remote.enabled())
         self.assertIn("certificate", response.get_json()["error"].lower())
 
+    def test_the_refusal_says_a_certificate_is_the_missing_piece_so_the_page_can_offer_the_choice(self):
+        body = self.enable().get_json()
+        self.assertIs(body["needs_certificate"], True)
+        self.assertEqual(body["reason"], "no_usable_certificate")
+        self.assertFalse(body["certificate"].get("present"))
+
+    def test_refusing_for_want_of_a_certificate_creates_nothing_and_changes_nothing(self):
+        before = self.preference()
+        self.enable()
+        self.assertEqual(self.calls, [], "no listener of any kind")
+        self.assertFalse(os.path.exists(str(self.s.remote.cert_file)), "no certificate was made silently")
+        self.assertEqual(self.preference(), before, "no preference was saved, and none downgraded to HTTP")
+
+    def test_an_unreadable_certificate_is_refused_the_same_way_and_never_replaced(self):
+        with open(str(self.s.remote.cert_file), "w") as handle:
+            handle.write("not a certificate")
+        marker = open(str(self.s.remote.cert_file)).read()
+        response = self.enable()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["reason"], "no_usable_certificate")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(open(str(self.s.remote.cert_file)).read(), marker, "the file was left exactly as found")
+
+    def test_the_choice_to_change_to_http_still_needs_the_explicit_acknowledgement(self):
+        # "Change to HTTP" in the page is a selection, not consent: the request must still carry it.
+        response = self.enable(transport="http")
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.get_json()["needs_confirmation"])
+        self.assertEqual(self.calls, [])
+
     def test_https_with_a_certificate_starts_with_a_tls_context(self):
         self.generate()
         response = self.enable()
@@ -261,6 +291,32 @@ class CertificateTests(Fixture):
         self.assertEqual(self.local.post("/api/admin/certificate", json={
             "action": "use", "cert_path": cert, "key_path": key}).status_code, 200)
         self.assertEqual(self.enable().status_code, 200)             # the site's own certificate
+
+    def test_the_refusal_says_which_problem_it_is_so_the_page_can_offer_the_right_decision(self):
+        """A mismatch is its own reason, and a supplied certificate is never offered a replacement."""
+        self.generate(address=MOVED["address"])
+        self.assertEqual(self.enable().get_json()["reason"], "certificate_mismatch")
+        cert, key = os.path.join(self.s.dir, "site.pem"), os.path.join(self.s.dir, "site.key")
+        luma_tls.generate_self_signed("203.0.113.99", cert, key)
+        self.local.post("/api/admin/certificate", json={"action": "use", "cert_path": cert, "key_path": key})
+        damaged = open(cert).read()
+        open(cert, "w").write("damaged")
+        body = self.enable().get_json()
+        self.assertEqual(body["reason"], "supplied_certificate_unusable")
+        self.assertIs(body["needs_certificate"], False,
+                      "a site's own certificate must not be offered a replacement")
+        self.assertEqual(open(cert).read(), "damaged", "the supplied file was left exactly as found")
+        self.assertEqual(self.calls, [])
+        del damaged
+
+    def test_the_state_says_whether_the_configured_pair_can_really_serve(self):
+        self.generate()
+        state = self.local.get("/api/remote_access").get_json()["certificate"]
+        self.assertIs(state["usable"], True)
+        open(str(self.s.remote.cert_file), "w").write("not a certificate")
+        state = self.local.get("/api/remote_access").get_json()["certificate"]
+        self.assertIs(state["usable"], False)
+        self.assertTrue(state["unusable_reason"])
 
     def test_a_certificate_cannot_be_removed_while_it_is_serving(self):
         self.generate()

@@ -91,10 +91,10 @@ executable.
   is in the executable only because PyInstaller's runtime hooks pull it in; LumaSuite's own code does not import
   it. In the Windows executable inspected for this file, setuptools' vendored libraries (including `autocommand`)
   are not present as code; only their licence texts are. The text is kept so the list stays complete; no `autocommand` code is distributed in the executable.
-- **macOS and Linux builds** add platform packages resolved at build time (for example
-  `python-xlib` on Linux and the `pyobjc` Quartz binding on macOS). Those builds have not been
-  inspected for this file; their texts are not collected here. Treat the list above as the
-  Windows x86-64 package until those archives are inspected.
+- **The macOS (Apple Silicon) build** adds platform packages resolved at build time (the `pyobjc`
+  Quartz binding that pystray uses on macOS). Those packages have not been inspected for this file;
+  their texts are not collected here. Treat the list above as the Windows x86-64 package until the macOS
+  archive is inspected. No other platform is distributed.
 - Pillow's licence file also lists the licences of the image libraries it bundles.
 - certifi's licence file is the Mozilla Public License 2.0 notice that certifi ships, not the full licence
   text. certifi is used unmodified; its source is the published `certifi` release on PyPI.

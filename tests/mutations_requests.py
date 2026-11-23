@@ -85,7 +85,7 @@ REQUEST_MUTATIONS = [
      '    logging.debug(f"[api_upgrade] received data: {data}")',
      "the upgrade body, which carries the device password, is logged", [LOGS]),
     ("update.suffix-ignored", "lumaserver.py",
-     'name.startswith("lumasuite-") and name.endswith(suffix)', 'name.startswith("lumasuite-") and name.endswith("")',
+     '            if name.endswith(suffix) and asset.get("browser_download_url"):', '            if name.endswith("") and asset.get("browser_download_url"):',
      "any file of the release is offered to every platform", [ASSETS]),
     ("error.detail-leaks", "luma_request.py",
      '                    "error": "That did not work. The reason is in the LumaSuite log."}), status',

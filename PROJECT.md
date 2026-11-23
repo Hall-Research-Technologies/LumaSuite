@@ -32,7 +32,7 @@ just device provisioning.
 
 ## 2. Version / release state
 
-**VERIFIED FROM SOURCE.** Current version: **1.1.0**. The one authoritative version is
+**VERIFIED FROM SOURCE.** Current version: **1.1.1**. The one authoritative version is
 `__version__` in `lumaserver.py`. Everything that shows a version reads it: the launcher
 (`app_launcher.py` declares the same value and `tests/test_release_consistency.py` pins the
 two together), `GET /api/app_version`, the Settings Application block, the User Guide
@@ -40,10 +40,12 @@ two together), `GET /api/app_version`, the Settings Application block, the User 
 backup's header, and the Windows version resource that `build_executable.py` generates from
 `lumaserver.py` (the build keeps no version of its own). `README.md`, `CHANGELOG.md`,
 `RELEASE_NOTES.md` and this file state it, and the same test fails if one drifts. No tag has
-been created for 1.1.0 and nothing is published from this branch.
+been created for 1.1.1 and nothing is published from this branch; v1.1.0 was never published, and
+v1.0.8 is the newest published release.
 
-`CHANGELOG.md` carries one consolidated `v1.1.0` section (the earlier unreleased entries were
-folded into it), then v1.0.8 and earlier. There is a runtime `GET /api/app_version` and a
+`CHANGELOG.md` carries the `v1.1.1` section (the first published release of the 1.1 series, which
+includes everything in the unpublished `v1.1.0` candidate), then the `v1.1.0` section (never
+published), then v1.0.8 and earlier. There is a runtime `GET /api/app_version` and a
 `GET /api/version`: `/api/version` is the per-device firmware version query and
 `/api/app_version` is the application's own version. They are different things.
 
@@ -62,7 +64,7 @@ lumaSuite/
 ├── server.py             2-line shim: `from lumaserver import APP as app`
 ├── app_launcher.py       Tkinter + pystray GUI wrapper; runs lumaserver.APP
 │                         in a background thread, opens browser, tray icon
-├── build_executable.py   PyInstaller packaging script (Windows/macOS/Linux)
+├── build_executable.py   PyInstaller packaging script (Windows x86-64 / macOS arm64)
 ├── luma_*.py             v1.1.0 modules beside the monolith: the access gate
 │                         (`luma_access`), accounts (`luma_users`), Remote Access
 │                         (`luma_remote*`, `luma_tls`), routing helpers (`luma_groups`,
@@ -177,8 +179,7 @@ and Settings are shared, not copy-pasted:
   Authentication (username, Password, Fallback Password — §11), Firmware
   (folder chooser), Production Studio Assets (static-image/logo folder
   choosers), Application (About: copyright line + `/license` link; the
-  "free for personal/business use" wording is deliberately omitted
-  because no LICENSE file exists yet, §20). Reads/writes the same
+  licence text is `LICENSE`, served at `/license`, §20). Reads/writes the same
   `/api/config` and new `/api/update_check` endpoints regardless of
   which page opened it.
 
@@ -674,8 +675,13 @@ I/O), `POST /api/ping` / `POST /api/tcp_probe` (per-device reachability),
 device and reports per-path status — a real connectivity-troubleshooting
 tool), `GET /api/version` (per-device firmware version) / `GET
 /api/app_version` (app's own version), `POST /api/export_csv` (inventory
-export). Logging is forced to `DEBUG` level, unbuffered, at startup — very
-verbose by default. Password values are deliberately not logged directly;
+export). Logging (`luma_logging`) is INFO by default, written to a rotating file
+(`<data folder>/logs/lumasuite.log`, 2 MB x 4 files at most) and to stderr when there
+is one; `LUMA_LOG_LEVEL=DEBUG` restores the per-read detail and `LUMA_LOG_FILE=0`
+writes no file. The packaged build is windowed (no stderr) and never wrote a
+log file before; the earlier unconditional DEBUG formatted a record for every
+device read and, from a redirected terminal, grew about 55 MB an hour with 200
+silent units. Password values are deliberately not logged directly;
 the frontend additionally redacts password-looking substrings from
 displayed error text (`sanitizePasswordsFromError`). No `/health` endpoint
 beyond heartbeat, no metrics endpoint.
@@ -707,9 +713,10 @@ transient success/failure notification across the app.
   `BUILD_STANDALONE.md`. It dispatches by platform argument or `platform.system()`: Windows
   (`--onefile --windowed`, Windows version resource generated from `lumaserver.py`'s
   `__version__`), macOS (`--onedir --windowed`, **one architecture per build**, taken from
-  `PYI_MACOS_ARCH` or the machine, bundle identifier `com.lumasuite.app`; it is not a universal
-  binary), Linux (`--onefile --windowed` plus a generated `.desktop` launcher and install
-  script). The entry script is `app_launcher.py` in every case. Every build adds `ui/`,
+  Apple Silicon only: an Intel host or a non-arm64 `PYI_MACOS_ARCH` is refused; bundle identifier
+  `com.lumasuite.app`; it is not a universal binary, and the bundle is signed ad hoc again after the version is stamped).
+  There is no Linux build and no macOS Intel build. The Windows build checks the executable's table of
+  contents for the licence material. The entry script is `app_launcher.py` in every case. Every build adds `ui/`,
   `hallway.png`, `atlona.png`, `licenses/` and `THIRD_PARTY_NOTICES.md`, and refuses to start
   if the last two are missing. No firmware or credential files are ever added as build data.
 - `LumaSuite.spec` (tracked in git despite `.gitignore`'s generic `*.spec` rule pre-dating it) is
@@ -722,11 +729,11 @@ transient success/failure notification across the app.
   The server serves them at `/license` and `/licenses/<package>/<file>` (public, and only paths the
   manifest lists). `tests/test_notices.py` asserts the lock, the manifest, the notices and the texts
   agree.
-- CI: `.github/workflows/build-cross-platform.yml`, matrix over `windows-latest`, `macos-26-intel`,
-  `macos-26` and `ubuntu-latest`, triggered by a push to `main`, a `v*` tag or manual dispatch.
+- CI: `.github/workflows/build-cross-platform.yml`, matrix over `windows-latest` and `macos-15` (native
+  arm64), the only two distributed platforms (macOS Intel and Linux are not built), triggered by a push to `main`, a `v*` tag or manual dispatch.
   Steps: install the lock, `py_compile` every server module, run every Python suite, `node --check`
   the UI scripts and run every Node suite, then build, upload artifacts and package
-  `LumaSuite-<tag>-windows-x86_64.zip`, `-macos-x86_64.zip`, `-macos-arm64.zip` and `-linux-x86_64.tar.gz`. An `identity`
+  `LumaSuite-<tag>-windows-x86_64.zip` and `-macos-arm64.zip`. An `identity`
   job runs first (`tools/release_guard.py identity`, tested by `tests/test_release_guard.py`): a tag must be exactly
   `v` plus `__version__` and sit on `origin/main`, otherwise the run stops; a branch push or dispatch is a diagnostic build
   that cannot publish. A valid tag creates a **draft** GitHub Release (never published automatically) from those
@@ -804,8 +811,8 @@ entry point installs it, not each test.
   executable.
 - The Windows release package holds `LumaSuite.exe`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `REBUILD.md`, `licenses/`
   and `third_party/pystray-0.19.5/`; `tools/release_guard.py` (`stage`, `inspect`) builds and checks that layout.
-- The macOS and Linux packages add platform packages (for example `python-xlib`, the `pyobjc` Quartz
-  binding) that have not been inspected; their texts are not collected.
+- The macOS package adds platform packages (the `pyobjc` Quartz binding that pystray uses) that have not been
+  inspected; their texts are not collected. There is no Linux package.
 
 ## 21. Third-party dependencies
 
@@ -813,8 +820,7 @@ entry point installs it, not each test.
 `requirements-build-lock.txt`: `requirements-build.txt` is the human-edited list of
 direct pins (`flask==3.1.3`, `requests==2.34.2`, `websocket-client==1.8.0`,
 `Werkzeug==3.1.9`, `PyInstaller==6.19.0`, `Pillow==13.0.0`, `pystray==0.19.5`,
-`psutil==5.9.8`, `cryptography==50.0.2`, with `cryptography==48.0.1` on Intel macOS, which
-has no wheel for 49 and later); the lock is the complete graph, every
+`psutil==5.9.8`, `cryptography==50.0.2` on every platform; the earlier Intel-macOS pin is gone with that platform); the lock is the complete graph, every
 transitive package an exact pin (Windows-only ones carry `sys_platform` markers),
 frozen from a fresh venv. Build/test interpreter: Python 3.12.16
 (python-build-standalone 20261026, OpenSSL 3.5.9; the Windows RC is built on it), because the
@@ -827,8 +833,8 @@ multipart file part to disk, so without it a stranger chooses the memory and dis
 listener is unlimited, so a local backup restore is unchanged. No application-wide
 `MAX_CONTENT_LENGTH` is set. `flask-cors` was removed (never imported;
 `tests/test_dependency_hygiene.py` keeps it out). Hashes (`--require-hashes`) are
-deferred until cross-platform hash management exists. macOS/Linux extras
-(macholib, python-xlib, pyobjc) still resolve unpinned.
+deferred until cross-platform hash management exists. macOS extras
+(macholib, pyobjc) still resolve unpinned.
 
 The README's earlier claim of a NumPy dependency was wrong (nothing imports it) and has been
 removed. Which of the locked distributions are actually inside the executable is recorded in
@@ -871,8 +877,8 @@ PyInstaller's runtime hooks pull it in.
   port and shares the data folder); the server's memory rises slowly under sustained use (about 2 MB/h
   measured over six hours, mostly the bounded activity log, flat when idle; no leak is claimed or excluded);
   the application makes outbound HTTPS requests to Hall Research (firmware versions, at launch and every seven
-  days) and to GitHub (newest release, on demand); macOS and Linux packages are built by CI but have not
-  been exercised on those systems by this release process.
+  days) and to GitHub (newest release, on demand); the macOS (Apple Silicon) package is built by CI but has not
+  been exercised on a Mac by this release process.
 - No pre-upload firmware-version-vs-device comparison exists (§13) —
   **UNKNOWN — REQUIRES VALIDATION** whether that's intentional
   (operator-trusted file selection) or a gap. (A separate, explicit,
@@ -2300,3 +2306,57 @@ The new setting never reads or writes Remote Access's port, adapter, transport, 
 **Logging.** INFO events only (conflict, alternate chosen, port changed, restart); nothing periodic; no secrets.
 
 **Tests.** `tests/test_local_port.py` (controller, file, routes; real loopback sockets), `tests/test_launcher_port.py` + `tests/launcher_port_driver.py` (the real `AppWindow` under a withdrawn Tk root, driven with `btn.invoke()`; skipped loudly when Tk cannot initialise), `tests/port_settings_test.js` (render path and request contract), mutations `port.*` in `tests/mutate_security.py`.
+
+
+## 38. Restricted routing: no page-wide lock, and a route is only ever what it has been shown to be
+
+Found on hardware against the v1.1.0 draft: after one route the Routing and Matrix pages refused every further route until
+verification and a full state read had finished, and a display that was merely slow to report the stream it had taken was
+drawn as a failure (a red mark) and then corrected by the next refresh. Both were in `ui/user.js`; the server was already
+parallel and per-display locked.
+
+- **The page holds only what it is writing to.** `state.routing` is per target (display, group, wall, matrix row); there is
+  no page-wide busy flag. A second route to a *different* target goes straight out; a second route to the *same* target
+  waits for the first (`Still routing`). The server's per-display locks remain the authority.
+- **One state read per burst.** `scheduleRefresh` runs when the last route in flight finishes, not after each one. Cards are
+  updated in place (`paintCardState`); `render()` skips a rebuild when what the cards are drawn from has not changed.
+- **Three states per destination, from the server.** `/api/user/route_multi` returns `targets` -- one per thing chosen, named
+  by *position* in the list the page sent (the response carries no identity) -- each `verified`, `unconfirmed` or `failed`.
+  `unconfirmed` is a video route whose read-back answered with another stream (`not_verified`); a group is the worst of its
+  members. Audio-only routes and walls are never `unconfirmed`.
+- **The later look is read-only.** `POST /api/user/route_check` (USER) takes the same grants a route needs, confirms each
+  display's identity, and reads the encoder's stream and the decoder's selected stream. It writes nothing and takes no lock.
+  The page looks at 1.5 s, 3 s and 5 s after the answer; a display that never reports the stream is then a verified failure.
+  A later route to the same target replaces an earlier one's outcome (`routeToken`), so a late look cannot undo it.
+- **Unconfirmed is drawn as neither success nor failure** (`route-pending`, `Confirming…`; matrix cell `pending`). Only a
+  verified failure is red.
+- Measurement tooling: `tests/bench_routing.py` (server, against `_devicesim`) and `tests/bench_user_ui.js` (the page, with
+  answers delayed by the server figures). Real-hardware timings are a separate live step.
+
+
+## 34. Multi-switch awareness (LLDP) -- Device Manager
+
+Ported from OmniSuite with the same semantics; informational only.
+
+- **Source.** The AV LAN neighbour a unit reports is already read during a scan (`luma_netstatus`, stored as `unit["net"]["lldp"]`).
+  Nothing new is asked of any unit and nothing runs on the discovery path: `luma_topology.topology()` is pure and derives everything
+  from the stored records when `/api/cache` (and the scan response, and `GET /api/lldp_topology`) are served.
+- **Identity.** A switch is its LLDP **chassis ID** (`ChassisID`), normalised for grouping only (case, `:`/`-`/`.`; a dotted address is
+  never stripped into a MAC; an all-zero/all-ones MAC is not an identity). The system name is a label. Never subnet, address, adapter or
+  hostname. A unit with no read, no link, no neighbour or a neighbour without a usable chassis is **unknown**: counted, never grouped,
+  never "different".
+- **Primary.** The switch with strictly the most known units. A tie has no primary and therefore no "different" unit
+  (`tied: true`, notice still shown, wording names no culprit). N switches are supported; `multi_switch` is two or more known switches.
+- **Wire shape** (additive): `lldp_topology` and `topology_warning_acknowledged` beside `units`. `devices` is keyed by address (the
+  display key) and carries the MAC as the identity, `state` (`primary`/`different`/`tied`/`unknown`), `switch_id`, `switch_name`,
+  `port` and, for unknown units, a `reason`.
+- **Acknowledgement.** `topology_ack.json`, its own atomic store (`luma_topology.AckStore`), set by
+  `POST /api/lldp_topology/acknowledge`. It belongs to the lifetime of the discovered inventory: reset only where the inventory is
+  emptied (full Clear Units, or a Clear Units that removes the last unit), never by a scan, a reload or another switch appearing. The
+  "Different switch" marks are not affected by it. Both routes are administrative.
+- **Not carried over from OmniSuite:** daisy-chain resolution (an OmniStream unit can sit behind another unit's switch port; no such
+  LumaStream relationship is read) and USB-extender rows.
+- **UI.** `ui/switch-topology.js` (no request except the acknowledgement, no timer, text-only rendering); the banner is the shared
+  `.notice` inside the table's own scroll container so it scrolls away and never covers a header; the mark uses the info role.
+- **Not proven by the lab.** The lab has one switch (a stack: ports `1/0/x` and `2/0/x` share one chassis ID), so a second switch is
+  proven only by synthetic fixtures and a synthetic scratch instance.

@@ -21,8 +21,9 @@
  * inspection confirmed they are pure presentation data (a preset name plus
  * seven hex colours), with no device/protocol logic attached. Two of
  * OmniSuite's nine semantic roles ("daisy chain" / "other switch", used for
- * its multi-switch topology view) are deliberately dropped: LumaSuite has
- * no such topology view, and those tokens don't exist here.
+ * its multi-switch topology view) are deliberately dropped as palette entries:
+ * LumaSuite's multi-switch notice and its "Different switch" mark are drawn from
+ * the info role, so every preset and both modes already apply to them.
  */
 (function () {
   var LUMA_PRESETS = [
@@ -113,6 +114,36 @@
     return contrastRatio(hex, "#ffffff") >= contrastRatio(hex, "#101418") ? "#ffffff" : "#101418";
   }
 
+  // The operator's light-mode page background. A generic appearance control (nothing in it is
+  // specific to a product): one colour, validated as a colour before it reaches a custom property,
+  // applied to both <html> and <body> because the light palette is declared on both and a value set
+  // on only one would be shadowed on the other. The surfaces around it are derived in family.css
+  // from `--light-bg`, so panels and headers keep their separation from the page.
+  //
+  // `data-light-bg` is only present when the choice differs from the default, so an installation that
+  // never touched this renders exactly the palette it always did.
+  var LIGHT_BG_DEFAULT = "#f7f8fb";
+  function normalizeLightBg(value) {
+    if (typeof value !== "string") return null;
+    var hex = value.trim().toLowerCase();
+    if (!/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/.test(hex)) return null;
+    if (hex.length === 4) hex = "#" + hex.charAt(1) + hex.charAt(1) + hex.charAt(2) + hex.charAt(2) + hex.charAt(3) + hex.charAt(3);
+    return hex;
+  }
+  function applyLightBackground(value) {
+    var colour = normalizeLightBg(value);
+    var html = document.documentElement;
+    var hosts = [html, document.body].filter(Boolean);
+    if (!colour || colour === LIGHT_BG_DEFAULT) {
+      hosts.forEach(function (host) { host.style.removeProperty("--light-bg"); });
+      html.removeAttribute("data-light-bg");
+      return LIGHT_BG_DEFAULT;
+    }
+    hosts.forEach(function (host) { host.style.setProperty("--light-bg", colour); });
+    html.setAttribute("data-light-bg", colour);
+    return colour;
+  }
+
   function applyPresetColors(id) {
     var preset = presetById(id);
     var hosts = [document.documentElement, document.body].filter(Boolean);
@@ -151,14 +182,18 @@
     if (density !== "classic" && density !== "compact") density = "classic";
 
     var presetId = presetById((appearance && appearance.preset) || "default").id;
+    var lightBg = normalizeLightBg(appearance && appearance.lightBackground) || LIGHT_BG_DEFAULT;
 
     html.classList.toggle("light", theme === "light");
     html.classList.toggle("dark", theme !== "light");
     html.setAttribute("data-density", density);
     html.setAttribute("data-preset", presetId);
     applyPresetColors(presetId);
+    applyLightBackground(lightBg);
 
-    window.__lumaAppearance = { theme: theme, density: density, preset: presetId };
+    window.__lumaAppearance = { theme: theme, density: density, preset: presetId, lightBackground: lightBg };
+    window.__lumaApplyLightBackground = applyLightBackground;
+    window.__lumaNormalizeLightBackground = normalizeLightBg;
     window.LUMA_PRESETS = LUMA_PRESETS;
     window.__lumaApplyPresetColors = applyPresetColors;
     window.__lumaReadableTextOn = readableTextOn;
@@ -173,6 +208,7 @@
         document.body.classList.toggle("light", theme === "light");
         document.body.classList.toggle("dark", theme !== "light");
         applyPresetColors(presetId);
+        applyLightBackground(lightBg);
       } catch (e) {}
     };
   } catch (e) {

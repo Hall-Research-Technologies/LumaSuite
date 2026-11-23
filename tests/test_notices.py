@@ -1,6 +1,6 @@
 """Third-party notices describe what is packaged, the texts travel in the package, and /license serves them.
 
-LumaSuite's own licence is undecided, so none is shipped and none is invented here. What is shipped
+LumaSuite's own licence (LICENSE) is covered by tests/test_licence_package.py. What is checked here
 is a list of the components inside the executable and the licence text each one distributes.
 """
 import json
@@ -107,8 +107,8 @@ class LicenceTextsAreInThePackageTests(unittest.TestCase):
 
     def test_every_build_packages_the_texts_and_the_notices(self):
         build = read("build_executable.py")
-        self.assertEqual(build.count("{LICENSES_DIR}{add_data_sep}licenses"), 3, "Windows, macOS and Linux")
-        self.assertEqual(build.count("{NOTICES_FILE}{add_data_sep}."), 3)
+        self.assertEqual(build.count("{LICENSES_DIR}{add_data_sep}licenses"), 2, "Windows and macOS")
+        self.assertEqual(build.count("{NOTICES_FILE}{add_data_sep}."), 2)
         self.assertIn("THIRD_PARTY_NOTICES.md", build)
 
     def test_the_texts_are_not_excluded_from_version_control(self):
