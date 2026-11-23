@@ -48,6 +48,14 @@ def node(file):
     return ("node:" + file, ["node", os.path.join("tests", file)])
 
 
+# route_multi and route_check carry near-identical grant checks, so an anchor inside either has to
+# begin in text only the one has: route_multi's check follows its "walls are not available" refusal.
+MULTI_CHECK_HEAD = ("error\": \"Video walls are not available.\"}), 404\n\n        def _check(account):\n"
+                    "            if not account.permissions.may_use_interface(interface):\n"
+                    "                return \"interface_not_permitted\"\n")
+MULTI_CHECK_BODY = MULTI_CHECK_HEAD + ("            if not account.permissions.may_use_source(source_id):\n"
+                                      "                return \"source_not_permitted\"\n")
+
 # (id, file, anchor, replacement, what it breaks, suites that must notice)
 MUTATIONS = [
     # ---- who is local -----------------------------------------------------------------
@@ -787,6 +795,11 @@ MUTATIONS = [
      "        results.append(dict(outcome, index=index))",
      "        results.append(dict(outcome, index=index))" + NL + "        if not outcome.get(" + Q + "ok" + Q + "): break",
      "one failed display stops every display after it",
+     [py("test_display_groups.py", "SequentialRunTests")]),
+    ("groups.parallel-entry-failure-escapes", "luma_groups.py",
+     "            outcome = {\"ok\": False, \"reason\": \"error\"}\n        return dict(outcome, index=index, t_start=started",
+     "            raise\n        return dict(outcome, index=index, t_start=started",
+     "one display that raises in a parallel route fails the whole batch instead of only itself",
      [py("test_group_scale.py", "SizeTests")]),
 
     # ---- where a remote caller may make the server connect ----------------------
@@ -895,8 +908,8 @@ MUTATIONS = [
      "any value at all, including null, acknowledges plain HTTP",
      [py("test_remote_access_api.py", "EnablingTests")]),
     ("tls.downgrade-on-error", "luma_remote_api.py",
-     "        if tls_error:\n            # Never start in the clear because TLS could not be arranged.",
-     "        if False:\n            # Never start in the clear because TLS could not be arranged.",
+     "        if tls_error:\n            # Never start in the clear because TLS could not be arranged, and",
+     "        if False:\n            # Never start in the clear because TLS could not be arranged, and",
      "HTTPS that cannot be arranged starts anyway",
      [py("test_remote_access_api.py", "EnablingTests")]),
     ("tls.cookie-never-secure", "luma_remote_api.py",
@@ -949,13 +962,13 @@ MUTATIONS = [
      "the routing page builds markup from device text",
      [node("user_page_test.js")]),
     ("ui.route-single-flight", "ui/user.js",
-     "    if (state.busy || !source || !chosen.length) return;",
-     "    if (!source || !chosen.length) return;",
-     "a second click while a route is in flight sends a second request",
-     [node("user_page_test.js")]),
+     "    var free = chosen.filter(function (t) { return !state.routing[targetKey(t)]; });",
+     "    var free = chosen.slice();",
+     "a target that is still being written to is sent a second request",
+     [node("user_page_test.js"), node("user_route_states_test.js")]),
     ("ui.group-left-out-of-request", "ui/user.js",
-     "    var groups = chosen.filter(function (t) { return t.kind === 'group'; })",
-     "    var groups = [].filter(function (t) { return t.kind === 'group'; })",
+     "                groups: free.filter(function (t) { return t.kind === 'group'; }).map(function (t) { return t.id; }),",
+     "                groups: [],",
      "a chosen group is left out of the request",
      [node("user_page_test.js")]),
     ("ui.status-code-shown", "ui/user.js",
@@ -1192,22 +1205,34 @@ MUTATIONS = [
      "a display that is in a chosen group and chosen on its own is routed twice",
      [py("test_user_multi.py", "DestinationResolutionTests")]),
     ("multi.source-grant-skipped", "luma_remote_api.py",
+     MULTI_CHECK_HEAD +
      "            if not account.permissions.may_use_source(source_id):\n"
      "                return \"source_not_permitted\"\n"
      "            for identity in display_ids:",
+     MULTI_CHECK_HEAD +
      "            for identity in display_ids:",
      "a source the account was not given is routed",
      [py("test_user_multi.py", "PermissionTests", "HandlerSecondLineTests")]),
     ("multi.display-grant-skipped", "luma_remote_api.py",
+     MULTI_CHECK_BODY +
      "            for identity in display_ids:\n"
      "                if not account.permissions.may_control_destination(identity):",
+     MULTI_CHECK_BODY +
      "            for identity in []:\n"
      "                if not account.permissions.may_control_destination(identity):",
      "a display the account was not given is routed (a group member picked on its own)",
      [py("test_user_multi.py", "PermissionTests", "HandlerSecondLineTests")]),
     ("multi.group-grant-skipped", "luma_remote_api.py",
+     MULTI_CHECK_BODY +
+     "            for identity in display_ids:\n"
+     "                if not account.permissions.may_control_destination(identity):\n"
+     "                    return \"destination_not_permitted\"\n"
      "            for group_id in group_ids:\n"
      "                if not account.permissions.may_control_group(group_id):",
+     MULTI_CHECK_BODY +
+     "            for identity in display_ids:\n"
+     "                if not account.permissions.may_control_destination(identity):\n"
+     "                    return \"destination_not_permitted\"\n"
      "            for group_id in []:\n"
      "                if not account.permissions.may_control_group(group_id):",
      "a group the account was not given is routed because it holds a granted display",
@@ -1352,7 +1377,7 @@ MUTATIONS = [
      "a unit that answers again stays offline",
      [py("test_user_walls.py", "OfflineTests", "TheRealRoutesTests")]),
     ("offline.refresh-does-not-record", "lumaserver.py",
-     "        with cache_lock:\n            luma_liveness.record(unit, answered)\n",
+     "            luma_liveness.record(unit, answered)\n",
      "",
      "the shared refresh never notes which units answered",
      [py("test_user_walls.py", "TheRealRoutesTests")]),
@@ -1392,7 +1417,7 @@ MUTATIONS = [
      "the matrix is not told which units are offline",
      [py("test_user_walls.py", "TheRealRoutesTests")]),
     ("userpage.wall-omitted-from-request", "ui/user.js",
-     "    if (walls.length) body.walls = walls;",
+     "      if (sent.walls.length) body.walls = sent.walls;",
      "",
      "routing to a wall sends no wall",
      [node("user_page_test.js")]),
@@ -1410,11 +1435,6 @@ MUTATIONS = [
      "      if (!online) return;\n      button.setAttribute('draggable', 'true');",
      "      button.setAttribute('draggable', 'true');",
      "an offline source can be dragged",
-     [node("user_page_test.js")]),
-    ("userpage.drop-ignores-busy", "ui/user.js",
-     "    return !!(state.drag && !state.busy && kind !== 'source');",
-     "    return !!(state.drag && kind !== 'source');",
-     "a destination accepts a drop while a route is in flight",
      [node("user_page_test.js")]),
     ("userpage.drop-routes-the-selection-not-the-target", "ui/user.js",
      "      routeTo(held.source, [{kind: kind, id: item.id}]);",
@@ -1447,7 +1467,7 @@ MUTATIONS = [
      "a slow device is asked again before it has answered",
      [node("user_page_test.js")]),
     ("userpage.route-does-not-refresh-pictures", "ui/user.js",
-     "      refreshNow(displayIds.map(function (id) { return 'display:' + id; }));",
+     "      refreshNow(ids.map(function (id) { return 'display:' + id; }));",
      "",
      "a route leaves the routed display's old picture on screen until the next tick",
      [node("user_page_test.js")]),
@@ -1515,6 +1535,12 @@ from mutations_requests import REQUEST_MUTATIONS  # noqa: E402
 MUTATIONS += REQUEST_MUTATIONS
 from mutations_restore import RESTORE_MUTATIONS, CANARIES  # noqa: E402
 MUTATIONS += RESTORE_MUTATIONS
+from mutations_topology import TOPOLOGY_MUTATIONS  # noqa: E402
+MUTATIONS += TOPOLOGY_MUTATIONS
+from mutations_lag import LAG_MUTATIONS  # noqa: E402
+MUTATIONS += LAG_MUTATIONS
+from mutations_resurrection import RESURRECTION_MUTATIONS  # noqa: E402
+MUTATIONS += RESURRECTION_MUTATIONS
 
 NIGHT_A_MUTATIONS = [
     ('remove.selected-ignores-assignments', 'lumaserver.py',
@@ -1747,9 +1773,11 @@ TORTURE_MUTATIONS = [
      "the cache forgets whether a display's audio follows its video",
      [py("test_user_av_convergence.py", "TheCacheAgreesWithTheDeviceTests")]),
     ("torture.display-grant-never-checked", "luma_remote_api.py",
+     MULTI_CHECK_HEAD +
      '            if not account.permissions.may_use_source(source_id):\n'
      '                return "source_not_permitted"\n'
      '            for identity in display_ids:',
+     MULTI_CHECK_HEAD +
      '            if not account.permissions.may_use_source(source_id):\n'
      '                return "source_not_permitted"\n'
      '            for identity in ():',
@@ -1812,13 +1840,13 @@ AV_MUTATIONS = [
      "the administrator's endpoint accepts the restricted User's route as a mode",
      [py(AV, "BreakawayIsPreservedTests")]),
     ("av.engine-cache-audio-not-recorded", "lumaserver.py",
-     '                audio["streamname"] = after.get("audio", "")\n',
-     "                pass\n",
+     '\n                audio["streamname"] = after.get("audio", "")\n',
+     "\n                pass\n",
      "the matrix draws a User's audio dot on the source the display held before the route",
      [py(AV, "TheCacheAgreesWithTheDeviceTests")]),
     ("av.engine-cache-follow-not-recorded", "lumaserver.py",
-     '                    audio["followvideoenable"] = after["follow"]\n',
-     "                    pass\n",
+     '\n                    audio["followvideoenable"] = after["follow"]\n                audio["ip"]',
+     '\n                    pass\n                audio["ip"]',
      "the cache forgets whether the display's audio follows its video after a route",
      [py(AV, "TheCacheAgreesWithTheDeviceTests")]),
     ("av.rollback-writes-audio-that-follows", "luma_breakaway.py",
@@ -1843,9 +1871,9 @@ ADMIN_POLL_MUTATIONS = [
      [py("test_admin_matrix_poll.py", "SharedSweepTests")]),
     ("poll.force-ignored", "lumaserver.py",
      '    if isinstance(body, dict) and body.get("force") is True:\n'
-     '        _observe_cache.invalidate("matrix")',
+     '        _force_next_sweep.set()',
      '    if False:\n'
-     '        _observe_cache.invalidate("matrix")',
+     '        _force_next_sweep.set()',
      "the Refresh button is answered from a read that is already a few seconds old",
      [py("test_admin_matrix_poll.py", "SharedSweepTests")]),
     ("poll.any-truthy-force", "lumaserver.py",
@@ -2076,8 +2104,8 @@ MUTATIONS += RESTORE_SESSION_MUTATIONS
 SENTENCE_SUITE = py("test_user_av_convergence.py", "TheSentenceReachesEverySurfaceTests")
 REFUSAL_SENTENCE_MUTATIONS = [
     ("refusal.multi-rows-drop-the-sentence", "luma_remote_api.py",
-     "            row.update(_declined_fields(r))\n",
-     "",
+     'total=r.get("total", 0))\n            row.update(_declined_fields(r))\n',
+     'total=r.get("total", 0))\n',
      "a drop, a multi-select and the Matrix say nothing about why the engine declined",
      [SENTENCE_SUITE]),
     ("refusal.group-rows-drop-the-sentence", "luma_remote_api.py",
@@ -2371,6 +2399,10 @@ def main():
     parser.add_argument("--check", action="store_true", help="verify every anchor, run nothing")
     parser.add_argument("--coverage", action="store_true", help="every suite is broken by at least one mutation")
     parser.add_argument("--out", help="directory for each suite's full output")
+    parser.add_argument("--skip-baseline", action="store_true",
+                        help="do not run each suite clean first (a sharded sweep runs --baseline-only once instead)")
+    parser.add_argument("--baseline-only", action="store_true", help="run every suite clean, mutate nothing")
+    parser.add_argument("--shard", help="K/N: run only mutations whose position modulo N equals K (parallel trees)")
     args = parser.parse_args()
 
     if not (args.check):
@@ -2390,6 +2422,9 @@ def main():
     if args.routing:
         mine = {m[0] for m in ROUTING_MUTATIONS}
         selected = [m for m in selected if m[0] in mine]
+    if args.shard:
+        k, n = (int(x) for x in args.shard.split("/"))
+        selected = [m for i, m in enumerate(selected) if i % n == k]
     ids = [m[0] for m in MUTATIONS]
     assert len(ids) == len(set(ids)), "duplicate mutation ids"
 
@@ -2413,11 +2448,22 @@ def main():
     for m in selected:
         for label, command in m[5]:
             suites[label] = command
-    for label, command in sorted(suites.items()):
+    if args.baseline_only:
+        suites = {label: command for m in MUTATIONS for label, command in m[5]}
+    failed = []
+    for label, command in ([] if args.skip_baseline else sorted(suites.items())):
         code, _ = run_suite(command, out_dir, "baseline")
         if code != 0:
             print("BASELINE FAILS: %s -- a mutation cannot be judged against a failing suite" % label)
-            return 3
+            failed.append(label)
+            if not args.baseline_only:
+                return 3
+        elif args.baseline_only:
+            print("baseline ok  %s" % label)
+        sys.stdout.flush()
+    if args.baseline_only:
+        print("%d suites, %d failing clean" % (len(suites), len(failed)))
+        return 1 if failed else 0
 
     survivors, caught, seen_failing = [], [], set()
     for m in selected:

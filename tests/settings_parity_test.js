@@ -37,6 +37,25 @@ assert.strictEqual(t.status().className, 'update-status update-available', 'an a
 assert.ok(/UPDATE AVAILABLE/.test(t.status().textContent) && /1\.2\.0/.test(t.status().textContent));
 assert.strictEqual(t.nodes.cfg_asset_link.hidden, false);
 
+// An update with no download for this computer says so, stays the red state and never offers a link.
+t = lift();
+const sentence = 'There is no supported update package for this computer. LumaSuite releases are built for Windows (x86-64) and macOS on Apple Silicon only.';
+t.render({ok: true, state: 'update_available', latest_version: '1.1.1', installed_version: '1.1.0', asset_url: null,
+          html_url: 'https://example.invalid/r', package_message: sentence});
+assert.strictEqual(t.status().className, 'update-status update-available');
+assert.ok(/UPDATE AVAILABLE/.test(t.status().textContent) && /no supported update package/.test(t.status().textContent), t.status().textContent);
+assert.strictEqual(t.nodes.cfg_asset_link.hidden, true, 'no download link without a package');
+assert.strictEqual(t.nodes.cfg_release_link.href, 'https://example.invalid/r', 'the release page stays reachable');
+
+// A package being offered carries no apology, and a current answer never carries the sentence.
+t = lift();
+t.render({ok: true, state: 'update_available', latest_version: '1.1.1', asset_url: 'https://example.invalid/a.zip', package_message: null});
+assert.ok(!/no supported/.test(t.status().textContent));
+assert.strictEqual(t.nodes.cfg_asset_link.hidden, false);
+t = lift();
+t.render({ok: true, state: 'current', installed_version: '1.1.1', package_message: sentence});
+assert.ok(!/no supported/.test(t.status().textContent), 'current is never decorated');
+
 // Anything the check could not establish is neutral: never green on a failed request, never red either.
 for (const answer of [null, {ok: false}, {ok: true, state: 'unable_to_check'}, {ok: true, state: 'something_new'}, {ok: true}]) {
   t = lift();

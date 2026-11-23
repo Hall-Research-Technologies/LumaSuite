@@ -17,6 +17,9 @@ So the rule is stated once:
 `install` applies the same rule before any handler runs, so a route that has not been converted
 is still covered, and a handler that wants the dictionary asks `json_object()`.
 """
+import logging
+import re
+
 from flask import jsonify, request
 
 import luma_remote
@@ -120,9 +123,64 @@ def install(app, remote_limit):
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("X-Frame-Options", "DENY")
             response.headers.setdefault("Referrer-Policy", "no-referrer")
+            # The policy stated deliberately, naming only long-standing features no
+            # LumaSuite page uses, each switched off for every origin. It never names
+            # a Privacy Sandbox directive (attribution-reporting, browsing-topics and
+            # the like): a browser that does not recognise a name prints a console
+            # error on every page load, and those names are not this application's.
+            response.headers.setdefault("Permissions-Policy", PERMISSIONS_POLICY)
         return response
 
     return app
+
+
+class RedactDirectAccessToken(logging.Filter):
+    """Rewrite a Direct Access token out of anything about to be logged.
+
+    The token is a bearer credential in a URL path, so the request log would otherwise hold a
+    working passwordless link to somebody's account -- in a file, on the operator's disk, for as
+    long as the log is kept. (Measured: the werkzeug request line `GET /access/<token>` was written
+    at INFO, in the clear.)
+
+    A filter rather than a log level: the request line is genuinely useful and the token is the
+    only part of it that must not be there. A short prefix is left in place; it cannot be redeemed
+    and it is enough to tell two attempts apart in a log.
+    """
+
+    PATTERN = re.compile(r"(/access/)([A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]+")
+
+    def filter(self, record):
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        if "/access/" not in message:
+            return True
+        # Collapse args into the already-formatted message: rewriting the format string alone
+        # would leave the token in record.args.
+        record.msg = self.PATTERN.sub(r"\1\2...redacted", message)
+        record.args = ()
+        return True
+
+
+def install_token_redaction():
+    """On the werkzeug logger, the root logger and every handler on them, so nothing routes around it.
+
+    Idempotent. Called after logging is configured, because configuring it replaces the handlers."""
+    redactor = RedactDirectAccessToken()
+    for name in ("werkzeug", ""):
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, RedactDirectAccessToken) for f in logger.filters):
+            logger.addFilter(redactor)
+        # A filter on a logger is not consulted for records that arrive from a child logger, so
+        # it goes on the handlers as well.
+        for handler in logger.handlers:
+            if not any(isinstance(f, RedactDirectAccessToken) for f in handler.filters):
+                handler.addFilter(redactor)
+
+
+#: One definition, shared with OmniSuite's wording. A denial, never a grant.
+PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 
 
 def internal_error(exc, status=500):

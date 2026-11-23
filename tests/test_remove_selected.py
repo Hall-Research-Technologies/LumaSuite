@@ -300,6 +300,35 @@ class RaceTests(RemoveSelectedBase):
         self.assertEqual(result["r"].status_code, 200)
 
 
+    def test_the_account_and_group_locks_are_held_while_the_removal_decides(self):
+        # A grant that is merely slow looks like one that is waiting (creating an account
+        # hashes a password), so the timing tests above cannot tell a dropped lock from a
+        # busy one. Ask the locks themselves, from a thread that is not the remover.
+        gate = threading.Event()
+        release = threading.Event()
+        original = luma_inventory.build
+
+        def slow(*args, **kwargs):
+            result = original(*args, **kwargs)
+            gate.set()
+            release.wait(5)
+            return result
+        luma_inventory.build = slow
+        self.addCleanup(setattr, luma_inventory, "build", original)
+        t = threading.Thread(target=lambda: self.remove([self.ip(SOURCE_B)]))
+        t.start()
+        try:
+            self.assertTrue(gate.wait(5), "precondition: the removal reached the classification")
+            for name, lock in (("account", self.system.store.hold()), ("group", self.system.groups.hold())):
+                got = lock.acquire(blocking=False)
+                if got:
+                    lock.release()
+                self.assertFalse(got, "the %s lock must be held while the removal decides" % name)
+        finally:
+            release.set()
+            t.join(10)
+
+
 class AuditTests(RemoveSelectedBase):
     def test_removing_records_one_entry_and_no_secret(self):
         self.user(sources=[A])

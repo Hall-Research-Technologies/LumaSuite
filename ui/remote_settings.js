@@ -74,6 +74,14 @@
     els.protect.hidden = true;
     section.appendChild(els.protect);
 
+    // Direct links handed out for an address remote access no longer serves. Advisory, shown
+    // only while remote access is serving; names a count and where to go, never a link.
+    els.directNotice = el('div', 'small', '');
+    els.directNotice.id = 'cfg_remote_direct_notice';
+    els.directNotice.style.cssText = 'margin:0 0 8px;color:var(--text);';
+    els.directNotice.hidden = true;
+    section.appendChild(els.directNotice);
+
     // First administrator: created here, on this computer, because a remote client
     // must never be able to make itself one.
     els.bootstrap = el('div');
@@ -441,8 +449,40 @@
   //   required     missing, unreadable, expired, or made for another network
   function certificateKind(c) {
     if (!c || !c.present || !c.readable || c.expired) return 'required';
-    if (c.for_address && c.matches_address === false) return 'required';
-    return c.generated === false ? 'custom' : 'self_signed';
+    // Asked of the same loader the listener uses, so "active" cannot be claimed for a
+    // certificate whose key is missing or does not match.
+    if (c.usable === false) return 'required';
+    var supplied = c.generated === false;
+    // A supplied certificate is never judged against the adapter: it may carry a name
+    // LumaSuite has no way of knowing about, and the server never blocks on it either.
+    if (!supplied && c.for_address && c.matches_address === false) return 'required';
+    return supplied ? 'custom' : 'self_signed';
+  }
+
+  // WHY a certificate is not usable, as the one decision the page can offer for it.
+  //   missing    nothing exists                       -> Create Certificate
+  //   mismatch   LumaSuite's own, for another address -> Regenerate Certificate
+  //   unusable   LumaSuite's own, unreadable/expired  -> Regenerate Certificate
+  //   supplied   the site's own, whatever is wrong    -> never replaced; HTTP or Cancel
+  // null when the certificate is usable.
+  function certificateReason(c) {
+    if (!c || !c.present) return 'The certificate file is missing.';
+    if (!c.readable) return c.error || 'The certificate file could not be read.';
+    if (c.expired) return 'The certificate has expired.';
+    if (c.usable === false) return c.unusable_reason || 'The certificate cannot be used.';
+    return '';
+  }
+
+  function certificateProblem(c) {
+    if (certificateKind(c) !== 'required') return null;
+    if (c && c.generated === false) {
+      return {kind: 'supplied', reason: certificateReason(c) || 'It cannot be used.'};
+    }
+    if (!c || !c.present) return {kind: 'missing', reason: ''};
+    var addressOnly = c.readable && c.usable !== false && !c.expired && c.for_address &&
+      c.matches_address === false;
+    if (addressOnly) return {kind: 'mismatch', reason: ''};
+    return {kind: 'unusable', reason: certificateReason(c)};
   }
 
   function httpsLabel(c) {
@@ -462,6 +502,7 @@
       var why = '';
       if (c.present && !c.readable) why = 'The certificate file could not be read. ';
       else if (c.present && c.expired) why = 'The certificate has expired. ';
+      else if (c.present && c.usable === false) why = (c.unusable_reason || 'The certificate cannot be used.') + ' ';
       else if (c.present && c.for_address && c.matches_address === false) {
         why = 'The certificate does not cover ' + c.for_address + '. ';
       }
@@ -485,6 +526,7 @@
     // Status, in a sentence.
     var text;
     if (!state.has_admin) text = 'Off — an administrator account is needed first.';
+    else if (enabled && state.address_moved && state.address_moved.message) text = 'ON \u2014 ' + state.address_moved.message;
     else if (enabled && state.encrypted) text = 'ON — other devices on this network can reach LumaSuite securely at ' + state.url;
     else if (enabled) text = 'ON — not encrypted, at ' + state.url;
     else if (saved && !state.configured_available) text = 'Configured for ' + (state.configured_adapter_name || 'a network') +
@@ -494,6 +536,13 @@
     if (enabled && typeof state.sessions === 'number') text += ' · ' + state.sessions + ' signed in';
     els.status.textContent = text;
     els.protect.hidden = !enabled;
+    var stale = (state.direct_links_stale || []).length;
+    els.directNotice.hidden = !(enabled && stale);
+    els.directNotice.textContent = stale
+      ? (stale === 1 ? 'One direct link was' : stale + ' direct links were') +
+        ' handed out for an earlier address. The links themselves still work at the new address, but ' +
+        'anyone holding the old one needs the new one. Open Users, edit the account and use Copy link.'
+      : '';
 
     els.bootstrap.hidden = !!state.has_admin || !state.local;
     els.config.hidden = !state.has_admin;
@@ -508,7 +557,10 @@
     var plaintext = enabled ? !state.encrypted : !https;
     els.warning.hidden = !plaintext;
     els.note.hidden = plaintext;
-    els.cert.hidden = !https && !enabled;
+    // The certificate belongs to HTTPS. Remote Access that deliberately uses HTTP has none to describe, and
+    // showing this row there said "HTTPS certificate is missing or invalid" under Security for a setup that
+    // never asked for one. Same rule as OmniSuite's Settings: choosing HTTP hides the certificate row.
+    els.cert.hidden = !https;
 
     els.certStatus.textContent = certificateWords(state.certificate, state);
     els.certGenerate.disabled = !(state.certificate && state.certificate.can_generate) || enabled;
@@ -575,12 +627,81 @@
     });
   }
 
+  // HTTPS with no usable certificate is a decision, not a failure to report afterwards. Three
+  // honest answers, none of them taken for the operator: create (or regenerate) a certificate,
+  // carry on over HTTP (which then asks its own plaintext question), or change nothing. Cancel
+  // is only ever Cancel. A certificate the site supplied is never offered a replacement.
+  function certificateDecision(problem, c) {
+    var NOTHING = ' Nothing has been turned on.';
+    var HTTP = 'switch to HTTP, which does not encrypt sign-in details';
+    var FINGERPRINT = ' Regenerating changes its fingerprint, so browsers that accepted the old ' +
+      'one will warn again.';
+    var option = els.adapter.options[els.adapter.selectedIndex];
+    var address = (c && c.for_address) || (option ? option.getAttribute('data-address') : '') || '';
+    var names = (c && c.san_ips && c.san_ips.length ? c.san_ips.join(', ') : '') || (c && c.subject) || 'another address';
+    if (problem.kind === 'supplied') {
+      return ask({title: 'The certificate you supplied cannot be used',
+        message: problem.reason + ' LumaSuite never replaces a certificate you supplied. Fix or remove ' +
+          'it under Certificate in Settings, or ' + HTTP + '.' + NOTHING,
+        confirmText: 'Change to HTTP', cancelText: 'Cancel', danger: true}).then(function (yes) {
+        return yes === true ? 'http' : 'cancel';
+      });
+    }
+    var dialog;
+    if (problem.kind === 'mismatch') {
+      dialog = {title: 'The certificate is for another network',
+        message: 'The certificate LumaSuite created is for ' + names + ', not for ' +
+          (address || 'this network') + '. Regenerate it for this network, or ' + HTTP + '.' +
+          FINGERPRINT + NOTHING,
+        confirmText: 'Regenerate Certificate'};
+    } else if (problem.kind === 'unusable') {
+      dialog = {title: 'The certificate cannot be used',
+        message: problem.reason + ' Regenerate the certificate LumaSuite created, or ' + HTTP + '.' +
+          FINGERPRINT + NOTHING,
+        confirmText: 'Regenerate Certificate'};
+    } else {
+      dialog = {title: 'HTTPS needs a certificate',
+        message: 'Remote access is set to HTTPS, but there is no usable certificate for this ' +
+          'network. Create one now, or ' + HTTP + '.' + NOTHING,
+        confirmText: 'Create Certificate'};
+    }
+    // Cancel takes the focus: neither costly answer is made by pressing Enter.
+    dialog.cancelText = 'Cancel';
+    dialog.secondary = {text: 'Change to HTTP', value: 'http'};
+    dialog.danger = true;
+    return ask(dialog).then(function (choice) {
+      if (choice === 'http') return 'http';
+      if (choice === true) return 'create';
+      return 'cancel';
+    });
+  }
+
+  // Resolves once the enable workflow has run to its end (or been stopped by the operator).
+  // Create / Regenerate performs the certificate operation and the workflow CONTINUES to the
+  // one meaningful question, "Turn on remote access?" -- it is not a dead end, and the
+  // certificate being made never turns anything on by itself.
   function turnOn() {
+    var cert = lastState && lastState.certificate;
+    var problem = els.transport.value === 'https' ? certificateProblem(cert) : null;
+    if (!problem) return turnOnConfirmed();
+    return certificateDecision(problem, cert).then(function (choice) {
+      if (choice === 'http') { els.transport.value = 'http'; return turnOnConfirmed(); }
+      if (choice === 'create') {
+        return generateCertificate({confirmed: true}).then(function (made) {
+          // Only a certificate that was actually made is a go-ahead.
+          return made === false ? null : turnOnConfirmed();
+        });
+      }
+      return null;
+    });
+  }
+
+  function turnOnConfirmed() {
     var transport = els.transport.value;
     var option = els.adapter.options[els.adapter.selectedIndex];
     var summary = [{label: 'Network', value: option ? option.textContent : ''},
                    {label: 'Security', value: transport === 'https' ? 'HTTPS (encrypted)' : 'HTTP (not encrypted)'}];
-    return ask({title: 'Turn on remote access',
+    return ask({title: 'Turn on remote access?',
       message: transport === 'https'
         ? 'Other devices on this network will be able to reach LumaSuite and sign in.'
         : 'Other devices on this network will be able to reach LumaSuite, and sign-in details will cross ' +
@@ -614,9 +735,12 @@
 
   function certAction(body, done) {
     return api('/api/admin/certificate', {method: 'POST', body: body}).then(function (r) {
-      if (!r.ok) { say(r.body.error || 'That did not work.', 'error'); return load(); }
+      // Resolves whether the operation worked, so a flow that depends on it (turning
+      // Remote Access on after a certificate was made) can tell a made certificate from a
+      // refused one.
+      if (!r.ok) { say(r.body.error || 'That did not work.', 'error'); return load().then(function () { return false; }); }
       if (done) say(done, 'ok');
-      return load();
+      return load().then(function () { return true; });
     });
   }
 
@@ -628,13 +752,33 @@
 
   function shortPrint(value) { return value ? String(value).slice(0, 23) + '…' : ''; }
 
-  function generateCertificate() {
+  // `opts.confirmed` is passed by the decision offered when Remote Access is turned on: the
+  // operator has just chosen Create or Regenerate in a dialog that said what it does, so
+  // asking the same question again would be a second confirmation of one action. The button
+  // next to the certificate keeps its own question.
+  function generateCertificate(opts) {
+    var confirmed = !!(opts && opts.confirmed);
     var option = els.adapter.options[els.adapter.selectedIndex];
     var address = option ? option.getAttribute('data-address') : '';
     if (!address) { say('Choose a network first.', 'error'); return Promise.resolve(); }
     var current = lastState && lastState.certificate;
+    // A supplied certificate is never replaced from here, and the server refuses too; saying
+    // so first spares a question that cannot lead anywhere.
+    if (current && current.present && current.generated === false) {
+      say('A certificate you supplied is in use. Remove it first if you want LumaSuite to create one.', 'error');
+      return Promise.resolve(false);
+    }
     if (!replacesCertificate(current)) {
       return certAction({action: 'generate', address: address}, 'Certificate created');
+    }
+    if (confirmed) {
+      return api('/api/admin/certificate', {method: 'POST', body: {action: 'generate', address: address}}).then(function (r) {
+        if (!r.ok) { say(r.body.error || 'That did not work.', 'error'); return load().then(function () { return false; }); }
+        var next = r.body.certificate && r.body.certificate.fingerprint;
+        say('Certificate regenerated. Fingerprint changed from ' + shortPrint(r.body.previous_fingerprint) +
+          ' to ' + shortPrint(next) + '.', 'ok');
+        return load().then(function () { return true; });
+      });
     }
     // Never automatic: replacing the certificate changes the fingerprint, so browsers will warn
     // again and anyone who compared the old fingerprint has to compare the new one.

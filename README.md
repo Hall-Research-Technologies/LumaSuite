@@ -1,12 +1,12 @@
 # LumaSuite
 
-**Current Version: 1.1.0**
+**Current Version: 1.1.1**
 
 LumaSuite discovers, configures, routes and firmware-upgrades **LumaStream** HDMI-over-IP
 encoders and decoders (`HW-LUMA-E****` / `HW-LUMA-D****`) and **Atlona AT-OME-CS31** HDMI matrix
 switchers, and includes Production Studio (slates, logo overlay, ticker, RTMP). It is a Flask
 application with a browser interface, run through a small launcher window and packaged as a
-single application for Windows, macOS and Linux.
+single application for Windows (x86-64) and macOS (Apple Silicon).
 
 - [User Guide](ui/manual.html) (Settings > User Guide in the application) is what an operator reads.
 - [RELEASE_NOTES.md](RELEASE_NOTES.md) and [CHANGELOG.md](CHANGELOG.md) say what changed.
@@ -18,8 +18,8 @@ single application for Windows, macOS and Linux.
 
 - **Device Manager**: scan the adapter's network and any routed networks you list, track units by
   hardware (MAC) address so a changed address updates the unit instead of duplicating it, set
-  hostnames, passwords, NTP and HDCP, see AV LAN link speed and the connected switch port, and upgrade
-  firmware. Firmware availability is checked in the background at launch and every seven days (six hours after a failed attempt), has no off switch, and never installs anything.
+  hostnames, passwords, NTP and HDCP, see AV LAN link speed and the connected switch port, be told when
+  units are plugged into more than one network switch, and upgrade firmware. Firmware availability is checked in the background at launch and every seven days (six hours after a failed attempt), has no off switch, and never installs anything.
 - **Matrix Routing**: an administrator routes *Audio + Video*, *Video* or *Audio* from any source to
   any display. A route is only reported as done after the display itself confirms it.
 - **Video Wall**: layouts, zones, per-decoder Video Wall Mode, and routing a source to a saved wall.
@@ -30,21 +30,44 @@ single application for Windows, macOS and Linux.
   saved video walls they were assigned. See below.
 - **Backup and Restore**: one encrypted file, made and restored on the LumaSuite computer only.
 
+## Screenshots
+
+The screenshots below, and those in the [User Guide](ui/manual.html), were taken from this version against simulated
+units on example addresses (198.18.0.0/15); the units, names and addresses are not real equipment.
+
+![Device Manager after a scan: adapter and target networks, Scan and Clear Units, firmware status, link speed and the Preview column](docs/screenshots/device-manager.png)
+
+*Device Manager.* Scan the adapter's network and any routed networks you list; units are tracked by hardware address.
+
+![The Device Manager table with a "Multiple network switches detected" notice and five units marked "Different switch"](docs/screenshots/multiple-switches.png)
+
+*Multiple-switch awareness.* Units on a switch other than the primary one are marked, with counts in the notice. Informational only.
+
+![The routing page a User sees: source cards with pictures, display cards, a Display Group and a saved Video Wall, and Clear selection, Unroute and Route at the bottom](docs/screenshots/user-routing.png)
+
+*Standard routing for a User.* Choose a source and any number of displays, groups and saved walls, then press Route.
+
+![The Remote Access section of Settings with a created certificate: the address it is for, the days left and its fingerprint](docs/screenshots/remote-access-certificate.png)
+
+*Remote Access and certificates.* HTTP is the default; HTTPS needs a certificate, which LumaSuite creates only when asked.
+
 ## Supported platforms
 
-What the release workflow builds, and what has been exercised. A platform is listed as *built* when
-CI produces an archive for it; that is not a statement that it has been run on that operating system.
+Two platforms are distributed, and only those: **Windows x86-64** and **macOS on Apple Silicon (arm64)**.
+There is no macOS Intel build, no universal binary and no Linux build; nothing is built, tested, named,
+published or offered by the update check for them. The *test runner* (where the automated suites run in CI) and the
+*distributed platform* (what a release carries) are the same two machines, and the workflow asserts that.
 
-| Platform | Archive | Built on | Status |
+| Platform | Archive | Built and tested on | Status |
 |---|---|---|---|
-| Windows x86-64 | `LumaSuite-<tag>-windows-x86_64.zip` (single `LumaSuite.exe`) | `windows-latest` | Built; the packaged application has been started and exercised on Windows 11. |
-| macOS Intel (x86-64) | `LumaSuite-<tag>-macos-x86_64.zip` (`LumaSuite.app`) | `macos-26-intel` | Built by the release workflow. The test suites run on that runner. The packaged app has not been run on a Mac by Hall Research. |
-| macOS Apple Silicon | `LumaSuite-<tag>-macos-arm64.zip` (`LumaSuite.app`) | `macos-26` | Built. As above. |
-| Linux x86-64 | `LumaSuite-<tag>-linux-x86_64.tar.gz` | `ubuntu-latest` | Built on the Ubuntu runner only. It needs a graphical session (X11 or Wayland). Other distributions are not tested, and the package is not exercised on a desktop by this release process. |
+| Windows x86-64 | `LumaSuite-<tag>-windows-x86_64.zip` (single `LumaSuite.exe`) | `windows-latest` | Built; the packaged application has been started and exercised on Windows 11. The executable is not Authenticode-signed (Windows SmartScreen asks you to confirm). |
+| macOS Apple Silicon (arm64) | `LumaSuite-<tag>-macos-arm64.zip` (`LumaSuite.app`) | `macos-15` (a native arm64 runner) | Built by the release workflow, which checks the Mach-O architecture of every file. **Not yet run on a Mac by Hall Research.** |
 
-The macOS builds are one architecture each, not a universal binary. The minimum macOS version and
-the minimum glibc for Linux have not been established. Windows on Arm, 32-bit systems and Linux on
-Arm are not built.
+The macOS app carries an ad hoc signature only (the build signs it again after the version is stamped into
+`Info.plist`, because Apple Silicon will not run code whose signature does not verify). It is not Developer ID
+signed and not notarised, so Gatekeeper asks you to confirm the first time (right-click, Open). The minimum macOS
+version has not been established. Windows on Arm, 32-bit systems, Intel Macs and Linux are not provided. A
+computer of an unsupported kind that checks for updates is told there is no supported update package for it.
 
 ## Run from source
 
@@ -118,8 +141,7 @@ Optional and off by default; LumaSuite on its own computer is unchanged either w
 
 ```bash
 python build_executable.py windows   # dist/Windows/LumaSuite.exe
-python build_executable.py macos     # dist/macOS/LumaSuite.app (the machine's architecture, or PYI_MACOS_ARCH)
-python build_executable.py linux     # dist/Linux/LumaSuite plus launcher scripts
+python build_executable.py macos     # dist/macOS/LumaSuite.app (Apple Silicon only; an Intel Mac refuses)
 ```
 
 Each target is built on its own operating system, normally by `.github/workflows/build-cross-platform.yml`.
@@ -139,6 +161,10 @@ of them before it builds anything.
 
 ## Known limitations
 
+- Inventory size: LumaSuite is qualified for up to about 250 units. Inventories of 500 and 1,000 simulated units were
+  also run; they work, but background refresh rounds are long and the Matrix Routing page opens slowly (a few seconds
+  at 1,000). Beyond 32 units the Device Manager's background detail refresh reads in batches of at most 32. These counts
+  were measured with simulated units, mostly silent, not with that many physical units.
 - `GET /api/remote_access` (the Settings Remote Access block) performs a network-adapter lookup and can
   take a few seconds, longest on first use. Other pages do not wait for it.
 - There is no single-instance lock. Starting LumaSuite twice runs two servers (the second takes the next

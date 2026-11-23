@@ -87,6 +87,21 @@ class FakeRouter:
             self.active -= 1
 
 
+class FakeUnrouter:
+    """Stands in for the verified Unroute. Records calls; never touches a device."""
+
+    def __init__(self):
+        self.calls = []                 # decoder_ip in call order
+        self.fail = {}                  # decoder_ip -> status to return instead of success
+
+    def __call__(self, decoder_ip):
+        self.calls.append(decoder_ip)
+        status = self.fail.get(decoder_ip)
+        if status:
+            return {"ok": False, "status": status, "reason": status}
+        return {"ok": True, "status": "verified"}
+
+
 class FakeModeRouter:
     """Stands in for the video-only / audio-only engine. Records calls; touches no device."""
 
@@ -147,6 +162,7 @@ class System:
         self.wall_defs = copy.deepcopy(list(walls or []))     # the saved walls, as stored now
         self.wall_router = FakeWallRouter()
         self.mode_router = FakeModeRouter()
+        self.unrouter = FakeUnrouter()
         self.previews = []              # (kind, address) requested
         self.physical = {}              # ip -> the MAC the device answering there reports ("" = silent)
         self.identity_reads = []        # addresses asked who they are
@@ -164,7 +180,7 @@ class System:
             observe=self._observe, preview_fetch=self._preview,
             walls=luma_walls.WallDirectory(lambda: self.wall_defs, wall_device_id),
             route_wall=self.wall_router, route_mode=self.mode_router,
-            identify=self._identify)
+            identify=self._identify, unroute=self.unrouter)
         self.store = self.remote.store
         self.hits = []                  # handler names that actually ran
         self._add_stub_routes()

@@ -46,10 +46,12 @@ AFTER_WAIT_ANCHOR = ('                with locks.hold(*op["resources"]):' + NL +
                      '                    refusal = _revalidate(check, rule)           # after the wait')
 AFTER_WAIT_BROKEN = ('                with locks.hold(*op["resources"]):' + NL +
                      '                    refusal = None           # after the wait')
-OFFLINE_DISPLAY_ANCHOR = ('                if _is_offline(identity):' + NL +
+OFFLINE_DISPLAY_ANCHOR = ('                                   if identity in address and not decoder_ip else {}))' + NL +
+                          '                if _is_offline(identity):' + NL +
                           '                    return {"ok": False, "result": "offline", "display": identity,' + NL +
                           '                            "name": _name(identity)}')
-OFFLINE_DISPLAY_BROKEN = ('                if False:' + NL +
+OFFLINE_DISPLAY_BROKEN = ('                                   if identity in address and not decoder_ip else {}))' + NL +
+                          '                if False:' + NL +
                           '                    return {"ok": False, "result": "offline", "display": identity,' + NL +
                           '                            "name": _name(identity)}')
 WALL_OFFLINE_ANCHOR = ('        if not luma_projection.is_online(unit):' + NL +
@@ -78,10 +80,8 @@ ROUTING_MUTATIONS = [
      "one failure marks every member failed (the sequential runner)",
      [py("test_display_groups.py", "SequentialRunTests")]),
     ("ui.route-sends-address", "ui/user.js",
-     "    var body = {source: source, displays: displays, groups: groups," + NL +
-     "                audio_follows_video: state.audioFollowsVideo !== false};",
-     "    var body = {source: source, displays: displays, groups: groups, ip: '198.51.100.1'," + NL +
-     "                audio_follows_video: state.audioFollowsVideo !== false};",
+     "    var body = {source: source, displays: sent.displays, groups: sent.groups};",
+     "    var body = {source: source, displays: sent.displays, groups: sent.groups, ip: '198.51.100.1'};",
      "the routing page sends an address",
      [STANDARD_PAGE]),
     ("route.user-endpoint-reads-mode", "luma_remote_api.py",
@@ -173,6 +173,15 @@ ROUTING_MUTATIONS = [
      OFFLINE_DISPLAY_ANCHOR, OFFLINE_DISPLAY_BROKEN,
      "a display that has stopped answering is written to",
      [py("test_routing_torture.py", "OfflineAndReturnTests")]),
+    ("unroute.offline-display-written", "luma_remote_api.py",
+     '                            "name": _name(identity)}' + NL +
+     '                if _is_offline(identity):' + NL +
+     '                    return {"ok": False, "result": "offline", "display": identity,',
+     '                            "name": _name(identity)}' + NL +
+     '                if False:' + NL +
+     '                    return {"ok": False, "result": "offline", "display": identity,',
+     "an offline display in an unroute is written to",
+     [py("test_user_unroute.py", "OfflineTests")]),
     ("torture.offline-wall-member-written", "lumaserver.py",
      WALL_OFFLINE_ANCHOR, WALL_OFFLINE_BROKEN,
      "a wall writes to a member that has stopped answering",
@@ -296,8 +305,8 @@ ROUTING_MUTATIONS = [
      "the group endpoint routes audio whatever the preference says",
      [PREF]),
     ("ui.afv-not-sent", "ui/user.js",
-     "                audio_follows_video: state.audioFollowsVideo !== false};",
-     "                };",
+     "      body.audio_follows_video = state.audioFollowsVideo !== false;",
+     "      body.audio_follows_video = undefined;",
      "the routing page never tells the server what the toggle says",
      [STANDARD_PAGE]),
     ("ui.afv-defaults-off", "ui/user.js",

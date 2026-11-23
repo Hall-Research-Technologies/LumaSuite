@@ -166,6 +166,49 @@ body.light {
   --state-info-text: color-mix(in srgb, var(--state-info) 55%, #000000 45%);
 }
 
+/* The operator's light background, and the surfaces derived from it. `--light-bg` is set by the
+   appearance script, and `data-light-bg` is present on <html> only when the choice differs from the
+   default, so an untouched installation keeps the palette above to the pixel. The aliases (--bg,
+   --card, ...) are declared against --surface in the block above, and a custom property resolves
+   where it is declared, so the override is stated on <html> AND on <body>: stated on one, the other
+   would keep the value it had when it was declared. The percentages in each mix sum to 100; a mix
+   summing to less multiplies the result's alpha, and every surface built on it would be translucent. */
+@supports (background: color-mix(in srgb, white 50%, black)) {
+  html.light[data-light-bg],
+  html[data-light-bg] body.light {
+    --surface:          var(--light-bg);
+    --surface-raised:   color-mix(in srgb, var(--light-bg) 55%, #ffffff 45%);
+    --surface-elevated: color-mix(in srgb, var(--light-bg) 95%, #000000 5%);
+    --edge:             color-mix(in srgb, var(--light-bg) 72%, #000000 28%);
+  }
+}
+
+/* Form controls, for every page. A page that styles none of its own (the Matrix page, and the
+   Settings dialog on it) fell back to the browser's painting: white boxes with black text in the
+   middle of a dark card. This is the one baseline, in the semantic tokens the presets set, wrapped
+   in :where() so it has no specificity of its own -- every page-specific rule still wins, and the
+   baseline decides only what nothing else decided. Buttons, checkboxes, radios, range and colour
+   inputs keep their own treatment. */
+:where(select, textarea,
+       input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=button]):not([type=submit]):not([type=reset]):not([type=image]):not([type=hidden])) {
+  background-color: var(--surface-elevated);
+  color: var(--text);
+  border: 1px solid var(--edge);
+  color-scheme: dark;
+}
+:where(.light) :where(select, textarea, input) { color-scheme: light; }
+:where(select, textarea, input)::placeholder { color: var(--text-muted); opacity: .8; }
+/* The Settings dialog's controls take one size on every page. */
+.modal select, .modal input[type=text], .modal input[type=number], .modal input[type=password] {
+  font-size: 14px; padding: 6px 8px; border-radius: 6px; font-family: inherit;
+}
+
+/* The single manual colour control in Settings > Appearance. */
+.light-bg-choice { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.light-bg-choice input[type="color"] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--edge); border-radius: 5px; background: none; cursor: pointer; }
+.light-bg-choice .color-hex { width: 96px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: var(--font-small, 12px); }
+.light-bg-choice .light-bg-note { font-size: var(--font-small, 12px); color: var(--text-muted); }
+
 html, body { background: var(--surface); }
 body { color: var(--text); }
 

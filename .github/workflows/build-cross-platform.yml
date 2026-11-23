@@ -35,6 +35,11 @@ jobs:
           git fetch origin main --depth=1000 || true
           python3 tools/release_guard.py identity
 
+  # SUPPORTED DISTRIBUTED PLATFORMS: Windows x86_64 and macOS Apple Silicon (arm64), and only those.
+  # No macOS Intel, no Linux, no universal binary: nothing is built, tested, named or published for
+  # them. Each row below is both the TEST RUNNER (the full suite runs on it) and the platform that is
+  # DISTRIBUTED from it. The identity and publish jobs run on ubuntu-latest purely as an orchestration
+  # runner: they run this repository's own scripts and ship nothing that was built there.
   build:
     needs: identity
     runs-on: ${{ matrix.os }}
@@ -47,23 +52,26 @@ jobs:
           - os: windows-latest
             platform: Windows
             mac_arch: ""
-            artifact_name: LumaSuite-Windows
-          - os: macos-26-intel
-            platform: macOS
-            mac_arch: x86_64
-            artifact_name: LumaSuite-macOS-intel
-          - os: macos-26
+            artifact_name: LumaSuite-Windows-x86_64
+          # macos-15 is a native Apple Silicon (arm64) runner. It is named rather than floating so that
+          # a label can never move this row to Intel; the architecture is asserted in the steps below.
+          - os: macos-15
             platform: macOS
             mac_arch: arm64
             artifact_name: LumaSuite-macOS-arm64
-          - os: ubuntu-latest
-            platform: Linux
-            mac_arch: ""
-            artifact_name: LumaSuite-Linux
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Require the architecture this row claims
+        shell: bash
+        run: |
+          echo "runner.os=${{ runner.os }} runner.arch=${{ runner.arch }}"
+          case "${{ runner.os }}-${{ runner.arch }}" in
+            Windows-X64|macOS-ARM64) ;;
+            *) echo "::error::LumaSuite is built for Windows x86_64 or macOS arm64 only; got ${{ runner.os }} ${{ runner.arch }}"; exit 1 ;;
+          esac
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -87,11 +95,21 @@ jobs:
           print("Tag", tag, "matches the application version")
           PY
 
-      - name: Install Linux GUI deps
-        if: runner.os == 'Linux'
+      - name: The interpreter is the architecture this row claims
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-tk libx11-dev libxkbcommon-x11-0
+          python -c "import platform, sys; print('python', sys.version); print('machine', platform.machine())"
+          python -c "import sysconfig; print('python platform:', sysconfig.get_platform())"
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            test "$(uname -m)" = "arm64" || { echo "::error::macOS runner is not arm64: $(uname -m)"; exit 1; }
+            # An x86_64-only interpreter (Rosetta) would build a non-arm64 app under an arm64 name. The python.org
+            # installer is universal2 and runs its arm64 slice here; the build passes --target-architecture arm64 and
+            # the package is verified below, so universal2 on its own is not a defect.
+            python -c "import platform, sys; sys.exit(0 if platform.machine() == 'arm64' else 1)" || { echo "::error::the Python interpreter is not arm64"; exit 1; }
+            python -c "import sysconfig, sys; p = sysconfig.get_platform(); sys.exit(1 if ('x86_64' in p and 'universal2' not in p) else 0)" || { echo "::error::the interpreter is x86_64 only"; exit 1; }
+          else
+            python -c "import platform, sys; sys.exit(0 if platform.machine().lower() in ('amd64', 'x86_64') else 1)" || { echo "::error::the Windows interpreter is not x86-64"; exit 1; }
+          fi
 
       - name: Install Python dependencies
         shell: bash
@@ -106,7 +124,16 @@ jobs:
 
       - name: Validate Python
         shell: bash
-        run: python -m py_compile lumaserver.py producer2_routes.py app_launcher.py build_executable.py luma_access.py luma_adapters.py luma_aliases.py luma_audit_text.py luma_backup.py luma_breakaway.py luma_destinations.py luma_gate.py luma_groups.py luma_inventory.py luma_liveness.py luma_locks.py luma_netstatus.py luma_portcontrol.py luma_previewstats.py luma_thumbnail.py luma_projection.py luma_remote.py luma_remote_api.py luma_retention.py luma_scanplan.py luma_secret.py luma_statecache.py luma_store.py luma_tls.py luma_user_matrix.py luma_users.py luma_walls.py luma_wiring.py luma_mac.py luma_request.py
+        run: python -m py_compile lumaserver.py producer2_routes.py app_launcher.py build_executable.py luma_access.py luma_adapters.py luma_aliases.py luma_audit_text.py luma_backup.py luma_breakaway.py luma_destinations.py luma_gate.py luma_groups.py luma_inventory.py luma_liveness.py luma_locks.py luma_netstatus.py luma_portcontrol.py luma_previewstats.py luma_thumbnail.py luma_projection.py luma_remote.py luma_remote_api.py luma_retention.py luma_scanplan.py luma_secret.py luma_statecache.py luma_store.py luma_tls.py luma_user_matrix.py luma_users.py luma_walls.py luma_wiring.py luma_mac.py luma_request.py luma_topology.py luma_logging.py
+
+      - name: Loopback aliases for the tests that bind two loopback addresses (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          # macOS has only 127.0.0.1 on lo0; Linux and Windows answer for all of 127/8. One test binds two
+          # distinct loopback addresses on one port, so the runner gets them. CI environment only: nothing
+          # here reaches the product, and the test itself is unchanged.
+          for a in 127.98.0.21 127.98.0.22; do sudo ifconfig lo0 alias $a up; done
+          ifconfig lo0 | grep 'inet 127.98'
 
       - name: Python backend tests (hardware-fenced)
         shell: bash
@@ -147,7 +174,9 @@ jobs:
           python tests/test_route_parallel.py
           python tests/test_server_hardening.py
           python tests/test_remote_access_api.py
+          python tests/test_direct_access_address.py
           python tests/test_certificate_identity.py
+          python tests/test_working_credential.py
           python tests/test_frontend_contract.py
           python tests/test_fence.py
           python tests/test_preview_proxy.py
@@ -168,14 +197,23 @@ jobs:
           python tests/test_unification.py
           python tests/test_device_manager_parity.py
           python tests/test_luma_netstatus.py
+          python tests/test_switch_topology.py
+          python tests/test_switch_topology_gate.py
+          python tests/test_switch_topology_lifecycle.py
           python tests/test_thumbnail.py
           python tests/test_firmware_check_now.py
           python tests/test_user_multi.py
+          python tests/test_user_unroute.py
+          python tests/test_unroute_engine.py
           python tests/test_user_walls.py
           python tests/test_user_matrix.py
           python tests/test_account_lifecycle.py
           python tests/test_route_matrix.py
           python tests/test_clear_assigned.py
+          python tests/test_clear_lag.py
+          python tests/test_detail_batch.py
+          python tests/test_clear_no_resurrection.py
+          python tests/test_log_volume.py
           python tests/test_restore_failure_stages.py
           python tests/test_night_inventory.py
           python tests/test_secrets_hammer.py
@@ -189,10 +227,12 @@ jobs:
           python tests/test_user_av_convergence.py
           python tests/test_admin_matrix_poll.py
           python tests/test_switcher_poll.py
+          python tests/test_offline_polling.py
           python tests/test_state_text_contrast.py
           python tests/test_local_port.py
           python tests/test_launcher_port.py
           python tests/test_release_consistency.py
+          python tests/test_user_guide_assets.py
           python tests/test_dependency_hygiene.py
           python tests/test_notices.py
           python tests/test_update_assets.py
@@ -202,7 +242,12 @@ jobs:
           python tests/test_log_hygiene.py
           python tests/test_update_production_identity.py
           python tests/test_release_guard.py
+          python tests/test_inspect_release.py
+          python tests/test_platform_matrix.py
+          python tests/test_updater_proof.py
+          python tests/test_private_paths.py
           python tests/test_licence_package.py
+          python tests/test_route_states.py
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -236,8 +281,11 @@ jobs:
           node tests/user_page_test.js
           node tests/user_matrix_page_test.js
           node tests/user_focus_test.js
+          node tests/user_route_states_test.js
           node tests/admin_routing_interface_test.js
           node tests/remote_pages_test.js
+          node tests/light_background_test.js
+          node tests/form_control_baseline_test.js
           node tests/port_settings_test.js
           node tests/unification_test.js
           node tests/matrix_indicator_test.js
@@ -247,9 +295,13 @@ jobs:
           node tests/firmware_check_test.js
           node tests/dialog_field_test.js
           node tests/clear_units_test.js
+          node tests/clear_lag_test.js
+          node tests/detail_batch_test.js
+          node tests/clear_stale_route_test.js
           node tests/remove_selected_test.js
           node tests/settings_parity_test.js
           node tests/device_table_test.js
+          node tests/switch_topology_test.js
 
       - name: Build Windows
         if: runner.os == 'Windows'
@@ -260,15 +312,11 @@ jobs:
         shell: bash
         run: python tools/release_guard.py inspect-exe dist/Windows/LumaSuite.exe
 
-      - name: Build macOS
+      - name: Build macOS (Apple Silicon only)
         if: runner.os == 'macOS'
         env:
           PYI_MACOS_ARCH: ${{ matrix.mac_arch }}
         run: python build_executable.py macos
-
-      - name: Build Linux
-        if: runner.os == 'Linux'
-        run: python build_executable.py linux
 
       - name: Upload Windows artifact
         if: runner.os == 'Windows'
@@ -283,13 +331,6 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/macOS/*.app
-
-      - name: Upload Linux artifact
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v5
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: dist/Linux/*
 
       - name: Upload Windows warning log
         if: always() && runner.os == 'Windows'
@@ -307,13 +348,55 @@ jobs:
           path: build/macOS/LumaSuite/warn-LumaSuite.txt
           if-no-files-found: ignore
 
-      - name: Upload Linux warning log
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v5
-        with:
-          name: warn-${{ matrix.artifact_name }}
-          path: build/Linux/LumaSuite/warn-LumaSuite.txt
-          if-no-files-found: ignore
+      - name: Verify the Windows executable is x86-64
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import struct, sys
+          data = open("dist/Windows/LumaSuite.exe", "rb").read(4096)
+          offset = struct.unpack_from("<I", data, 0x3C)[0]
+          machine = struct.unpack_from("<H", data, offset + 4)[0]
+          print("PE machine type: 0x%04x" % machine)
+          sys.exit(0 if machine == 0x8664 else "expected x86-64 (0x8664)")
+          PY
+
+      # The macOS package must be Apple Silicon and nothing else: no universal binary, no x86_64
+      # slice anywhere in the bundle. `lipo -archs` and `file` on the launcher, a header walk over
+      # every Mach-O file in the bundle AND in the zip that is distributed, the bundle identity and
+      # the signature state. NOT YET RUN: this was written on Windows, where macOS cannot be built;
+      # the first macOS CI run is its first execution.
+      - name: Verify the macOS bundle is arm64 only
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="dist/macOS/LumaSuite.app"
+          bin="$app/Contents/MacOS/LumaSuite"
+          test -d "$app" || { echo "::error::no app bundle at $app"; exit 1; }
+          test -x "$bin" || { echo "::error::launcher is missing or not executable: $bin"; exit 1; }
+          test -f "$app/Contents/Info.plist" || { echo "::error::no Info.plist"; exit 1; }
+          file "$bin"
+          archs="$(lipo -archs "$bin")"
+          echo "lipo -archs: $archs"
+          test "$archs" = "arm64" || { echo "::error::expected exactly arm64, lipo says: $archs"; exit 1; }
+          if file "$bin" | grep -qiE "universal|x86_64"; then
+            echo "::error::the launcher is universal or carries x86_64"
+            exit 1
+          fi
+          # Every Mach-O in the bundle, not only the launcher: a bundled library with an x86_64
+          # slice is an Intel binary inside an arm64 package.
+          python tools/verify_macho_arch.py --path "$app" --expect arm64
+          python tools/verify_macho_arch.py --bundle-identity "$app"
+          # Signature state, stated exactly: the bundle is signed AD HOC (the build signs it again
+          # after stamping Info.plist). It is NOT Developer ID signed and NOT notarized, and
+          # Gatekeeper is expected to refuse a double-click until the operator allows it (README).
+          codesign --verify --deep --strict "$app"
+          sig="$(codesign -dvv "$app" 2>&1)"
+          echo "$sig"
+          echo "$sig" | grep -q "Signature=adhoc" || { echo "::error::expected an ad hoc signature; this build is not meant to be Developer ID signed"; exit 1; }
+          if echo "$sig" | grep -q "Authority="; then echo "::error::a signing authority is present; the documentation says this build is ad hoc only"; exit 1; fi
+          spctl --assess --type execute -v "$app" 2>&1 || echo "spctl refuses the bundle, as documented for an unnotarized app"
 
       - name: Package Windows release asset
         if: runner.os == 'Windows'
@@ -331,14 +414,57 @@ jobs:
           zip_name="release/LumaSuite-${{ github.ref_name }}-macos-${{ matrix.mac_arch }}.zip"
           ditto -c -k --sequesterRsrc stage "$zip_name"
 
-      - name: Package Linux release asset
-        if: runner.os == 'Linux'
+      - name: Verify the distributed macOS zip is arm64 only
+        if: runner.os == 'macOS'
+        shell: bash
         run: |
-          mkdir -p linux-dist
-          cp dist/Linux/LumaSuite dist/Linux/LumaSuite.desktop dist/Linux/LumaSuite.png dist/Linux/run-lumasuite.sh dist/Linux/install-lumasuite-desktop.sh linux-dist/
-          python tools/release_guard.py stage linux linux-dist stage
-          mkdir -p release
-          tar -C stage -czf "release/LumaSuite-${{ github.ref_name }}-linux-x86_64.tar.gz" .
+          set -euo pipefail
+          python tools/verify_macho_arch.py --zip release/LumaSuite-*-macos-arm64.zip --expect arm64
+
+      # The package as it will be distributed, judged by this product's own inspector, and then
+      # started: "PyInstaller completed successfully" is not evidence that anything runs. The smoke
+      # test extracts the zip and asks the packaged application for its version, its pages and its
+      # licence texts. The version it must report is read from lumaserver.py.
+      - name: Inspect the distributed package
+        shell: bash
+        env:
+          RUN_REF_TYPE: ${{ github.ref_type }}
+          RUN_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          zip="$(find release -maxdepth 1 -name 'LumaSuite-*.zip' | head -1)"
+          test -n "$zip" || { echo "::error::no release archive found"; exit 1; }
+          if [ "$RUN_REF_TYPE" = "tag" ]; then
+            python tools/inspect_release.py "$zip" --version "$RUN_REF_NAME"
+          else
+            # A branch push or a dispatch is a diagnostic build and can never publish. Its archive is
+            # named for the branch, which is not an identity, so it is inspected under the diagnostic
+            # name the inspector accepts, with exactly the same content checks.
+            case "${{ runner.os }}" in
+              macOS) tail="macos-arm64.zip" ;;
+              *)     tail="windows-x86_64.zip" ;;
+            esac
+            mkdir -p diag-inspect
+            cp "$zip" "diag-inspect/LumaSuite-ci-diagnostic-$tail"
+            version="$(python -c "import sys; sys.path.insert(0, 'tools'); import release_guard; print('v' + release_guard.app_version())")"
+            python tools/inspect_release.py "diag-inspect/LumaSuite-ci-diagnostic-$tail" --version "$version-diag1" --diagnostic
+          fi
+
+      - name: Smoke-test the packaged artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip="$(find release -maxdepth 1 -name 'LumaSuite-*.zip' | head -1)"
+          rm -rf smoke-extract && mkdir smoke-extract
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            ditto -x -k "$zip" smoke-extract
+            exe="smoke-extract/LumaSuite.app/Contents/MacOS/LumaSuite"
+          else
+            python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('smoke-extract')" "$zip"
+            exe="smoke-extract/LumaSuite.exe"
+          fi
+          test -e "$exe" || { echo "::error::the packaged executable is not in the zip"; exit 1; }
+          python tests/smoke_packaged.py "$exe"
 
       - name: Upload packaged release asset
         uses: actions/upload-artifact@v5

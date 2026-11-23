@@ -31,6 +31,9 @@ The list is of what is packaged in the executable. Source: PyInstaller PKG and P
 | [packaging](https://github.com/pypa/packaging) | 26.3 | Apache-2.0 OR BSD-2-Clause | [LICENSE](licenses/packaging/LICENSE), [LICENSE.APACHE](licenses/packaging/LICENSE.APACHE), [LICENSE.BSD](licenses/packaging/LICENSE.BSD) |
 | [pillow](https://python-pillow.org) | 13.0.0 | MIT-CMU | [LICENSE](licenses/pillow/LICENSE) |
 | [psutil](https://github.com/giampaolo/psutil) | 5.9.8 | BSD License | [LICENSE](licenses/psutil/LICENSE) |
+| [pyobjc-core](https://github.com/ronaldoussoren/pyobjc) | 13.0 | MIT (macOS build only; the package carries no licence file, the PyObjC text is in `licenses/pyobjc-framework-cocoa/LICENSE.txt`) | [LICENSE.txt](licenses/pyobjc-framework-cocoa/LICENSE.txt) |
+| [pyobjc-framework-cocoa](https://github.com/ronaldoussoren/pyobjc) | 13.0 | MIT (macOS build only) | [LICENSE.txt](licenses/pyobjc-framework-cocoa/LICENSE.txt) |
+| [pyobjc-framework-quartz](https://github.com/ronaldoussoren/pyobjc) | 13.0 | MIT (macOS build only) | [LICENSE.txt](licenses/pyobjc-framework-quartz/LICENSE.txt) |
 | [pystray](https://github.com/moses-palmer/pystray) | 0.19.5 | GNU Lesser General Public License v3 (LGPLv3) | [COPYING](licenses/pystray/COPYING), [COPYING.LGPL](licenses/pystray/COPYING.LGPL) |
 | [requests](https://github.com/psf/requests) | 2.34.2 | Apache Software License | [LICENSE](licenses/requests/LICENSE), [NOTICE](licenses/requests/NOTICE) |
 | [setuptools](https://github.com/pypa/setuptools) | 84.2.1 | MIT | [LICENSE](licenses/setuptools/LICENSE) |
@@ -91,10 +94,11 @@ executable.
   is in the executable only because PyInstaller's runtime hooks pull it in; LumaSuite's own code does not import
   it. In the Windows executable inspected for this file, setuptools' vendored libraries (including `autocommand`)
   are not present as code; only their licence texts are. The text is kept so the list stays complete; no `autocommand` code is distributed in the executable.
-- **macOS and Linux builds** add platform packages resolved at build time (for example
-  `python-xlib` on Linux and the `pyobjc` Quartz binding on macOS). Those builds have not been
-  inspected for this file; their texts are not collected here. Treat the list above as the
-  Windows x86-64 package until those archives are inspected.
+- **The macOS (Apple Silicon) build** also contains the three `pyobjc` packages that pystray uses on macOS
+  (pyobjc-core, pyobjc-framework-Cocoa, pyobjc-framework-Quartz, all 13.0, MIT), pinned to the versions the macOS
+  CI build resolved and listed in the table above. Their licence texts are the PyObjC text, copied from the
+  published packages. The other packages in the list are the same on both platforms; the macOS archive's complete
+  contents have not been inspected for this file beyond the build's own package checks. No other platform is distributed.
 - Pillow's licence file also lists the licences of the image libraries it bundles.
 - certifi's licence file is the Mozilla Public License 2.0 notice that certifi ships, not the full licence
   text. certifi is used unmodified; its source is the published `certifi` release on PyPI.

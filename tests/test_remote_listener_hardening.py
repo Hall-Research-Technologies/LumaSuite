@@ -144,6 +144,21 @@ class OverSocketsTests(unittest.TestCase):
             self.assertEqual(headers.get("referrer-policy"), "no-referrer", path)
             self.assertNotIn("content-security-policy", headers, path)
 
+    def test_the_permissions_policy_is_a_denial_that_names_only_recognised_features(self):
+        """Stated deliberately; never a Privacy Sandbox directive a browser may not recognise."""
+        port = serve(self, self.m.APP)
+        _s, headers, _b = request(port, "192.0.2.50:%d" % port, "/login")
+        policy = headers.get("permissions-policy")
+        self.assertTrue(policy, "the network-facing listener states a policy")
+        names = [p.split("=")[0].strip() for p in policy.split(",") if p.strip()]
+        self.assertTrue(set(names) <= {"camera", "microphone", "geolocation", "fullscreen",
+                                       "payment", "usb", "midi", "autoplay", "display-capture"}, policy)
+        for part in policy.split(","):
+            self.assertTrue(part.strip().endswith("=()"), "a grant, not a denial: " + part)
+        for never in ("attribution-reporting", "private-aggregation", "join-ad-interest-group",
+                      "run-ad-auction", "browsing-topics", "interest-cohort"):
+            self.assertNotIn(never, policy)
+
     def test_local_responses_are_not_given_frame_denial_they_did_not_have(self):
         response = self.m.APP.test_client().get("/api/app_version")
         self.assertNotIn("X-Frame-Options", response.headers)

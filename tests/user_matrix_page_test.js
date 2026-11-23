@@ -280,6 +280,21 @@ const matrixRequests = h => h.requests.filter(r => r.url.split('?')[0] === '/api
     }
   });
 
+  await scenario('a wall that cannot take a mode has no pressable cell in that mode', async () => {
+    const m = MATRIX();
+    m.rows[0].modes = ['av'];                                     // an audio-less wall, say
+    const h = harness({routes: routes(MX, {'GET /api/user/matrix': {status: 200, body: m}}), remember: memory()});
+    await settle();
+    assert.strictEqual(cellAt(h, 'wall:' + WALL, A).disabled, false, 'av is a mode it has');
+    h.byId.mx_mode_video.checked = true; h.byId.mx_mode_video.fire('change');
+    assert.strictEqual(cellAt(h, 'wall:' + WALL, A).disabled, true, 'video is not');
+    const before = h.requests.length;
+    cellAt(h, 'wall:' + WALL, A).fire('click');
+    await settle();
+    assert.strictEqual(h.requests.length, before, 'a refused press sends nothing');
+    assert.strictEqual(cellAt(h, 'group:' + GRP, A).disabled, false, 'other rows keep their modes');
+  });
+
   await scenario('an offline display and an offline source cannot be pressed', async () => {
     const m = MATRIX();
     m.sources[1].online = false;

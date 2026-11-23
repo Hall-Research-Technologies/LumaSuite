@@ -176,9 +176,9 @@ Before publication, verify:
   `RELEASE_NOTES.md`, `lumaserver.py` (`__version__`), and
   `app_launcher.py` (`__version__`).
 - Documentation matches actual behavior.
-- Licensing state is what's intended (currently **unset** — see PROJECT.md;
-  do not add a license file speculatively, that's a business decision, not
-  an engineering one).
+- Licensing state is what's intended: `LICENSE` is the Hall Research source-available licence with
+  section 11A for LGPL components (see PROJECT.md §20). Do not introduce a second licence or change its
+  terms; that is a business decision, not an engineering one.
 - Packaging is correct (`build_executable.py` is the real build path;
   `LumaSuite.spec` is a stale, unused vestige — see PROJECT.md — don't edit
   it under the assumption it affects the shipped build).

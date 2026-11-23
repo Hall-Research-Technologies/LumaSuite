@@ -399,15 +399,23 @@ class DirectAccess:
     the record says so, rather than the product implying more than it did.
     """
 
-    __slots__ = ("enabled", "digest", "blob", "protection", "created_at")
+    __slots__ = ("enabled", "digest", "blob", "protection", "created_at",
+                 "issued_origin")
 
     def __init__(self, enabled=False, digest="", blob="", protection="",
-                 created_at=None):
+                 created_at=None, issued_origin=""):
         self.enabled = bool(enabled)
         self.digest = str(digest or "")
         self.blob = str(blob or "")
         self.protection = str(protection or "")
         self.created_at = created_at or 0
+        # The address (scheme://host:port) this link was last handed to an
+        # administrator for. Not a secret and not part of the token: the token
+        # names an account and works at whatever address the server is
+        # listening on. It exists so a change of address can be SAID, instead of
+        # an old URL going on looking current. Empty means unknown (a record
+        # from before this was kept), and unknown never raises a warning.
+        self.issued_origin = str(issued_origin or "")
 
     @property
     def active(self) -> bool:
@@ -416,14 +424,16 @@ class DirectAccess:
     def to_json(self) -> dict:
         return {"enabled": self.enabled, "digest": self.digest,
                 "blob": self.blob, "protection": self.protection,
-                "created_at": self.created_at}
+                "created_at": self.created_at,
+                "issued_origin": self.issued_origin}
 
     @classmethod
     def from_json(cls, raw) -> "DirectAccess":
         raw = raw if isinstance(raw, dict) else {}
         return cls(enabled=raw.get("enabled"), digest=raw.get("digest"),
                    blob=raw.get("blob"), protection=raw.get("protection"),
-                   created_at=raw.get("created_at"))
+                   created_at=raw.get("created_at"),
+                   issued_origin=raw.get("issued_origin"))
 
     def public(self) -> dict:
         """What an API may return about it. Never the token, never the blob."""
@@ -861,21 +871,21 @@ class UserStore:
     #     sessions, so a change takes effect on the next request rather than
     #     whenever a session happens to lapse.
 
-    def enable_direct_access(self, user_id, *, actor=None) -> dict:
+    def enable_direct_access(self, user_id, *, actor=None, origin="") -> dict:
         """Turn the feature on and mint the first token."""
-        return self._mint_direct_token(user_id, actor=actor,
+        return self._mint_direct_token(user_id, actor=actor, origin=origin,
                                        event="direct_access.enabled")
 
-    def regenerate_direct_access(self, user_id, *, actor=None) -> dict:
+    def regenerate_direct_access(self, user_id, *, actor=None, origin="") -> dict:
         """Replace the token. Every URL handed out before this stops working."""
         with self._lock:
             account = self._accounts.get(user_id)
             if account is None or not account.direct_access.active:
                 return {"ok": False, "error": "direct access is not enabled"}
-        return self._mint_direct_token(user_id, actor=actor,
+        return self._mint_direct_token(user_id, actor=actor, origin=origin,
                                        event="direct_access.regenerated")
 
-    def _mint_direct_token(self, user_id, *, actor, event) -> dict:
+    def _mint_direct_token(self, user_id, *, actor, event, origin="") -> dict:
         token = secrets.token_urlsafe(32)
         blob, protection = luma_secret.protect(token)
         with self._lock:
@@ -891,7 +901,8 @@ class UserStore:
                                  "only"}
             account.direct_access = DirectAccess(
                 enabled=True, digest=direct_token_digest(token),
-                blob=blob, protection=protection, created_at=_now())
+                blob=blob, protection=protection, created_at=_now(),
+                issued_origin=origin)
             self._persist()
             # The previous token's sessions end here, in the same critical
             # section that replaced it. Regenerating a link that left the old
@@ -901,6 +912,42 @@ class UserStore:
                        detail={"username": account.username,
                                "protection": protection})
             return {"ok": True, "token": token, "user": account.public()}
+
+    def direct_issued_origins(self) -> dict:
+        """{account id: (username, origin the link was last handed out for)} for live links."""
+        with self._lock:
+            return {a.id: (a.username, a.direct_access.issued_origin)
+                    for a in self._accounts.values() if a.direct_access.active}
+
+    def note_direct_origin(self, user_id, origin, *, actor=None,
+                           acknowledge=False) -> bool:
+        """Record the address a link was handed out for.
+
+        Without `acknowledge` this only LEARNS: it fills in an origin that was
+        never recorded (a link from before this was kept) and never overwrites
+        one, so a change of address stays visible until somebody says they have
+        dealt with it. With `acknowledge` it replaces the recorded origin, which
+        is the administrator saying the new link has been passed on. The token
+        is not touched either way: no session ends and nothing is revoked.
+        """
+        origin = str(origin or "")
+        if not origin:
+            return False
+        with self._lock:
+            account = self._accounts.get(user_id)
+            if account is None or not account.direct_access.active:
+                return False
+            record = account.direct_access
+            if record.issued_origin and not acknowledge:
+                return False
+            if record.issued_origin == origin:
+                return False
+            record.issued_origin = origin
+            self._persist()
+            if acknowledge:
+                self.audit("direct_access.address_acknowledged", actor=actor,
+                           detail={"username": account.username})
+            return True
 
     def disable_direct_access(self, user_id, *, actor=None) -> dict:
         with self._lock:

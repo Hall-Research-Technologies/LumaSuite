@@ -37,11 +37,6 @@ def numeric(version):
     return tuple(int(part) for part in version.split("."))
 
 
-#: The Intel-macOS marker: cryptography 49 and later publish no wheel for it.
-INTEL_MAC = 'sys_platform == "darwin" and platform_machine == "x86_64"'
-
-
-
 class DependencyHygieneTests(unittest.TestCase):
     def test_flask_cors_is_not_declared_or_hidden_imported(self):
         for name in ("requirements-build.txt", "requirements-build-lock.txt", "build_executable.py", "LumaSuite.spec"):
@@ -79,11 +74,10 @@ class DependencyHygieneTests(unittest.TestCase):
             self.assertEqual(len(lock[name]), 1, name)
             self.assertGreaterEqual(numeric(next(iter(lock[name]))), numeric(floor), name)
 
-    def test_cryptography_is_50_except_where_no_wheel_exists(self):
+    def test_cryptography_is_50_on_every_supported_platform(self):
         for name in ("requirements-build.txt", "requirements-build-lock.txt"):
             self.assertEqual(pins(name)["cryptography"],
-                             {"50.0.2": 'sys_platform != "darwin" or platform_machine != "x86_64"',
-                              "48.0.1": INTEL_MAC}, name)
+                             {"50.0.2": ""}, name)
 
     def test_the_lock_carries_the_transitive_graph(self):
         lock = pins("requirements-build-lock.txt")

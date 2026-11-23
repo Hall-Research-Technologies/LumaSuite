@@ -895,8 +895,12 @@ class BreakawayEndpointTests(unittest.TestCase):
         # quoted key could be a request field.)
         self.assertIsNone(re.search(r"[\"']mode[\"']", re.sub(r"#.*", "", user_route)))
         script = _read("ui/user.js")
-        self.assertIn("var body = {source: source, displays: displays, groups: groups,\n"
-                      "                audio_follows_video: state.audioFollowsVideo !== false};", script)
+        # The Standard request carries the preference and never a mode; only the Matrix branch names one.
+        self.assertIn("var body = {source: source, displays: sent.displays, groups: sent.groups};", script)
+        self.assertIn("      body.audio_follows_video = state.audioFollowsVideo !== false;", script)
+        start = script.index("      body.audio_follows_video")
+        standard_branch = script[start:script.index("    // The request is over when the answer arrives")]
+        self.assertNotIn("body.mode", standard_branch)
         self.assertNotIn("audio_encoder", script)
         self.assertNotIn("video_encoder", script)
 

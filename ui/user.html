@@ -50,10 +50,7 @@
       </section>
 
       <section class="panel" id="panel_displays" aria-labelledby="h_displays">
-        <div class="panel-head">
-          <h2 id="h_displays">2 &middot; Choose displays</h2>
-          <button id="clear_targets" class="secondary small" type="button" hidden>Clear selection</button>
-        </div>
+        <h2 id="h_displays">2 &middot; Choose displays</h2>
         <p class="hint">Where do you want to route it? Choose one or more.</p>
         <div id="displays"></div>
       </section>
@@ -80,6 +77,8 @@
 
   <div class="action-bar" id="action_bar">
     <div class="summary" id="summary" aria-live="polite">Choose a source and at least one display.</div>
+    <button id="clear_targets" class="btn-action secondary" type="button" disabled>Clear selection</button>
+    <button id="unroute_btn" class="btn-action secondary" type="button" disabled>Unroute</button>
     <button id="route_btn" class="btn-route" type="button" disabled>Route</button>
   </div>
 

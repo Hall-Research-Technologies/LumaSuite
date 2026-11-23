@@ -33,7 +33,7 @@ class GuardError(Exception):
     pass
 
 
-# What travels beside the application in every release package (Windows, macOS, Linux). The licence, the
+# What travels beside the application in every release package (Windows x86-64, macOS Apple Silicon). The licence, the
 # third-party notices, the rebuild steps and the unmodified pystray source must accompany the executable.
 PYSTRAY_DIR = "third_party/pystray-0.19.5"
 BESIDE_FILES = (
@@ -68,10 +68,6 @@ def stage(platform_name, dist_dir, out_dir, root="."):
         shutil.copy2(os.path.join(dist_dir, "LumaSuite.exe"), os.path.join(out_dir, "LumaSuite.exe"))
     elif platform_name == "macos":
         shutil.copytree(os.path.join(dist_dir, "LumaSuite.app"), os.path.join(out_dir, "LumaSuite.app"), symlinks=True)
-    elif platform_name == "linux":
-        for item in os.listdir(dist_dir):
-            src = os.path.join(dist_dir, item)
-            (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, os.path.join(out_dir, item))
     else:
         raise GuardError("unknown platform %r" % platform_name)
     return sorted(os.listdir(out_dir))
@@ -85,13 +81,15 @@ def app_version(root="."):
     return match.group(1)
 
 
+# SUPPORTED DISTRIBUTED PLATFORMS: Windows x86-64 and macOS Apple Silicon (arm64), and only those. No
+# macOS Intel, no Linux, no universal binary. This is the one place the distributed set is stated for
+# the release gate; the updater, the inspector, the workflow and the documentation are pinned to it by
+# tests/test_platform_matrix.py.
+DISTRIBUTED_TAILS = ("windows-x86_64.zip", "macos-arm64.zip")
+
+
 def expected_assets(tag):
-    return sorted([
-        "%s-%s-windows-x86_64.zip" % (PRODUCT, tag),
-        "%s-%s-macos-x86_64.zip" % (PRODUCT, tag),
-        "%s-%s-macos-arm64.zip" % (PRODUCT, tag),
-        "%s-%s-linux-x86_64.tar.gz" % (PRODUCT, tag),
-    ])
+    return sorted("%s-%s-%s" % (PRODUCT, tag, tail) for tail in DISTRIBUTED_TAILS)
 
 
 def decide_identity(event, ref_type, ref_name, repository, version, on_main):
@@ -183,7 +181,7 @@ def check_beside(path):
 
 
 def inspect_assets(directory, tag, require_notes_dir=None):
-    """Raise GuardError unless the directory holds exactly this tag's four assets and nothing else."""
+    """Raise GuardError unless the directory holds exactly this tag's two assets and nothing else."""
     if not TAG_RE.match(tag or ""):
         raise GuardError("tag %r is not a production tag" % (tag,))
     found = sorted(f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)))
@@ -242,8 +240,11 @@ def inspect_executable(exe_path, version):
     """Read the PyInstaller table of contents of the packaged exe (needs PyInstaller; build job only)."""
     from PyInstaller.archive.readers import CArchiveReader  # noqa: PLC0415
     names = list(CArchiveReader(exe_path).toc.keys())
+    if not names:
+        raise GuardError("the executable's table of contents read as empty; a check that parsed nothing proves nothing")
     low = [n.replace("\\", "/").lower() for n in names]
-    need = ["license", "third_party_notices.md", "licenses/manifest.json", "licenses/pystray/copying.lgpl"]
+    need = ["license", "third_party_notices.md", "licenses/manifest.json", "licenses/pystray/copying",
+            "licenses/pystray/copying.lgpl"]
     for item in need:
         if item not in low:
             raise GuardError("the executable does not carry %s" % item)
