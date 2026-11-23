@@ -98,7 +98,7 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
              observe, remote_enabled, set_remote_state, remote_config,
              locks, tls, cert_paths, tls_context_for, certificate_state,
              preview_fetch, user_shell, walls=None, route_wall=None, route_mode=None,
-             identify=None):
+             identify=None, verify_route=None, unroute=None):
     """Attach the remote-access API.
 
     Everything the module needs is passed in rather than imported from the
@@ -269,6 +269,16 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
             effective and certificate.get("readable")
             and tls.covers(certificate, effective))
         certificate["generated"] = not bool(saved.get("cert_path"))
+        # Whether a TLS context can really be built from the configured pair,
+        # asked of the loader the listener itself uses and whatever transport is
+        # currently selected. A certificate file that parses is not a certificate
+        # that can serve: its key may be missing or belong to another one, and
+        # "active" must not be claimed for it. (Same field, same meaning, as
+        # OmniSuite's state, so the page can reason about both identically.)
+        _https_context, https_error = tls_context_for(
+            dict(saved, transport="https"))
+        certificate["usable"] = bool(certificate.get("present")) and not https_error
+        certificate["unusable_reason"] = https_error if certificate.get("present") else ""
         return jsonify({
             "ok": True,
             **state,
@@ -277,6 +287,12 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
             "configured_address": saved.get("address") or "",
             "configured_adapter": saved.get("adapter_id") or "",
             "configured_adapter_name": saved.get("adapter_name") or "",
+            # The listener is bound to one address and its adapter now carries another. Said
+            # plainly; never acted on (no rebind, no new certificate).
+            "address_moved": _address_moved(state, saved, enumerated),
+            # Direct links last handed out for another address than the one now
+            # being served. Names only; never a token or a URL.
+            "direct_links_stale": _stale_direct_links(),
             "configured_available": bool(configured and available),
             "restore_error": saved.get("restore_error") or "",
             "has_admin": store.has_admin,
@@ -381,9 +397,23 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
                     "key_path": str(data.get("key_path") or saved_choice.get("key_path") or "")}
         context, tls_error = tls_context_for(proposed)
         if tls_error:
-            # Never start in the clear because TLS could not be arranged.
+            # Never start in the clear because TLS could not be arranged, and
+            # never make a certificate or choose HTTP on the administrator's
+            # behalf. The refusal says WHICH kind of problem it is, so the page
+            # can offer the decision (create one, use HTTP, or stop). A
+            # certificate the site supplied is never offered a replacement:
+            # that case is reported as itself.
+            described = certificate_state()
+            supplied = bool(proposed["cert_path"])
+            # (Missing and unreadable keep the one reason this product has
+            # always used; only the supplied case is new, because it is the one
+            # the page must not answer by offering to create a certificate.)
+            reason = ("supplied_certificate_unusable" if supplied
+                      else "no_usable_certificate")
             return jsonify({"ok": False, "error": tls_error,
-                            "certificate": certificate_state()}), 400
+                            "needs_certificate": not supplied,
+                            "reason": reason,
+                            "certificate": described}), 400
 
         # A certificate for one address, about to be served on another.
         #
@@ -416,6 +446,7 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
                         f"for {address}. Create one for this network, then "
                         "turn remote access on."),
                     "needs_certificate": True,
+                    "reason": "certificate_mismatch",
                     "certificate": {**described, "for_address": address,
                                     "matches_address": False,
                                     "generated": True}}), 400
@@ -655,6 +686,80 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
             body["note"] = note
         return body
 
+    def _current_origin():
+        """scheme://host:port while remote access is serving, else empty."""
+        state = listener.describe()
+        if not state.get("enabled") or not state.get("host"):
+            return ""
+        return (f"{state.get('scheme') or 'https'}://{state['host']}:"
+                f"{state['port']}")
+
+    def _address_moved(state, saved, adapters=None):
+        """Where Remote Access is bound versus where its chosen adapter is NOW, or None.
+
+        Derived from the live interface list on every call (no polling, nothing written, no
+        interface changed). Only a positive finding is reported: the listener is up, the chosen
+        adapter is here, and it no longer carries the address the listener is bound to. An
+        adapter that is missing, or one with several addresses that still includes the bound one,
+        is not "moved". Nothing is rebound and nothing is reissued by saying so.
+        """
+        host = state.get("host") or ""
+        chosen = saved.get("adapter_id") or ""
+        if not (state.get("enabled") and host and chosen):
+            return None
+        try:
+            live = adapters if adapters is not None else luma_adapters.enumerate_adapters()
+        except Exception:
+            return None
+        current, _why = luma_adapters.resolve_address(chosen, host, live)
+        if not current or current == host:
+            return None
+        return {"from": host, "to": current,
+                "message": (f"This computer's address changed from {host} to {current}. "
+                            f"Remote Access is still listening on {host}. Turn Remote Access "
+                            "off and on to move it.")}
+
+    def _stale_direct_links():
+        """Usernames whose direct link was last handed out for another address.
+
+        Derived from the current listener and what each link was issued for, on
+        every call, so a late change is seen without anybody rescanning. An
+        origin that was never recorded is unknown and is not counted: unknown is
+        not the same as changed.
+        """
+        origin = _current_origin()
+        if not origin:
+            return []
+        return sorted(name for name, issued in store.direct_issued_origins().values()
+                      if issued and issued != origin)
+
+    def _admin_direct_payload(account, token):
+        """The admin's view of a link: the payload plus where it points now.
+
+        The token is unchanged by a change of address and still names the same
+        account, so the NEW link is simply this one built on the new origin. What
+        is added is the fact that the address moved: `address_changed`, the
+        origin the link was last handed out for, and the origin it is for now. The
+        old URL is never rebuilt or returned -- it carries the token, and there is
+        no reason to produce a second copy of a credential.
+        """
+        body = _direct_payload(account, token)
+        origin = _current_origin()
+        issued = account.direct_access.issued_origin
+        body["link_origin"] = origin
+        moved = _address_moved(listener.describe(), remote_config())
+        # While the listener is still on the old address the link below IS the address that works;
+        # it must not be read as current at the new one, so the move is stated beside it.
+        body["address_moved"] = moved
+        body["issued_origin"] = issued
+        body["address_changed"] = bool(token and origin and issued
+                                       and issued != origin)
+        if token and origin and not issued:
+            # A link from before the address was recorded: learn it now, on the
+            # request that is the administrator looking at it. Never overwrites.
+            store.note_direct_origin(account.id, origin)
+        return body
+
     @app.route("/api/admin/users/<user_id>/direct_access",
                methods=["GET", "POST"])
     def api_admin_direct_access(user_id):
@@ -667,15 +772,35 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
                 return jsonify({"ok": True, "username": account.username,
                                 "direct_access": account.direct_access.public(),
                                 "link": "", "recoverable": False, "note": ""})
-            return jsonify(_direct_payload(
+            return jsonify(_admin_direct_payload(
                 account, store.direct_access_token(user_id)))
 
         data = luma_request.json_object()
         action = str(data.get("action") or "").strip()
         if action == "enable":
-            result = store.enable_direct_access(user_id, actor=actor)
+            result = store.enable_direct_access(user_id, actor=actor,
+                                                origin=_current_origin())
         elif action == "regenerate":
-            result = store.regenerate_direct_access(user_id, actor=actor)
+            result = store.regenerate_direct_access(user_id, actor=actor,
+                                                    origin=_current_origin())
+        elif action == "acknowledge_address":
+            # The administrator saying the new link has been passed on. Records
+            # the address only; the token, its sessions and everything else are
+            # left exactly as they are.
+            origin = _current_origin()
+            if not origin:
+                return jsonify({"ok": False, "error": (
+                    "Remote access is off, so there is no address to "
+                    "acknowledge yet.")}), 400
+            if not store.note_direct_origin(user_id, origin, actor=actor,
+                                            acknowledge=True):
+                account = store.get(user_id)
+                if account is None or not account.direct_access.active:
+                    return jsonify({"ok": False,
+                                    "error": "direct access is not enabled"}), 400
+            account = store.get(user_id)
+            return jsonify(_admin_direct_payload(
+                account, store.direct_access_token(user_id)))
         elif action == "disable":
             result = store.disable_direct_access(user_id, actor=actor)
         else:
@@ -690,7 +815,7 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
                             "link": "", "recoverable": False, "note": ""})
         # The freshly minted token comes back from the store rather than being
         # read again, so the one moment it exists in memory is this one.
-        return jsonify(_direct_payload(account, result["token"]))
+        return jsonify(_admin_direct_payload(account, result["token"]))
 
     @app.route("/access/<token>", methods=["GET"])
     def direct_access_entry(token):
@@ -1196,7 +1321,8 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
             body["reason"] = outcome.get("reason") or status
             body["error"] = (_REFUSED_SENTENCES.get(body["reason"]) if status == "refused" else None)                 or _ROUTE_SENTENCES.get(status, _ROUTE_SENTENCES["failed"])
         return body, (200 if ok else {"unreachable": 503, "not_verified": 502,
-                                      "not_found": 404, "offline": 409}.get(status, 502))
+                                      "not_found": 404, "offline": 409,
+                                      "conflict": 409}.get(status, 502))
 
     @app.route("/api/user/route", methods=["POST"])
     def api_user_route():
@@ -1357,6 +1483,8 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
 
     #: What one request may name. Bounded before anything is resolved, so a hostile
     #: list costs a 400 and not a loop.
+    #: The one plane that has no source: every display in the request is put into the unrouted state.
+    UNROUTE_PLANE = "unroute"
     MULTI_MAX_DISPLAYS = 64
     MULTI_MAX_GROUPS = 16
     MULTI_MAX_WALLS = 16
@@ -1518,12 +1646,218 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
         return jsonify({
             "ok": summary["ok"], "routed": summary["routed"], "total": summary["total"],
             "timing": summary["timing"],
+            "targets": _target_states(display_ids, group_ids, wall_ids, ordered, summary["results"],
+                                      plane),
             "summary": "%d of %d %s routed" % (summary["routed"], summary["total"],
                                                unit_word if summary["total"] == 1
                                                else unit_word + "s"),
             "results": rows})
 
+    @app.route("/api/user/unroute", methods=["POST"])
+    def api_user_unroute():
+        """Unroute permitted displays and groups: destinations only, no source.
+
+        The same selection model as a route: individual displays and Display Groups, any mix.
+        The whole request is authorised before anything is written (one identity the account
+        holds no grant for refuses all of it), groups are resolved to members now, each physical
+        display is written once, and each display is its own operation: lock, re-check the
+        account, verify the hardware identity, write, read back. One that fails, is offline or is
+        busy does not stop the others, and the answer counts what really became of each.
+        Video walls are not part of this request.
+        """
+        data = luma_request.json_object()
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "displays and groups required"}), 400
+        display_ids = _bounded_list(data.get("displays"), MULTI_MAX_DISPLAYS,
+                                    luma_projection.canonical_identity)
+        group_ids = _bounded_list(data.get("groups"), MULTI_MAX_GROUPS,
+                                  lambda g: g.strip().lower())
+        if display_ids is None or group_ids is None:
+            return jsonify({"ok": False, "error": "displays and groups required"}), 400
+        if data.get("walls"):
+            return jsonify({"ok": False, "reason": "not_supported",
+                            "error": "A video wall cannot be unrouted from here."}), 400
+        if not display_ids and not group_ids:
+            return jsonify({"ok": False, "error": "choose at least one display or group"}), 400
+        if unroute is None:
+            return jsonify({"ok": False, "reason": "not_supported",
+                            "error": "That is not available."}), 404
+
+        def _check(account):
+            if not account.permissions.may_use_interface("standard"):
+                return "interface_not_permitted"
+            for identity in display_ids:
+                if not account.permissions.may_control_destination(identity):
+                    return "destination_not_permitted"
+            for group_id in group_ids:
+                if not account.permissions.may_control_group(group_id):
+                    return "group_not_permitted"
+            return None
+
+        refusal = _revalidate(_check, "/api/user/unroute")          # before any wait
+        if refusal is not None:
+            return refusal
+        ordered, missing = _resolve_destinations(display_ids, group_ids)
+        if missing is not None:
+            return jsonify({"ok": False, "error": "That group is not available."}), 404
+        if len(ordered) > MULTI_MAX_DESTINATIONS:
+            return jsonify({"ok": False, "error": "too many displays in one request"}), 400
+        summary = _run_batch("/api/user/unroute", _check, None, ordered, [], UNROUTE_PLANE,
+                             _display_names(), group_ids=group_ids)
+        store.audit("unroute", actor=_current_account(), detail={
+            "groups": group_ids, "routed": summary["routed"], "total": summary["total"],
+            "results": [{"display": r.get("display"), "ok": r.get("ok"), "result": r.get("result")}
+                        for r in summary["results"]]})
+        rows = []
+        for r in summary["results"]:
+            row = {"index": r["index"], "name": r.get("name") or "Display",
+                   "ok": bool(r.get("ok")), "result": r.get("result") or "failed"}
+            row.update(_declined_fields(r))
+            rows.append(row)
+        return jsonify({
+            "ok": summary["ok"], "unrouted": summary["routed"], "total": summary["total"],
+            "timing": summary["timing"],
+            "targets": _target_states(display_ids, group_ids, [], ordered, summary["results"],
+                                      UNROUTE_PLANE),
+            "summary": "%d of %d %s unrouted" % (summary["routed"], summary["total"],
+                                                 "display" if summary["total"] == 1 else "displays"),
+            "results": rows})
+
     _WALL_PREFIX = "wall:"
+
+    def _state_of(row, plane):
+        """One destination's honest state: verified, unconfirmed or failed.
+
+        `unconfirmed` is a route that was written and whose read-back did not agree *yet*
+        (the device answered, with another stream). It is not a failure and is not shown as
+        one: the page looks again, read-only, and only then calls it verified or failed. An
+        audio-only route has no video stream to look at again, so it is not offered one.
+        """
+        if row.get("ok"):
+            return "verified"
+        if (row.get("result") == "not_verified" and plane != luma_user_matrix.MODE_AUDIO
+                and plane != UNROUTE_PLANE and row.get("kind") != "wall"):
+            return "unconfirmed"
+        return "failed"
+
+    def _worst(states):
+        for word in ("failed", "unconfirmed"):
+            if word in states:
+                return word
+        return "verified"
+
+    def _target_states(display_ids, group_ids, wall_ids, ordered, results, plane):
+        """What became of each thing the person chose, for the page to mark individually.
+
+        The page never has to guess which row belonged to which choice. A target is named by
+        its position in the list the page sent for its kind (the page sends each choice once)
+        -- never by an identity, because a restricted response carries none. A group is the
+        worst of its members. Rows are in the order of `ordered` (displays, then each group's members,
+        each once) followed by the walls, which is how the batch was built.
+        """
+        by_display = {}
+        for position, identity in enumerate(ordered):
+            if position < len(results):
+                by_display[identity] = _state_of(results[position], plane)
+        targets = [{"kind": "display", "index": n,
+                    "state": by_display.get(identity, "failed")}
+                   for n, identity in enumerate(display_ids)]
+        for n, group_id in enumerate(group_ids):
+            group = groups.get(group_id)
+            members = list((group or {}).get("members") or [])
+            targets.append({"kind": "group", "index": n,
+                            "state": _worst([by_display.get(m, "failed") for m in members]
+                                            or ["failed"])})
+        for n in range(len(wall_ids)):
+            at = len(ordered) + n
+            targets.append({"kind": "wall", "index": n,
+                            "state": _state_of(results[at], plane) if at < len(results) else "failed"})
+        return targets
+
+    @app.route("/api/user/route_check", methods=["POST"])
+    def api_user_route_check():
+        """Look again, read-only, at displays a route reported as not yet confirmed.
+
+        Writes nothing and takes no lock: it is the same read-back a route makes, asked a
+        little later, so a display that was merely slow to report the stream it had taken is
+        confirmed and one that really did not take it is reported as that. The caller needs
+        exactly the grants a route to the same destinations needs -- this is not a way to
+        look at displays or sources an account may not use -- and each display's identity is
+        confirmed before it is read, as it is before a write. Walls are not looked at again.
+        """
+        if verify_route is None:
+            return jsonify({"ok": False, "reason": "not_supported",
+                            "error": "That is not available."}), 404
+        data = luma_request.json_object()
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "source, displays and groups required"}), 400
+        source_id = luma_projection.canonical_identity(data.get("source"))
+        display_ids = _bounded_list(data.get("displays"), MULTI_MAX_DISPLAYS,
+                                    luma_projection.canonical_identity)
+        group_ids = _bounded_list(data.get("groups"), MULTI_MAX_GROUPS,
+                                  lambda g: g.strip().lower())
+        interface = data.get("interface", "standard")
+        if (not source_id or display_ids is None or group_ids is None
+                or interface not in ("standard", "matrix")
+                or (not display_ids and not group_ids)):
+            return jsonify({"ok": False, "error": "source, displays and groups required"}), 400
+
+        def _check(account):
+            if not account.permissions.may_use_interface(interface):
+                return "interface_not_permitted"
+            if not account.permissions.may_use_source(source_id):
+                return "source_not_permitted"
+            for identity in display_ids:
+                if not account.permissions.may_control_destination(identity):
+                    return "destination_not_permitted"
+            for group_id in group_ids:
+                if not account.permissions.may_control_group(group_id):
+                    return "group_not_permitted"
+            return None
+
+        refusal = _revalidate(_check, "/api/user/route_check")
+        if refusal is not None:
+            return refusal
+        ordered, missing = _resolve_destinations(display_ids, group_ids)
+        if missing is not None:
+            return jsonify({"ok": False, "error": "That group is not available."}), 404
+        if len(ordered) > MULTI_MAX_DESTINATIONS:
+            return jsonify({"ok": False, "error": "too many displays in one request"}), 400
+
+        def look(index, identity):
+            refusal = _revalidate(_check, "/api/user/route_check")
+            if refusal is not None:
+                return {"ok": False, "result": "refused"}
+            address = _address_index()
+            encoder_ip, decoder_ip = address.get(source_id), address.get(identity)
+            if not encoder_ip or not decoder_ip:
+                return {"ok": False, "result": "not_found"}
+            if _is_offline(identity) or _is_offline(source_id):
+                return {"ok": False, "result": "offline"}
+            if _confirm_identity(decoder_ip, identity) or _confirm_identity(encoder_ip, source_id):
+                return {"ok": False, "result": "failed"}
+            seen = verify_route(decoder_ip, encoder_ip) or {}
+            status = seen.get("status")
+            return {"ok": status == "verified",
+                    "result": status if status in ("verified", "not_verified", "unreachable")
+                    else "failed"}
+
+        # Reads only, so no route engine and no lock: a bounded pool, in the order asked.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max(1, min(6, len(ordered)))) as pool:
+            futures = [pool.submit(copy_current_request_context(
+                lambda i=i, who=who: look(i, who))) for i, who in enumerate(ordered)]
+            looked = []
+            for future in futures:
+                try:
+                    looked.append(future.result())
+                except Exception:
+                    looked.append({"ok": False, "result": "failed"})
+        plane = luma_user_matrix.MODE_VIDEO
+        targets = _target_states(display_ids, group_ids, [], ordered, looked, plane)
+        # `unconfirmed` is still the answer while the display disagrees: how many looks are
+        # worth taking before calling it a failure is the page's budget, not the server's.
+        return jsonify({"ok": all(t["state"] == "verified" for t in targets), "targets": targets})
 
     #: What a person is told when the engine declined before writing anything.
     _REFUSED_SENTENCES = {
@@ -1551,6 +1885,7 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
         "not_verified": "The command was sent, but the display did not confirm it.",
         "unreachable": "That device did not answer.",
         "not_found": "That device is not currently known.",
+        "conflict": "The inventory changed while this ran. Refresh and check the display.",
         "offline": "That device is offline.",
         "busy": "That display is busy with another change. Try again in a moment.",
         "failed": "That did not work.",
@@ -1613,7 +1948,31 @@ def register(app, *, store, listener, aliases, groups, load_cache, route_av,
                     "result": "unreachable" if reason == "identity_unconfirmed" else "failed",
                     "reason": reason, "display": identity, "name": _name(identity)}
 
+        def unroute_run(identity):
+            def run():
+                decoder_ip = _address_index().get(identity)
+                if not decoder_ip:
+                    return {"ok": False, "result": "not_found", "display": identity,
+                            "name": _name(identity)}
+                if _is_offline(identity):
+                    return {"ok": False, "result": "offline", "display": identity,
+                            "name": _name(identity)}
+                reason = _confirm_identity(decoder_ip, identity)
+                if reason:
+                    return _not_confirmed(identity, reason)
+                outcome = unroute(decoder_ip)
+                status = outcome.get("status") or ("verified" if outcome.get("ok") else "failed")
+                if status == "refused":
+                    status = "failed"
+                return {"ok": bool(outcome.get("ok")), "result": status,
+                        "reason": outcome.get("reason") or "", "audio": "unchanged",
+                        "display": identity, "name": _name(identity)}
+            return run
+
         def display_run(identity):
+            if plane == UNROUTE_PLANE:
+                return unroute_run(identity)
+
             def run():
                 address = _address_index()
                 encoder_ip = address.get(source_id)

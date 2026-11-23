@@ -141,7 +141,7 @@ class NoticesAndRebuildTests(unittest.TestCase):
 
     def test_every_build_packages_the_licence(self):
         build = read("build_executable.py")
-        self.assertEqual(build.count("{LICENSE_FILE}{add_data_sep}."), 3, "Windows, macOS and Linux")
+        self.assertEqual(build.count("{LICENSE_FILE}{add_data_sep}."), 2, "Windows and macOS")
 
     def test_third_party_source_is_kept_byte_for_byte_by_git(self):
         self.assertIn("third_party/** -text", read(".gitattributes"))

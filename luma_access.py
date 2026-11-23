@@ -68,6 +68,8 @@ ROUTES: dict = {
     "/api/user/route": Access.USER,
     "/api/user/route_group": Access.USER,
     "/api/user/route_multi": Access.USER,
+    "/api/user/unroute": Access.USER,
+    "/api/user/route_check": Access.USER,
     "/api/user/matrix": Access.USER,
     "/api/user/preview": Access.USER,
 
@@ -103,6 +105,8 @@ ROUTES: dict = {
     "/api/cache": Access.ADMIN,
     "/api/heartbeat": Access.ADMIN,
     "/api/clear_units": Access.ADMIN,
+    "/api/lldp_topology": Access.ADMIN,
+    "/api/lldp_topology/acknowledge": Access.ADMIN,
     "/api/clear_units/assignments": Access.ADMIN,
     "/api/remove_units": Access.ADMIN,
     "/api/export_csv": Access.ADMIN,

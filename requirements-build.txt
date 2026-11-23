@@ -6,7 +6,4 @@ PyInstaller==6.19.0
 Pillow==13.0.0
 pystray==0.19.5
 psutil==5.9.8
-# cryptography 49 and later publish no prebuilt wheel for Intel macOS; 48.0.1 is the last
-# that does (the same split OmniSuite carries). Every other platform takes 50.0.2.
-cryptography==50.0.2 ; sys_platform != "darwin" or platform_machine != "x86_64"
-cryptography==48.0.1 ; sys_platform == "darwin" and platform_machine == "x86_64"
+cryptography==50.0.2

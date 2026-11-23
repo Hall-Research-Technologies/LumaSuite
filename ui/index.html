@@ -45,6 +45,23 @@
     .lldp-value { white-space:pre-wrap; overflow-wrap:anywhere; }
     .mac-lldp { cursor:help; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:2px; }
     .mac-lldp:focus-visible { outline:2px solid var(--focus-ring); outline-offset:-2px; }
+    /* Multi-switch awareness. The banner is the shared .notice (advisory, not an error). A unit reached
+       through a different switch than the primary one is marked on its MAC cell: it says "different
+       switch", not "broken unit". The tint is layered over the opaque frozen-column background so the
+       cell stays opaque when the table scrolls sideways beneath it. Tokens only: both appearances and
+       every preset follow. The percentages sum to 100. */
+    /* Never wider than the window, so the dismiss control is reachable at any width. */
+    #switch_topology_dismiss { padding:2px 8px; border-radius:6px; }
+    #switch_topology_dismiss:focus-visible { outline:2px solid var(--focus-ring); outline-offset:1px; }
+    #switch_topology_warning { margin:8px; position:sticky; left:0; max-width:calc(100vw - 48px); }
+    table.device-table td.mac-lldp.alternate-switch {
+      background-image: linear-gradient(color-mix(in srgb, var(--state-info) 16%, transparent 84%), color-mix(in srgb, var(--state-info) 16%, transparent 84%)),
+                        linear-gradient(var(--surface-raised), var(--surface-raised));
+      box-shadow: inset 3px 0 0 var(--state-info);
+    }
+    /* inline-block at full width: on its own line, and outside the dotted underline the MAC cell paints
+       (a text decoration propagates into in-flow block children and cannot be switched off by them). */
+    td.mac-lldp .switch-note { display:inline-block; width:100%; margin-top:2px; font-size:11px; font-weight:600; color:var(--state-info-text); overflow-wrap:anywhere; text-decoration:none; cursor:default; }
     .link-ok { color:var(--state-success-text); }
     .link-slow { color:var(--state-error-text); }
     .link-unknown { color:var(--text-muted); }
@@ -172,6 +189,7 @@
   <script>window.__lumaMirrorBody && window.__lumaMirrorBody();</script>
   <script src="/ui/dialogs.js?v=2"></script>
   <script src="/ui/clear_units.js"></script>
+  <script src="/ui/switch-topology.js?v=20261120-switchtopology2"></script>
   <script src="/ui/settings.js?v=1"></script>
   <script src="/ui/adminnav.js"></script>
 <script>
@@ -311,6 +329,13 @@
     </div>
   </div>
 
+    <div id="switch_topology_warning" class="notice notice-warning" role="status" aria-live="polite" hidden>
+      <div class="switch-warning-body" style="flex:1 1 auto;">
+        <div class="notice-title switch-warning-title"></div>
+        <div class="notice-detail switch-warning-detail"></div>
+      </div>
+      <button type="button" id="switch_topology_dismiss" aria-label="Dismiss multiple network switches notice">&times;</button>
+    </div>
     <table id="tbl" class="device-table" data-sticky-cols="3">
       <thead>
         <tr>
@@ -517,6 +542,17 @@ const StatusStore = {
 // ------- always fetch from backend, never use localStorage cache -------
 function loadLocal(){ return []; }
 function saveLocal(rows){}
+// The switch topology rides with the inventory the page already fetched; nothing is requested for it.
+if(window.lumaSwitchTopology){
+  // Units that were never read are read by the server shortly after the page opens; when the topology
+  // says some were, the rows are reloaded once so the page agrees with the inventory.
+  window.lumaSwitchTopology.learn.onLearned = function(){ reloadUnitsFromServer().catch(function(){}); };
+}
+function ingestTopology(payload){
+  if(!payload || Array.isArray(payload) || !window.lumaSwitchTopology) return;
+  if(payload.lldp_topology === undefined) return;   // an older server, or a payload that is not the inventory
+  window.lumaSwitchTopology.apply(payload.lldp_topology, payload.topology_warning_acknowledged);
+}
 function tolerantRows(payload){ if(!payload) return []; if(Array.isArray(payload)) return payload; if(payload.units) return payload.units; if(payload.rows) return payload.rows; if(payload.value && Array.isArray(payload.value)) return payload.value; return []; }
 function normalizeMac(value){ return String(value || "").replace(/[^0-9a-f]/gi, "").toLowerCase(); }
 function byIP(rows){ const m=new Map(); (rows||[]).forEach(r=> r&&r.ip && m.set(r.ip, r)); return m; }
@@ -827,6 +863,7 @@ function renderRows(list){
     tdIP.appendChild(a);
 
     const tdMAC=document.createElement('td'); tdMAC.textContent=u.mac||""; tdMAC.className='mac-lldp'; tdMAC.tabIndex=0; tdMAC.dataset.ip=u.ip||'';
+    if(window.lumaSwitchTopology) window.lumaSwitchTopology.decorateMacCell(tdMAC,u);
     const tdLink=document.createElement('td'); tdLink.className='linkspeed_cell'; renderLinkSpeedCell(tdLink,unitLinkSpeed(u));
     const tdHost=document.createElement('td');
     const roleLbl = classifyRole(u) || '';
@@ -1316,61 +1353,110 @@ function updateTotals(){
 // Poll encoder RTMP status
 let rtmpPollInterval = null;
 
+// Background requests (the RTMP status read and the reachability probes) share one lane that can be
+// cancelled in one call. A browser runs six requests to one address at once and queues the rest in
+// order, so a poll that is allowed to pile up delays every action the operator takes, Clear Units
+// included, by however long the pile is. Cancelling the lane frees those slots immediately.
+const bgLane = { ctl: new AbortController() };
+function bgFetch(url, init){ return fetch(url, Object.assign({}, init || {}, { signal: bgLane.ctl.signal })); }
+function cancelBackgroundRequests(){
+  const old = bgLane.ctl;
+  bgLane.ctl = new AbortController();
+  try{ old.abort(); }catch(e){}
+}
+// Run `worker` over `items`, at most `limit` at a time.
+async function runLimited(items, limit, worker){
+  let next = 0;
+  const lanes = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while(next < items.length){
+      const item = items[next++];
+      try{ await worker(item); }catch(e){}
+    }
+  });
+  await Promise.all(lanes);
+}
+
+// A unit whose RTMP status read gets no answer is left alone for a while (doubling, capped), so one
+// unreachable encoder cannot cost a request every round.
+const RTMP_POLL_CONCURRENCY = 4;
+const RTMP_READ_TIMEOUT_SECONDS = 1.5;
+const RTMP_BACKOFF_FIRST_MS = 10000;
+const RTMP_BACKOFF_CAP_MS = 120000;
+const rtmpBackoff = new Map();
+let rtmpPollInFlight = false;
+
+function rtmpNoteAnswer(ip, answered){
+  if(answered){ rtmpBackoff.delete(ip); return; }
+  const held = rtmpBackoff.get(ip);
+  const step = held ? Math.min(held.step * 2, RTMP_BACKOFF_CAP_MS) : RTMP_BACKOFF_FIRST_MS;
+  rtmpBackoff.set(ip, { step, until: Date.now() + step });
+}
+
 async function pollEncoderRtmpStatus() {
   if (appConfig.is_default_password) {
     stopRtmpPolling();
     return;
   }
+  // One round at a time: a round that is still running is the answer to this tick.
+  if (rtmpPollInFlight) return;
+  rtmpPollInFlight = true;
+  const epoch = unitDataEpoch;
+  const lane = bgLane.ctl;
+  try {
+    const now = Date.now();
+    // Collect all encoders that need polling
+    const encoderEntries = Array.from(unitMap.entries())
+      .filter(([ip, unit]) => unit.streamLed)
+      .filter(([ip]) => { const b = rtmpBackoff.get(ip); return !b || b.until <= now; });
 
-  // Collect all encoders that need polling
-  const encoderEntries = Array.from(unitMap.entries())
-    .filter(([ip, unit]) => unit.streamLed);
-  
-  // Poll all encoders in parallel for better performance
-  const pollPromises = encoderEntries.map(async ([ip, unit]) => {
-    try {
-      // First check if RTMP is enabled
-      const rtmpResp = await fetch('/api/producer/jsonrpc', {
+    const rpc = async (ip, method) => {
+      const resp = await bgFetch('/api/producer/jsonrpc', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ ip, method: "Rtmp.Get", params: {} })
+        body: JSON.stringify({ ip, method, params: {}, timeout: RTMP_READ_TIMEOUT_SECONDS })
       });
-      
-      const rtmpResult = await rtmpResp.json();
-      if (!rtmpResult || !rtmpResult.result || rtmpResult.result.enable !== true) {
-        // RTMP not enabled, hide LED
-        updateStreamLed(unit.streamLed, false);
-        return;
+      return resp.json();
+    };
+
+    await runLimited(encoderEntries, RTMP_POLL_CONCURRENCY, async ([ip, unit]) => {
+      // The lane was cancelled (Clear Units, a scan): this round is over, and its remaining reads are not issued.
+      if (lane !== bgLane.ctl) return;
+      try {
+        // First check if RTMP is enabled
+        const rtmpResult = await rpc(ip, "Rtmp.Get");
+        if (epoch !== unitDataEpoch) return;       // the inventory changed while this was in flight
+        if (!rtmpResult || rtmpResult.error === "device_no_response") { rtmpNoteAnswer(ip, false); return; }
+        rtmpNoteAnswer(ip, true);
+        if (!rtmpResult.result || rtmpResult.result.enable !== true) {
+          // RTMP not enabled, hide LED
+          updateStreamLed(unit.streamLed, false);
+          return;
+        }
+
+        // RTMP is enabled, check actual run status
+        const statusResult = await rpc(ip, "RtmpRunStatus.Get");
+        if (epoch !== unitDataEpoch) return;
+
+        // Validate that we got a proper RtmpRunStatus response
+        const isValidStatus = statusResult &&
+          statusResult.result &&
+          statusResult.result.hasOwnProperty('runstatus') &&
+          typeof statusResult.result.runstatus === 'string';
+
+        if (isValidStatus) {
+          const isLive = statusResult.result.runstatus.toLowerCase() === 'active';
+          updateStreamLed(unit.streamLed, isLive);
+        }
+        // If invalid response, don't update (preserve previous state)
+      } catch(e) {
+        // Silently fail for individual units, preserve previous state. A cancelled request is not
+        // evidence about the unit.
+        if (!(e && e.name === "AbortError")) rtmpNoteAnswer(ip, false);
       }
-      
-      // RTMP is enabled, check actual run status
-      const statusResp = await fetch('/api/producer/jsonrpc', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ ip, method: "RtmpRunStatus.Get", params: {} })
-      });
-      
-      const statusResult = await statusResp.json();
-      
-      // Validate that we got a proper RtmpRunStatus response
-      const isValidStatus = statusResult && 
-        statusResult.result && 
-        statusResult.result.hasOwnProperty('runstatus') && 
-        typeof statusResult.result.runstatus === 'string';
-      
-      if (isValidStatus) {
-        const isLive = statusResult.result.runstatus.toLowerCase() === 'active';
-        updateStreamLed(unit.streamLed, isLive);
-      }
-      // If invalid response, don't update (preserve previous state)
-      
-    } catch(e) {
-      // Silently fail for individual units, preserve previous state
-    }
-  });
-  
-  // Wait for all polls to complete (using allSettled to allow individual failures)
-  await Promise.allSettled(pollPromises);
+    });
+  } finally {
+    rtmpPollInFlight = false;
+  }
 }
 
 function updateStreamLed(led, isLive) {
@@ -1427,22 +1513,77 @@ function cleanAdapterName(name){
 }
 
 // ------- (NEW) precise re-scan to persist to disk/UI -------
-async function rescanIPs(ips){
-  if(!ips || !ips.length) return;
-  const targets = ips.join(",");
-  const requestEpoch = unitDataEpoch;
-  try{
-    const resp = await fetch('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets})});
-    const data = await resp.json();
-    if(requestEpoch !== unitDataEpoch || data.stale) return;
-    const rows = data.units || data.rows || [];
-    units = mergeByIP(units, rows);
-    saveLocal(units);
-    rerenderFiltered();
-    updateTotals();
-  }catch(e){
-    console.warn("rescanIPs error", e);
+// A refresh of several units is sent as consecutive batches. The server refuses a scan that names more
+// than luma_scanplan.MAX_RANGES (32) expressions with HTTP 400 (too_many_ranges): that limit guards
+// operator-typed range text and is not widened for this. One address is one expression, so a refresh of
+// every visible unit is split here into batches the server accepts. They are sent one at a time, in the
+// cancellable background lane (Clear Units cancels them), so the browser never holds more than one of
+// them and a long inventory costs rounds, not a pile of requests.
+const DETAIL_BATCH_SIZE = 32;            // must not exceed luma_scanplan.MAX_RANGES (asserted by a test)
+const DETAIL_BACKOFF_FIRST_MS = 10000;
+const DETAIL_BACKOFF_CAP_MS = 120000;
+const detailBackoff = { step: 0, until: 0 };
+// A unit that gives no reply to a batch is left out of the following rounds for a while (doubling,
+// capped), so a unit that accepts a connection and then says nothing costs one read per wait, not one
+// per round. Any reply clears it. Only the server's `answered` list is believed: an older server that
+// sends none leaves every unit in every round, as before.
+const DETAIL_UNIT_BACKOFF_FIRST_MS = 10000;
+const DETAIL_UNIT_BACKOFF_CAP_MS = 120000;
+const detailUnitBackoff = new Map();
+function detailNoteReplies(batch, answered){
+  if(!Array.isArray(answered)) return;
+  const heard = new Set(answered);
+  const now = Date.now();
+  for(const ip of batch){
+    if(heard.has(ip)){ detailUnitBackoff.delete(ip); continue; }
+    const held = detailUnitBackoff.get(ip);
+    const step = held ? Math.min(held.step * 2, DETAIL_UNIT_BACKOFF_CAP_MS) : DETAIL_UNIT_BACKOFF_FIRST_MS;
+    detailUnitBackoff.set(ip, { step, until: now + step });
   }
+}
+function chunkList(list, size){
+  const out = [];
+  for(let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+// Resolves "ok", "failed" (the server or the network refused a batch) or "cancelled" (the inventory
+// changed, or the background lane was cancelled: nothing is wrong, and nothing is held against anyone).
+async function rescanIPs(ips, options){
+  if(!ips || !ips.length) return "ok";
+  const background = !!(options && options.background);
+  const lane = bgLane.ctl;
+  const requestEpoch = unitDataEpoch;
+  const send = background ? bgFetch : fetch;
+  const gone = () => requestEpoch !== unitDataEpoch || (background && lane !== bgLane.ctl);
+  let merged = units, last = null;
+  try{
+    for(const batch of chunkList(ips, DETAIL_BATCH_SIZE)){
+      if(gone()) return "cancelled";
+      const resp = await send('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({targets: batch.join(",")})});
+      const data = await resp.json();
+      if(gone() || data.stale) return "cancelled";
+      if(!resp.ok || data.ok === false){
+        console.warn("rescanIPs refused:", resp.status, data && data.reason);
+        return "failed";
+      }
+      merged = mergeByIP(merged, data.units || data.rows || []);
+      if(background) detailNoteReplies(batch, data.answered);
+      last = data;
+    }
+  }catch(e){
+    if(e && e.name === "AbortError") return "cancelled";
+    console.warn("rescanIPs error", e);
+    return "failed";
+  }
+  if(gone()) return "cancelled";
+  // The reply carries the topology derived from the inventory as it is now; a re-read of one
+  // unit can move it to another switch, so this path says so exactly as a full scan does.
+  ingestTopology(last);
+  units = merged;
+  saveLocal(units);
+  rerenderFiltered();
+  updateTotals();
+  return "ok";
 }
 
 let detailPollInFlight = false;
@@ -1450,10 +1591,20 @@ async function pollVisibleUnitDetails(ips){
   const targets = Array.from(new Set((ips || [])
     .filter(ip => ip && !(Upgrade && Upgrade.isActive && Upgrade.isActive(ip)))));
   if(!targets.length || detailPollInFlight || scanAbortController) return;
+  if(detailBackoff.until > Date.now()) return;     // the last round was refused: leave the server alone for a while
+  const now = Date.now();
+  const due = targets.filter(ip => { const b = detailUnitBackoff.get(ip); return !b || b.until <= now; });
+  if(!due.length) return;
   detailPollInFlight = true;
   try{
-    await rescanIPs(targets);
-    updateDashboardNtpFromUnits(selectedNtpIPs(), targets, { allowNewSource: true });
+    const outcome = await rescanIPs(due, { background: true });
+    if(outcome === "failed"){
+      detailBackoff.step = detailBackoff.step ? Math.min(detailBackoff.step * 2, DETAIL_BACKOFF_CAP_MS) : DETAIL_BACKOFF_FIRST_MS;
+      detailBackoff.until = Date.now() + detailBackoff.step;
+      return;
+    }
+    detailBackoff.step = 0; detailBackoff.until = 0;
+    if(outcome === "ok") updateDashboardNtpFromUnits(selectedNtpIPs(), targets, { allowNewSource: true });
   }catch(e){
     console.warn("pollVisibleUnitDetails error", e);
   }finally{
@@ -1502,11 +1653,19 @@ function endScanQuietMode(state){
 // window. Called once on load and once after a manual scan completes --
 // deliberately not on a timer, to avoid adding a third steady-state poll
 // site alongside Video Wall's own refresh/detect calls.
-async function refreshVideoWallBadge(){
+// The badge never holds the page: the server answers within about a second whatever the decoders are doing,
+// and says so (`pending`: nothing detected yet; `stale`: the last good count) while the detection finishes in
+// the background. The page then asks again a few times, on a growing delay, and the request is in the
+// cancellable background lane, so Clear Units, Settings and the Matrix never queue behind it.
+const VW_BADGE_RETRY_MS = [4000, 8000, 15000];
+let vwBadgeTimer = null;
+async function refreshVideoWallBadge(attempt){
   const badge = document.getElementById("vwBadge");
   if (!badge) return;
+  attempt = Number.isInteger(attempt) ? attempt : 0;
+  if (attempt === 0 && vwBadgeTimer) { clearTimeout(vwBadgeTimer); vwBadgeTimer = null; }
   try {
-    const resp = await fetch('/api/video_wall/candidates_summary');
+    const resp = await bgFetch('/api/video_wall/candidates_summary');
     const data = await resp.json().catch(() => ({}));
     const count = (data && data.ok && Number.isFinite(data.review_count)) ? data.review_count : 0;
     if (count > 0) {
@@ -1514,13 +1673,17 @@ async function refreshVideoWallBadge(){
       badge.textContent = `Video Wall · ${count}`;
       badge.classList.toggle("attention", !!attention);
       badge.style.display = "inline-flex";
-    } else {
+    } else if (!(data && data.pending)) {
       badge.style.display = "none";
+    }
+    if (data && (data.pending || data.stale) && attempt < VW_BADGE_RETRY_MS.length) {
+      if (vwBadgeTimer) clearTimeout(vwBadgeTimer);
+      vwBadgeTimer = setTimeout(() => { vwBadgeTimer = null; refreshVideoWallBadge(attempt + 1); }, VW_BADGE_RETRY_MS[attempt]);
     }
   } catch (e) {
     // Best-effort only -- a failed badge fetch must never disrupt Device
-    // Manager's own scan/table functionality.
-    badge.style.display = "none";
+    // Manager's own scan/table functionality. A cancelled one says nothing.
+    if (!(e && e.name === "AbortError")) badge.style.display = "none";
   }
 }
 
@@ -1592,6 +1755,7 @@ async function scan(){
     const rows = data.units || data.rows || [];
     const errors = data.errors || [];
     console.log("[SCAN] Units:", rows.length, "Errors:", errors.length);
+    ingestTopology(data);
     units = mergeByIP(units, rows);
     saveLocal(units);
     rerenderFiltered();
@@ -2202,7 +2366,8 @@ function startPendingUpgradeWatch(ips){
 }
 async function tcpProbe(ip){
   try{
-    const r = await api("/api/tcp_probe",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({ip,timeout_ms:400})});
+    const resp = await bgFetch("/api/tcp_probe",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({ip,timeout_ms:400})});
+    const r = await resp.json();
     if(r && r.ok) return !!r.reachable;
   }catch(e){}
   return false;
@@ -2210,7 +2375,16 @@ async function tcpProbe(ip){
 function getVisibleIPs(){
   return Array.from(document.querySelectorAll("#tbody tr")).map(tr=>tr.dataset.ip).filter(Boolean);
 }
-async function heartbeatOnce(options={}){
+// One round at a time. The timer fires every three seconds whether or not the last round is done;
+// without this a slow round is followed by another, and the requests of all of them wait in the
+// browser's queue ahead of anything the operator does.
+let heartbeatRound = null;
+function heartbeatOnce(options={}){
+  if(heartbeatRound) return heartbeatRound;
+  heartbeatRound = heartbeatRoundImpl(options).finally(() => { heartbeatRound = null; });
+  return heartbeatRound;
+}
+async function heartbeatRoundImpl(options={}){
   const now=Date.now();
   // Always include rebooting units even if poll slider is off
   const rebootIPs = Object.keys(rebootTracker);
@@ -2221,14 +2395,16 @@ async function heartbeatOnce(options={}){
   
   // Probe all IPs in PARALLEL (not sequential) to avoid timeout delays blocking the loop
   const probeResults = new Map();
-  const probes = ips
-    .filter(ip => !Upgrade.isActive(ip))
-    .map(async ip => {
-      const ok = await tcpProbe(ip);
-      probeResults.set(ip, ok);
-    });
-  
-  await Promise.all(probes);
+  const probeIPs = ips.filter(ip => !Upgrade.isActive(ip));
+  const lane = bgLane.ctl;
+  await runLimited(probeIPs, 8, async ip => {
+    if(lane !== bgLane.ctl) return;
+    const ok = await tcpProbe(ip);
+    probeResults.set(ip, ok);
+  });
+  // The lane was cancelled (Clear Units, a scan): the answers describe nothing, and a probe that
+  // was cancelled must not be read as the unit being down.
+  if(lane !== bgLane.ctl) return;
   
   // Now process results
   for(const ip of ips){
@@ -2294,7 +2470,9 @@ async function heartbeatOnce(options={}){
     rebootHeartbeatOwned = false;
   }
   if(isSliderOn() && !options.skipDetailPoll){
-    await pollVisibleUnitDetails(visibleIPs);
+    // Only units that answered this round's reachability probe are read in detail: a unit that did not
+    // would be refused at the first connection anyway, so it costs nothing here.
+    await pollVisibleUnitDetails(visibleIPs.filter(ip => probeResults.get(ip) === true));
   }
 }
 function enableHeartbeat(on){
@@ -2734,6 +2912,7 @@ async function upgradeSelected(){
 
 async function reloadUnitsFromServer(){
   const payload = await api("/api/cache");
+  ingestTopology(payload);
   units = mergeByIP([], tolerantRows(payload));
   saveLocal(units);
   rerenderFiltered();
@@ -2772,6 +2951,7 @@ async function removeSelected(){
   $("#chk_all").checked = false;
   try{
     const payload = await api("/api/cache");
+    ingestTopology(payload);
     units = mergeByIP([], tolerantRows(payload));
     saveLocal(units);
   }catch(e){
@@ -3026,6 +3206,19 @@ async function submitPasswordSync(){
       if (statusEl) statusEl.textContent = "Clear Units is not available.";
       return;
     }
+    // Background reads are stopped before anything is asked or sent. They are only presentation, and
+    // left running they queue ahead of this request in the browser.
+    const pollsWereOn = !!pollTimer;
+    cancelBackgroundRequests();
+    stopRtmpPolling();
+    enableHeartbeat(false);
+    let cleared = false;
+    const resumePolls = () => {
+      if (cleared) return;
+      startRtmpPolling();
+      if (pollsWereOn) enableHeartbeat(true);
+    };
+    try {
     await window.lumaClearUnits.run({
       api: (path, options) => {
         const init = Object.assign({credentials: "same-origin"}, options || {});
@@ -3038,16 +3231,19 @@ async function submitPasswordSync(){
       },
       onError: (text) => { if (statusEl) statusEl.textContent = text; },
       onDone: async (result) => {
+        cleared = true;
         if (statusEl) statusEl.textContent = "Clearing units...";
-        const heartbeatWasOn = !!pollTimer;
+        const heartbeatWasOn = pollsWereOn;
         unitDataEpoch += 1;
-        stopRtmpPolling();
-        enableHeartbeat(false);
+        rtmpBackoff.clear();
+        detailUnitBackoff.clear();
+        detailBackoff.step = 0; detailBackoff.until = 0;
         if (result && result.scope === "unassigned" && result.kept) {
           // Assigned units stay in the server's inventory: reload what it holds rather than
           // assuming nothing remains.
           selectedUnitIPs.clear();
           try { await reloadUnitsFromServer(); } catch (e) { console.error("Reload after clear:", e); }
+          startRtmpPolling();
           if (heartbeatWasOn) enableHeartbeat(true);
         } else {
           units = [];
@@ -3055,11 +3251,14 @@ async function submitPasswordSync(){
           selectedUnitIPs.clear();
           saveLocal([]);
           StatusStore.clearAll();
+          // The inventory is gone, and with it the switch grouping and the dismissed advisory.
+          if(window.lumaSwitchTopology) window.lumaSwitchTopology.apply(null, false);
           renderRows([]);
         }
         if (statusEl) statusEl.textContent = window.lumaClearUnits.describe(result);
       }
     });
+    } finally { resumePolls(); }
   });
   
   // Targets input clear button
@@ -3223,6 +3422,7 @@ async function submitPasswordSync(){
 
   try{
     const payload = await api("/api/cache");
+    ingestTopology(payload);
     const serverRows = tolerantRows(payload);
     units = mergeByIP(units, serverRows);
     saveLocal(units);

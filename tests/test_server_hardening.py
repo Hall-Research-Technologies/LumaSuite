@@ -322,6 +322,14 @@ class PersistenceTests(Base):
         self.assertEqual(self.app.unit(SOURCE_A["ip"])["hostname"], "Alpha Camera")
         self.assertIsNotNone(self.app.unit("192.0.2.77"))
 
+    def test_a_disk_row_at_a_held_address_never_replaces_it_even_with_no_hardware_identity(self):
+        # The identity check alone would not stop this: a row with no MAC has no identity to match,
+        # so only the held-address check keeps the stale row from replacing the live record.
+        stale = {k: v for k, v in dict(SOURCE_A, hostname="STALE FROM DISK").items() if k != "mac"}
+        luma_store.atomic_write_json(self.cache_file, [stale])
+        self.assertEqual(self.m._merge_disk_into_memory(), 0)
+        self.assertEqual(self.app.unit(SOURCE_A["ip"])["hostname"], "Alpha Camera")
+
     def test_a_write_whose_snapshot_predates_a_clear_does_not_resurrect_the_units(self):
         original = luma_store.read_json
         fired = []

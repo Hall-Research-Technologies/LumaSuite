@@ -470,6 +470,27 @@ function login(search, role, protocol = 'https:') {
   const BASE = {ok: true, enabled: false, has_admin: true, configured: false, adapters: [], transport: 'https',
                 certificate: {present: false, can_generate: true}, sessions: 0};
 
+  // The computer's address moved while Remote Access was on: Settings must not go on saying it is
+  // on, securely, at the old address as though nothing happened.
+  const MOVED = {from: '198.51.100.10', to: '198.51.100.77', message: "This computer's address changed from 198.51.100.10 to " +
+    "198.51.100.77. Remote Access is still listening on 198.51.100.10. Turn Remote Access off and on to move it."};
+  async function statusFor(extra) {
+    const state = Object.assign({}, BASE, {enabled: true, encrypted: true, transport: 'https', url: 'https://198.51.100.10:8443/',
+      certificate: {present: true, readable: true, generated: true, usable: true, for_address: '198.51.100.10', matches_address: true}}, extra);
+    const w = settings(state, {local: true});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    return reg(w, 'cfg_remote_status').textContent;
+  }
+  await scenario('a moved address is said in plain words, not "ON ... securely"', async () => {
+    const moved = await statusFor({address_moved: MOVED});
+    assert.ok(moved.startsWith("ON \u2014 This computer's address changed from 198.51.100.10 to 198.51.100.77."), moved);
+    assert.ok(moved.includes('Remote Access is still listening on 198.51.100.10. Turn Remote Access off and on to move it.'), moved);
+    assert.ok(!/securely at/.test(moved), 'the old claim is still being made: ' + moved);
+    const fine = await statusFor({address_moved: null});
+    assert.ok(/ON .* securely at https:\/\/198\.51\.100\.10:8443\//.test(fine), fine);
+  });
+
   await scenario('the Remote Access section is built once into the extension point', async () => {
     const w = settings(BASE, {local: true});
     assert.ok(reg(w, 'cfg_remote_section'));
@@ -532,6 +553,38 @@ function login(search, role, protocol = 'https:') {
       assert.ok(r.detail.endsWith('before enabling HTTPS.'), r.detail);
       assert.ok(!/certificate active/.test(r.option + r.detail), 'must not claim an active certificate');
     }
+  });
+
+  // Remote Access that deliberately uses HTTP must not say, under Security, that an HTTPS certificate is missing:
+  // it never asked for one. Same rule as OmniSuite's Settings (choosing HTTP hides the certificate row).
+  async function httpPage(extra) {
+    const state = Object.assign({}, BASE, {enabled: true, encrypted: false, transport: 'http', url: 'http://198.51.100.10:8080/',
+      certificate: {present: false, can_generate: true}}, extra);
+    const w = settings(state, {local: true});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    return w;
+  }
+  await scenario('HTTP by choice: the certificate row is hidden, and the plaintext warning is the one statement shown', async () => {
+    const w = await httpPage();
+    assert.strictEqual(reg(w, 'cfg_remote_cert').hidden, true, 'the certificate row is shown for a setup that uses no certificate');
+    assert.strictEqual(reg(w, 'cfg_remote_warning').hidden, false);
+    assert.strictEqual(reg(w, 'cfg_remote_note').hidden, true);
+    const status = reg(w, 'cfg_remote_status').textContent;
+    assert.ok(/not encrypted/.test(status), status);
+    assert.ok(!/certificate/i.test(status), status);
+  });
+  await scenario('HTTP by choice, not yet enabled: still no certificate row', async () => {
+    const w = await httpPage({enabled: false, encrypted: false});
+    assert.strictEqual(reg(w, 'cfg_remote_cert').hidden, true);
+  });
+  await scenario('HTTPS with no usable certificate still says what is wrong, in the row that is shown', async () => {
+    const state = Object.assign({}, BASE, {enabled: false, transport: 'https', certificate: {present: false, can_generate: true}});
+    const w = settings(state, {local: true});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    assert.strictEqual(reg(w, 'cfg_remote_cert').hidden, false);
+    assert.ok(reg(w, 'cfg_remote_cert_status').textContent.startsWith('HTTPS certificate is missing or invalid.'));
   });
 
   await scenario('MA-009: in HTTP mode the HTTPS option still describes the certificate that exists', async () => {
@@ -693,7 +746,7 @@ function login(search, role, protocol = 'https:') {
     const post = w.rec.requests.find(r => r.method === 'POST' && r.url === '/api/remote_access');
     assert.strictEqual(post.body.accept_insecure, true);
     assert.strictEqual(post.body.transport, 'http');
-    const secure = settings(state, {local: true});
+    const secure = settings(Object.assign({}, state, {certificate: SELF}), {local: true});
     (secure.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
     await settle();
     reg(secure, 'cfg_remote_toggle').click();
@@ -701,6 +754,162 @@ function login(search, role, protocol = 'https:') {
     const p2 = secure.rec.requests.find(r => r.method === 'POST' && r.url === '/api/remote_access');
     assert.strictEqual(p2.body.accept_insecure, false);
     assert.strictEqual(p2.body.transport, 'https');
+  });
+
+  // ---- HTTPS selected with no usable certificate is a decision, never a silent outcome ----
+  const NO_CERT_STATE = Object.assign({}, BASE, {transport: 'https', certificate: {present: false, can_generate: true},
+    adapters: [{id: 'a1', name: 'Ethernet', address: '192.0.2.50'}]});
+  async function noCertificatePage(choice) {
+    const w = settings(NO_CERT_STATE, {local: true, confirmAnswers: choice === 'then-confirm' ? [true, true] : [choice, true]});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_toggle').click();
+    await settle();
+    return w;
+  }
+  const postsTo = (w, url) => w.rec.requests.filter(r => r.method === 'POST' && r.url === url);
+
+  await scenario('DEFECT 2: HTTPS with no usable certificate asks first, offering exactly three answers', async () => {
+    const w = await noCertificatePage(false);
+    assert.strictEqual(w.confirms.length, 1, 'one question, nothing else');
+    const q = w.confirms[0];
+    assert.strictEqual(q.title, 'HTTPS needs a certificate');
+    assert.strictEqual(q.confirmText, 'Create Certificate');
+    assert.strictEqual(q.secondary.text, 'Change to HTTP');
+    assert.strictEqual(q.secondary.value, 'http');
+    assert.strictEqual(q.cancelText, 'Cancel');
+    assert.ok(/nothing has been turned on/i.test(q.message));
+  });
+
+  await scenario('DEFECT 2: Cancel changes nothing at all', async () => {
+    const w = await noCertificatePage(false);
+    assert.strictEqual(postsTo(w, '/api/remote_access').length, 0);
+    assert.strictEqual(postsTo(w, '/api/admin/certificate').length, 0);
+    assert.strictEqual(reg(w, 'cfg_remote_transport').value, 'https', 'the selection is left as it was');
+  });
+
+  await scenario('DEFECT 2: Create Certificate makes the certificate and CONTINUES to the one last question', async () => {
+    const w = await noCertificatePage('then-confirm');
+    const created = postsTo(w, '/api/admin/certificate');
+    assert.strictEqual(created.length, 1);
+    assert.strictEqual(created[0].body.action, 'generate');
+    assert.strictEqual(created[0].body.address, '192.0.2.50');
+    assert.deepStrictEqual(w.confirms.map(c => c.title), ['HTTPS needs a certificate', 'Turn on remote access?'],
+      'the decision, then the enable question -- no dead end, no second confirmation of the creation');
+    assert.deepStrictEqual(plain(w.confirms[1].summary.map(r => r.label)), ['Network', 'Security']);
+    assert.strictEqual(postsTo(w, '/api/remote_access').length, 1);
+  });
+
+  await scenario('DEFECT 2: creating a certificate never turns remote access on by itself', async () => {
+    const w = settings(NO_CERT_STATE, {local: true, confirmAnswers: [true, false]});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_toggle').click();
+    await settle();
+    assert.strictEqual(postsTo(w, '/api/admin/certificate').length, 1);
+    assert.strictEqual(w.confirms[w.confirms.length - 1].title, 'Turn on remote access?', 'the enable question is last');
+    assert.strictEqual(postsTo(w, '/api/remote_access').length, 0, 'declining the last question enables nothing');
+  });
+
+  await scenario('DEFECT 2: Change to HTTP selects HTTP and continues into the ordinary plaintext confirmation', async () => {
+    const w = await noCertificatePage('http');
+    assert.strictEqual(w.confirms.length, 2, 'the choice, then the plaintext confirmation');
+    assert.strictEqual(w.confirms[1].title, 'Turn on remote access?');
+    assert.strictEqual(w.confirms[1].danger, true);
+    const turnOn = postsTo(w, '/api/remote_access');
+    assert.strictEqual(turnOn.length, 1);
+    assert.strictEqual(turnOn[0].body.transport, 'http');
+    assert.strictEqual(turnOn[0].body.accept_insecure, true);
+    assert.strictEqual(postsTo(w, '/api/admin/certificate').length, 0, 'no certificate was created on the way');
+  });
+
+  await scenario('DEFECT 2: a usable certificate goes straight to the ordinary confirmation, with no extra question', async () => {
+    const w = settings(Object.assign({}, NO_CERT_STATE, {certificate: SELF}), {local: true});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_toggle').click();
+    await settle();
+    assert.strictEqual(w.confirms.length, 1);
+    assert.strictEqual(w.confirms[0].title, 'Turn on remote access?');
+    assert.strictEqual(postsTo(w, '/api/remote_access')[0].body.transport, 'https');
+  });
+
+  await scenario('DEFECT 2: a certificate made for another network is also a decision, and a custom one is never replaced from here', async () => {
+    const wrongNetwork = Object.assign({}, SELF, {for_address: '192.0.2.99', matches_address: false});
+    const w = settings(Object.assign({}, NO_CERT_STATE, {certificate: wrongNetwork}), {local: true, confirmAnswers: [false]});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_toggle').click();
+    await settle();
+    assert.strictEqual(w.confirms[0].title, 'The certificate is for another network');
+    assert.strictEqual(w.confirms[0].confirmText, 'Regenerate Certificate');
+    assert.strictEqual(w.confirms[0].secondary.text, 'Change to HTTP');
+    assert.strictEqual(w.confirms[0].danger, true, 'Cancel takes the focus');
+    assert.ok(w.confirms[0].message.includes('192.0.2.99') || w.confirms[0].message.includes('192.0.2.50'), w.confirms[0].message);
+    assert.ok(/fingerprint/i.test(w.confirms[0].message));
+    assert.strictEqual(postsTo(w, '/api/remote_access').length, 0);
+    assert.strictEqual(postsTo(w, '/api/admin/certificate').length, 0);
+  });
+
+  await scenario('DEFECT 2: regenerating from the decision is not asked a second time, and continues', async () => {
+    const stale = Object.assign({}, SELF, {for_address: '192.0.2.99', matches_address: false});
+    const w = settings(Object.assign({}, NO_CERT_STATE, {certificate: stale}), {local: true, confirmAnswers: [true, true]});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_toggle').click();
+    await settle();
+    assert.deepStrictEqual(w.confirms.map(c => c.title), ['The certificate is for another network', 'Turn on remote access?']);
+    assert.strictEqual(postsTo(w, '/api/admin/certificate').length, 1);
+    assert.strictEqual(postsTo(w, '/api/admin/certificate')[0].body.action, 'generate');
+    assert.strictEqual(postsTo(w, '/api/remote_access').length, 1);
+  });
+
+  await scenario('DEFECT 2: an unreadable certificate LumaSuite made is regenerated the same way', async () => {
+    const damaged = {present: true, readable: false, generated: true, error: 'Not a readable PEM certificate.', can_generate: true};
+    const w = settings(Object.assign({}, NO_CERT_STATE, {certificate: damaged}), {local: true, confirmAnswers: [true, true]});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_toggle').click();
+    await settle();
+    assert.strictEqual(w.confirms[0].confirmText, 'Regenerate Certificate');
+    assert.ok(w.confirms[0].message.includes('Not a readable PEM certificate'));
+    assert.strictEqual(postsTo(w, '/api/remote_access').length, 1);
+  });
+
+  await scenario('DEFECT 2: a SUPPLIED certificate is never offered a replacement', async () => {
+    const bad = Object.assign({}, SELF, {generated: false, usable: false, unusable_reason: 'The private key does not match the certificate.'});
+    for (const answers of [[false], [true, true]]) {
+      const w = settings(Object.assign({}, NO_CERT_STATE, {certificate: bad}), {local: true, confirmAnswers: answers});
+      (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+      await settle();
+      reg(w, 'cfg_remote_toggle').click();
+      await settle();
+      const q = w.confirms[0];
+      assert.ok(!/Create|Regenerate/.test(q.confirmText) && !q.secondary, JSON.stringify(q));
+      assert.ok(/never replaces a certificate you supplied/.test(q.message), q.message);
+      assert.strictEqual(postsTo(w, '/api/admin/certificate').length, 0, 'a certificate was generated over a supplied one');
+    }
+  });
+
+  await scenario('DEFECT 2: a supplied certificate carrying another name is not blocked by the page', async () => {
+    const custom = Object.assign({}, SELF, {generated: false, for_address: '192.0.2.50', matches_address: false, subject: 'site.example.test'});
+    const w = settings(Object.assign({}, NO_CERT_STATE, {certificate: custom}), {local: true});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_toggle').click();
+    await settle();
+    assert.deepStrictEqual(w.confirms.map(c => c.title), ['Turn on remote access?']);
+  });
+
+  await scenario('DEFECT 2: the Create button never touches a supplied certificate and asks nothing', async () => {
+    const custom = Object.assign({}, SELF, {generated: false});
+    const w = settings(Object.assign({}, NO_CERT_STATE, {certificate: custom, adapters: [{id: 'a1', name: 'Ethernet', address: '192.0.2.50'}]}), {local: true});
+    (w.doc.listeners['luma:settings-open'] || []).forEach(fn => fn());
+    await settle();
+    reg(w, 'cfg_remote_cert_generate').click();
+    await settle();
+    assert.strictEqual(w.confirms.length, 0);
+    assert.strictEqual(postsTo(w, '/api/admin/certificate').length, 0);
   });
 
   // ------------------------------------------------------------------ sign-out

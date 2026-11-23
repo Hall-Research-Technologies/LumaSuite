@@ -185,6 +185,34 @@
     },
     {
       "bundled": [],
+      "files": [],
+      "licence": "MIT (macOS build only; as declared, the package carries no licence file, the PyObjC text is licenses/pyobjc-framework-cocoa/LICENSE.txt)",
+      "name": "pyobjc-core",
+      "url": "https://github.com/ronaldoussoren/pyobjc",
+      "version": "13.0"
+    },
+    {
+      "bundled": [],
+      "files": [
+        "LICENSE.txt"
+      ],
+      "licence": "MIT (macOS build only)",
+      "name": "pyobjc-framework-cocoa",
+      "url": "https://github.com/ronaldoussoren/pyobjc",
+      "version": "13.0"
+    },
+    {
+      "bundled": [],
+      "files": [
+        "LICENSE.txt"
+      ],
+      "licence": "MIT (macOS build only)",
+      "name": "pyobjc-framework-quartz",
+      "url": "https://github.com/ronaldoussoren/pyobjc",
+      "version": "13.0"
+    },
+    {
+      "bundled": [],
       "files": [
         "COPYING",
         "COPYING.LGPL"

@@ -1,6 +1,40 @@
 # Changelog
 
-## v1.1.0 - 2026-11-11
+## v1.1.1 - 2026-11-23
+
+The first published release of the 1.1 series. It includes everything described under v1.1.0 below, which was an
+internal candidate and was never published: optional Remote Access with accounts, Display Groups, saved video walls
+as User destinations, verified routing, a rebuilt Device Manager table and the third-party notices. Nothing changes
+until an administrator turns Remote Access on. It also corrects the defects found in hardware acceptance of that
+candidate, adds multiple-switch awareness, and carries the responsiveness and platform work below.
+
+### Added
+
+- Device Manager: multiple-switch awareness. LumaSuite reads which switch each unit is plugged into from the LLDP neighbour the scan already collects (no extra request to any unit). A unit on a switch other than the primary one is marked *Different switch* (with the switch name when the unit reports it), and a dismissible notice, *Multiple network switches detected*, gives the counts and says to check inter-switch bandwidth if USB or AV-over-IP problems occur. Informational only: routing, discovery and every unit are unchanged. A unit with no usable LLDP is never counted as being on another switch. The dismissal lasts as long as the discovered-unit list and is reset only by clearing it (Clear Units, or removing the last unit). A unit cabled through another unit is followed to its switch rather than counted as a second one; a unit that was listed before it was ever read is read once in the background; and the page now updates its marks after a per-unit re-read as well as after a scan.
+- User Guide: screenshots beside the instructions they illustrate (Device Manager, multiple-switch notice, Settings, the Remote Access and certificate workflow, accounts and permissions, Direct Access, Standard and Matrix routing, Display Groups, Video Wall, Production Studio, Preview, Clear Units, backup and restore), a contents list, numbered figures with callouts, a section on how many units LumaSuite is qualified for, an expanded Clear Units description and print rules. The screenshots are taken from the build itself against simulated units on example addresses; they are packaged under `ui/guide/` and are separate from the README screenshots in `docs/screenshots/`, which are not packaged.
+- Release notes rewritten for customers.
+
+### Changed
+
+- Platforms: LumaSuite is now built, tested and distributed for **Windows x86-64 and macOS Apple Silicon (arm64) only**. The macOS Intel and Linux build jobs, artifacts and archives are gone, with no universal binary. The macOS runner is the native arm64 runner `macos-15`, and the workflow asserts the runner, the interpreter, `lipo -archs` and the Mach-O header of every file in the bundle and in the zip (`tools/verify_macho_arch.py`). The update check offers a Windows x86-64 computer its zip and an Apple Silicon Mac its zip; any other computer is told there is no supported update package for it, never that it is up to date. The macOS bundle is signed ad hoc again after its version is stamped (not Developer ID, not notarised). `cryptography` is `50.0.2` on every platform now that the Intel-macOS exception is not needed.
+- Build: the Windows build reads the packaged executable's table of contents and fails unless the licence, the third-party notices and the pystray GPL and LGPL texts are inside it. The release inspector detects build-machine and user-profile paths by shape instead of by naming one author's folders. The packaged application is started and asked for its version in CI.
+
+### Fixed
+
+- Device Manager: with more than 32 units listed, the background detail refresh (Poll units) never worked: the page asked the server to read every address in one request, and the server refuses a scan that names more than 32 addresses (HTTP 400). The refresh is now sent in batches of at most 32, one request at a time, in the background lane that Clear Units cancels; a refused refresh is retried after a growing pause, units that did not answer the page's reachability check are not read in detail, and a unit that accepts a connection but does not reply is left out of the following rounds for a growing interval. The server's limit is unchanged. This affected the v1.1.0 candidate.
+- Device Manager: Clear Units (and every other action) no longer waits behind the page's own background reads. The encoder streaming-status read ran every three seconds for every encoder with no limit and no "one round at a time", so with a few encoders that did not answer, hundreds of requests queued in the browser ahead of Clear Units, which then took minutes to ask its question and send its request (the server itself answered in milliseconds). The read is now one round at a time, at most four at once, with a short timeout, an encoder that does not answer is left alone for a growing interval, the reachability probes are bounded the same way, and Clear Units stops them before it asks anything. A restart only appeared to cure it because it emptied the queue.
+- Clear Units: a scan or sweep that began before it no longer goes on reading the cleared units; what was derived from the cleared units (learning times, the shared state observation, the Video Wall detection) goes with them.
+- Clear Units: a route that was still running when its display was cleared, or one sent from a page that was built before the clear, no longer recreates a partial unit (one with no address or hardware address) in the list. A route to a unit that is not in the list now says so (404) and sends nothing; a route that lost its display part-way, or a page that predates the clear, is told the inventory changed (409) and to refresh. The Matrix page sends the inventory revision it was built from; older pages that send none keep working.
+- Settings: Remote Access that uses HTTP by choice no longer says an HTTPS certificate is missing or invalid; the certificate line is shown only while HTTPS is chosen, as in OmniSuite.
+- Logging: the application logged every device read at DEBUG. It now logs at INFO to a rotating file in its data folder (at most 8 MB) and to the terminal when there is one; LUMA_LOG_LEVEL=DEBUG restores the detail. About 15 times less log from a terminal with 200 units that do not answer.
+- Remote Access: the Remote Access navigation item follows the setting without a page refresh. Turning HTTPS on with no usable certificate now offers Create Certificate, Change to HTTP or Cancel instead of starting broken HTTPS.
+- Each unit keeps the credential that last authenticated it and uses it for discovery, sign-in, upload, proxy, routing, Preview, walls and Production Studio. A stale credential is replaced when the unit refuses it.
+- Routing: a route no longer locks the whole page. Several routes can be in flight; each display shows pending, verified or failed. Displays and Display Groups can be chosen together, and a display that is not a member of a chosen group is never written.
+- Routing page: Clear selection forgets the chosen source, displays and groups and sends nothing to a device.
+- Routing page: Unroute clears what the chosen displays or Display Groups are showing, with no source needed.
+- Security test coverage: all 565 security mutation checks now run and are caught.
+
+## v1.1.0 - 2026-11-11 (internal candidate, never published)
 
 Adds optional Remote Access with accounts, Display Groups, verified routing, a rebuilt Device Manager table,
 a fixed local port on request, and a third-party notices bundle. Nothing changes until an administrator

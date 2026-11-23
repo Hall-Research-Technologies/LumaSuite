@@ -89,6 +89,7 @@ import luma_statecache
 import luma_projection
 import luma_remote_api
 import luma_remote
+import luma_logging
 import luma_request
 import luma_mac
 import luma_gate
@@ -96,6 +97,7 @@ import luma_destinations
 import luma_breakaway
 import luma_scanplan
 import luma_netstatus
+import luma_topology
 import luma_thumbnail
 import luma_previewstats
 import luma_portcontrol
@@ -114,7 +116,7 @@ def _is_allowed_password(value: str) -> bool:
     return isinstance(value, str) and len(value) >= 6 and bool(ALLOWED_PASSWORD_RE.fullmatch(value))
 
 # --- Application Version ---
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 # --- CSV Export Endpoint for Device Manager ---
 
@@ -132,10 +134,28 @@ app = APP  # lowercase alias for external importers
 luma_request.install(APP, luma_gate.REMOTE_MAX_BODY_BYTES)
 
 # --- Matrix state refresh endpoint ---
-def _refresh_matrix_state_core() -> int:
-    """Poll every known encoder and decoder and update the cache. Returns how many changed."""
+#: Set by an operator's Refresh and consumed by the sweep it starts, so that sweep probes every unit.
+#: A flag rather than an argument: the shared observation cache calls the producer with none.
+_force_next_sweep = threading.Event()
+
+
+def _refresh_matrix_state_core(force: bool = False) -> int:
+    """Poll every known encoder and decoder and update the cache. Returns how many changed.
+
+    A unit that has stopped answering is probed on an exponential schedule with a cap
+    (`luma_liveness.is_due`) rather than on every sweep; `force` -- the Refresh button -- probes
+    everything. Units that answer are submitted first, so a crowd of silent ones can never delay them.
+    """
+    if _force_next_sweep.is_set():
+        _force_next_sweep.clear()
+        force = True
     with cache_lock:
-        units = list(cache_units.values())
+        sweep_generation = cache_generation
+        units = [u for u in cache_units.values() if luma_liveness.is_due(u, force=force)]
+        skipped = len(cache_units) - len(units)
+    units.sort(key=luma_liveness.is_offline)       # stable: answering units first
+    if skipped:
+        logging.debug("[refresh_matrix_state] %d quiet unit(s) not yet due for another look", skipped)
     updated = 0
     results = []
     # Use a short timeout for polling (e.g., 0.7s)
@@ -143,6 +163,10 @@ def _refresh_matrix_state_core() -> int:
     def poll_unit(unit):
         ip = unit.get("ip")
         if not ip:
+            return None
+        # Clear Units or a removal ended the inventory this sweep was started for: a unit that is no
+        # longer held is not read.
+        if cache_generation != sweep_generation:
             return None
         role = (unit.get("type") or unit.get("role") or '').lower()
         device_type = (unit.get("type") or "").lower()
@@ -214,7 +238,12 @@ def _refresh_matrix_state_core() -> int:
         # an extra one. A unit that missed enough refreshes in a row reads as
         # offline everywhere (luma_liveness); any answer clears it at once.
         with cache_lock:
+            was_offline = luma_liveness.is_offline(unit)
             luma_liveness.record(unit, answered)
+            now_offline = luma_liveness.is_offline(unit)
+        if was_offline != now_offline:
+            # The change is what an operator wants in the log; the check that found nothing new is not.
+            logging.info("[liveness] %s is %s", ip, "not answering" if now_offline else "answering again")
         return changed
 
     # Use ThreadPoolExecutor for parallel polling
@@ -243,12 +272,14 @@ def api_refresh_matrix_state():
     """
     body = luma_request.json_object()
     if isinstance(body, dict) and body.get("force") is True:
+        _force_next_sweep.set()
         _observe_cache.invalidate("matrix")
     try:
         updated = _observe_cache.get("matrix", _refresh_matrix_state_core)
         with cache_lock:
             served = [dict(u, online=not luma_projection.is_offline(u)) for u in cache_units.values()]
-        return jsonify({"ok": True, "updated": updated, "units": served})
+        return jsonify({"ok": True, "updated": updated, "units": served,
+                        "inventory_epoch": _inventory_epoch()})
     except Exception as e:
         logging.error(f"[refresh_matrix_state] Exception: {e}")
         return luma_request.internal_error(e)
@@ -283,6 +314,14 @@ def _route_av(decoder_ip, encoder_ip, allow_cached_stream=False, check_audio=Fal
     timeout = float(CONFIG.get("TIMEOUT", 3.0))
     result = {"ok": False, "status": "failed", "streamname": "", "audio": "unknown",
               "error": "", "reason": "", "set_result": None, "get_result": None}
+
+    # The display must be a unit this inventory holds, and is remembered as the unit it was when
+    # the route began. A route to a unit that Clear Units already removed is a stale request: it
+    # fails as one, before anything is sent, and never creates a record for the address.
+    decoder_ref = _unit_ref(decoder_ip)
+    if decoder_ref is None:
+        result.update(status="not_found", reason="unknown_unit", error=_UNKNOWN_UNIT_SENTENCE)
+        return result
 
     # 1. The encoder's stream, read now.
     streamname = None
@@ -348,19 +387,26 @@ def _route_av(decoder_ip, encoder_ip, allow_cached_stream=False, check_audio=Fal
 
     # 4. The cache follows the device. What the decoder reported is recorded; what
     #    we asked for is recorded as the route only once the decoder confirmed it.
+    #    Only the record the route began with is written. The display can have been removed (or
+    #    its address taken by another unit) while the route ran; the result is then not recorded,
+    #    and a record is never created here -- a partial one has no address or hardware identity.
     with cache_lock:
-        dec_unit = cache_units.get(decoder_ip, {})
-        if observed:
-            if not isinstance(dec_unit.get("dec"), dict):
-                dec_unit["dec"] = {}
-            if not isinstance(dec_unit["dec"].get("video"), dict):
-                dec_unit["dec"]["video"] = {}
-            dec_unit["dec"]["video"]["streamname"] = observed
-        if verified:
-            dec_unit["routed_encoder_ip"] = encoder_ip
-            dec_unit["routed_streamname"] = streamname
-        if dec_unit:
-            cache_units[decoder_ip] = dec_unit
+        dec_unit = _unit_if_same(decoder_ip, decoder_ref)
+        if dec_unit is not None:
+            if observed:
+                if not isinstance(dec_unit.get("dec"), dict):
+                    dec_unit["dec"] = {}
+                if not isinstance(dec_unit["dec"].get("video"), dict):
+                    dec_unit["dec"]["video"] = {}
+                dec_unit["dec"]["video"]["streamname"] = observed
+            if verified:
+                dec_unit["routed_encoder_ip"] = encoder_ip
+                dec_unit["routed_streamname"] = streamname
+    if dec_unit is None:
+        logging.info("[route_av] the display was removed from the inventory while the route ran; "
+                     "the result was not recorded")
+        result.update(status="conflict", reason="inventory_changed", error=_INVENTORY_CHANGED_SENTENCE)
+        return result
     _persist_units_cache()
 
     if not verified:
@@ -383,6 +429,79 @@ def _route_av(decoder_ip, encoder_ip, allow_cached_stream=False, check_audio=Fal
         except Exception as e:
             logging.info(f"[route_av] audio follow read failed for {decoder_ip}: {e}")
     return result
+
+
+_UNKNOWN_UNIT_SENTENCE = "That unit is not in the inventory. It may have been cleared; refresh and try again."
+_INVENTORY_CHANGED_SENTENCE = ("The unit was removed from the inventory while the route ran, "
+                               "so the result was not recorded. Refresh and check the display.")
+
+
+def _unit_ref(ip):
+    """(identity, generation) of the unit held at `ip` now, or None when none is held.
+
+    A request that must act on a unit remembers this when it begins and gives it back to
+    `_unit_if_same` when it comes to record what it did.
+    """
+    with cache_lock:
+        unit = cache_units.get(ip) if isinstance(ip, str) else None
+        if not isinstance(unit, dict):
+            return None
+        return luma_projection.unit_identity(unit), cache_generation
+
+
+def _unit_if_same(ip, ref):
+    """The record at `ip` when it is still the unit `ref` describes, else None. Caller holds `cache_lock`.
+
+    Same record, or the same hardware identity after the inventory was cleared and the unit
+    rediscovered. A record that now carries a different hardware identity is another device
+    that took the address, and is never written on behalf of the old request.
+    """
+    unit = cache_units.get(ip) if isinstance(ip, str) else None
+    if not isinstance(unit, dict) or ref is None:
+        return None
+    identity, generation = ref
+    now = luma_projection.unit_identity(unit)
+    if identity and now and now != identity:
+        return None                       # another device answers at this address now
+    if generation == cache_generation:
+        return unit
+    return unit if (identity and now == identity) else None
+
+
+_BOOT_NONCE = uuid.uuid4().hex[:8]
+
+
+def _inventory_epoch():
+    """A token that changes whenever Clear Units or a removal changes the inventory.
+
+    The browser may echo it with a state-changing request; a request that carries one from
+    before the change is refused as stale. Process-scoped nonce so a restart never reuses a
+    token a page already holds. Additive: nothing persisted, and a request without it is
+    judged by the unit it names alone.
+    """
+    with cache_lock:
+        return f"{_BOOT_NONCE}.{cache_generation}"
+
+
+def _stale_inventory_refusal(data):
+    """None, or the 400/409 response for an `inventory_epoch` the request carries.
+
+    Absent is fine (an older page). Present and not text is malformed (400). Present and not
+    the current one means the page was built from an inventory that has since been cleared or
+    changed (409): it is told to refresh, and nothing is sent to any unit.
+    """
+    if "inventory_epoch" not in data or data.get("inventory_epoch") is None:
+        return None
+    token = data.get("inventory_epoch")
+    if not isinstance(token, str) or not token or len(token) > 64:
+        return jsonify({"ok": False, "reason": "invalid_epoch",
+                        "error": "The inventory revision is not valid."}), 400
+    if token != _inventory_epoch():
+        return jsonify({"ok": False, "reason": "stale_inventory", "status": "conflict",
+                        "inventory_epoch": _inventory_epoch(),
+                        "error": "The inventory changed since this page loaded. "
+                                 "Refresh and try again."}), 409
+    return None
 
 
 def _remember_decoder_audio(decoder_ip, audio):
@@ -428,6 +547,10 @@ def _route_breakaway(decoder_ip, mode, video_encoder_ip=None, audio_encoder_ip=N
     """
     timeout = float(CONFIG.get("TIMEOUT", 3.0))
     password = CONFIG.get("password", "password")
+    decoder_ref = _unit_ref(decoder_ip)
+    if decoder_ref is None:
+        return {"ok": False, "status": "not_found", "mode": mode, "reason": "unknown_unit",
+                "error": _UNKNOWN_UNIT_SENTENCE}
     outcome = luma_breakaway.route(
         lambda method, params: _ws_call_auth(decoder_ip, method, params, timeout),
         lambda ip, method, params: _ws_call_auth(ip, method, params, timeout),
@@ -443,7 +566,7 @@ def _route_breakaway(decoder_ip, mode, video_encoder_ip=None, audio_encoder_ip=N
     after = outcome.get("after")
     if isinstance(after, dict):
         with cache_lock:
-            unit = cache_units.get(decoder_ip)
+            unit = _unit_if_same(decoder_ip, decoder_ref)
             if isinstance(unit, dict):
                 dec = unit["dec"] if isinstance(unit.get("dec"), dict) else {}
                 unit["dec"] = dec
@@ -460,11 +583,29 @@ def _route_breakaway(decoder_ip, mode, video_encoder_ip=None, audio_encoder_ip=N
                 if outcome.get("ok") and video_encoder_ip and mode != luma_breakaway.MODE_AUDIO:
                     unit["routed_encoder_ip"] = video_encoder_ip
                     unit["routed_streamname"] = outcome.get("video_stream", "")
+            else:
+                # The display left the inventory while the route ran: say so instead of
+                # reporting a result nothing recorded.
+                outcome = dict(outcome, ok=False, status="conflict", reason="inventory_changed",
+                               error=_INVENTORY_CHANGED_SENTENCE)
         _persist_units_cache()
     return outcome
 
 
-_BREAKAWAY_STATUS = {"verified": 200, "refused": 400, "unreachable": 503, "not_verified": 502, "failed": 502}
+_BREAKAWAY_STATUS = {"verified": 200, "refused": 400, "unreachable": 503, "not_verified": 502, "failed": 502,
+                     "not_found": 404, "conflict": 409}
+
+
+def _unknown_among(*ips):
+    """The addresses, among those named, that the inventory does not hold."""
+    with cache_lock:
+        return [ip for ip in ips if not (isinstance(ip, str) and ip in cache_units)]
+
+
+def _unknown_unit_response():
+    """A well-formed address the inventory does not hold: 404, said as that, nothing sent."""
+    return jsonify({"ok": False, "reason": "unknown_unit", "status": "not_found",
+                    "error": _UNKNOWN_UNIT_SENTENCE}), 404
 
 
 def _offline_among(*ips):
@@ -488,6 +629,7 @@ def api_route_matrix():
     # Administrator breakaway: only when a mode is named. With no mode the route is
     # the ordinary one below, exactly as it has always been.
     mode = data.get("mode")
+    stale = _stale_inventory_refusal(data) if isinstance(data, dict) else None
     if mode is not None:
         mode = str(mode).strip().lower()
         video_ip = data.get("video_encoder_ip") or encoder_ip
@@ -504,6 +646,12 @@ def api_route_matrix():
             return jsonify({"ok": False, "reason": "invalid_address", "error": "Invalid IP address format"}), 400
         if mode not in luma_breakaway.MODES:
             return jsonify({"ok": False, "reason": "unknown_mode", "error": "That routing mode does not exist."}), 400
+        if stale is not None:
+            return stale
+        # The display is the unit a route records on, so it must be one the inventory holds. A source
+        # is read from the device itself and has never had to be in the list.
+        if _unknown_among(decoder_ip):
+            return _unknown_unit_response()
         if _offline_among(*needed):
             return jsonify({"ok": False, "reason": "device_offline", "status": "offline",
                             "error": "That device is offline."}), 409
@@ -536,6 +684,10 @@ def api_route_matrix():
 
     if not decoder_ip or not encoder_ip:
         return jsonify({"ok": False, "error": "Missing decoder_ip or encoder_ip"}), 400
+    if stale is not None:
+        return stale
+    if _unknown_among(decoder_ip):
+        return _unknown_unit_response()
     if _offline_among(decoder_ip, encoder_ip):
         return jsonify({"ok": False, "reason": "device_offline", "status": "offline",
                         "error": "That device is offline."}), 409
@@ -918,15 +1070,44 @@ def _vw_call(ip: str, method: str, params: Optional[Any] = None, timeout: Option
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-def _vw_read_decoder(unit: Dict[str, Any]) -> Dict[str, Any]:
+def _vw_liveness_record(unit: Dict[str, Any]) -> Dict[str, Any]:
+    """The unit as the inventory holds it, for what only the inventory knows (its `reach` record).
+
+    The rows the Video Wall code reads are slim copies without that record, so asking them whether a unit
+    is quiet always answered "no" and every silent unit was read in full on every detection.
+    """
+    if isinstance(unit.get("reach"), dict):
+        return unit
+    with cache_lock:
+        held = cache_units.get(unit.get("ip", ""))
+        return dict(held) if isinstance(held, dict) else unit
+
+
+def _vw_silent(call: Dict[str, Any]) -> bool:
+    """True when the unit gave no reply at all (as opposed to a reply that was an error)."""
+    return (not call.get("ok")) and isinstance(call.get("error"), str)
+
+
+def _vw_read_decoder(unit: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
     ip = unit.get("ip", "")
     reported = {"device_id": unit.get("id") or _vw_device_id(unit), "ip": ip, "label": unit.get("label") or _vw_unit_label(unit), "online": bool(ip)}
-    calls = {
-        "wall": _vw_call(ip, "StandardVideoWallInfo.Get"),
-        "bezel": _vw_call(ip, "VideoWallBezel.Get"),
-        "display": _vw_call(ip, "VideoWallDisplayPref.Get"),
-        "source": _vw_call(ip, "SelectVideoStream.Get", {"password": CONFIG.get("password", "password")}),
-    }
+    names = ("wall", "bezel", "display", "source")
+    held = _vw_liveness_record(unit) if ip else unit
+    if ip and luma_liveness.is_offline(held) and not luma_liveness.is_due(held):
+        # Known quiet and not yet due for another look: four reads that cannot succeed would cost
+        # four timeouts per unit on every Video Wall read.
+        reported["online"] = False
+        reported["calls"] = {name: {"ok": False, "error": "not answering"} for name in names}
+        return reported
+    calls = {"wall": _vw_call(ip, "StandardVideoWallInfo.Get", timeout=timeout)}
+    if _vw_silent(calls["wall"]):
+        # A unit that did not answer the first read will not answer the next three; asking again only
+        # multiplies what one silent unit costs by four.
+        calls.update({name: {"ok": False, "error": "no response"} for name in names[1:]})
+    else:
+        calls["bezel"] = _vw_call(ip, "VideoWallBezel.Get", timeout=timeout)
+        calls["display"] = _vw_call(ip, "VideoWallDisplayPref.Get", timeout=timeout)
+        calls["source"] = _vw_call(ip, "SelectVideoStream.Get", {"password": CONFIG.get("password", "password")}, timeout=timeout)
     reported["calls"] = calls
     wall = calls["wall"].get("result") if calls["wall"].get("ok") else None
     if isinstance(wall, dict):
@@ -1419,11 +1600,32 @@ def _vw_classify_candidates(detected: Dict[str, Any], saved_walls: List[Dict[str
 _VW_DETECT_CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
 _VW_DETECT_CACHE_TTL = 15.0
 _vw_detect_cache_lock = threading.Lock()
+#: The newest completed detection, kept after the TTL so a caller that must not wait can be given it,
+#: marked stale. Dropped when the inventory it describes is cleared.
+_VW_DETECT_LAST: Dict[str, Any] = {"ts": 0.0, "payload": None}
+#: Bumped by anything that makes a running detection describe a world that has gone; its result is
+#: still returned to the caller that asked for it, and never stored.
+_vw_detect_generation = 0
+_vw_detect_run: Optional[Dict[str, Any]] = None
+_vw_detect_thread: Optional[threading.Thread] = None
+#: One short read per decoder. A decoder that answers does so in milliseconds.
+VW_DETECT_UNIT_TIMEOUT = 1.5
+#: How long the Device Manager badge waits for a detection before it answers with what it has.
+VW_BADGE_WAIT_SECONDS = float(os.environ.get("LUMA_VW_BADGE_WAIT", "1.5"))
 
 def _vw_invalidate_detect_cache() -> None:
+    global _vw_detect_generation
     with _vw_detect_cache_lock:
+        _vw_detect_generation += 1
         _VW_DETECT_CACHE["ts"] = 0.0
         _VW_DETECT_CACHE["payload"] = None
+
+def _vw_forget_detect() -> None:
+    """The inventory was cleared: the detection of it, including the last good one, goes."""
+    _vw_invalidate_detect_cache()
+    with _vw_detect_cache_lock:
+        _VW_DETECT_LAST["ts"] = 0.0
+        _VW_DETECT_LAST["payload"] = None
 
 def _vw_run_detect() -> Dict[str, Any]:
     """The actual device I/O: one parallel round of .Get calls per eligible
@@ -1435,7 +1637,7 @@ def _vw_run_detect() -> Dict[str, Any]:
     states = []
     if decoders:
         with ThreadPoolExecutor(max_workers=min(16, len(decoders))) as ex:
-            future_map = {ex.submit(_vw_read_decoder, unit): unit for unit in decoders}
+            future_map = {ex.submit(_vw_read_decoder, unit, VW_DETECT_UNIT_TIMEOUT): unit for unit in decoders}
             for fut in as_completed(future_map):
                 unit = future_map[fut]
                 try:
@@ -1454,16 +1656,67 @@ def _vw_run_detect() -> Dict[str, Any]:
     return {"ok": True, **detected, "candidates": candidates,
             "review_count": sum(1 for c in candidates if c["needs_review"]), **snap}
 
+def _vw_start_detect_locked() -> Dict[str, Any]:
+    """The detection in flight, started if there is none. Called with `_vw_detect_cache_lock` held.
+
+    Every caller that arrives while one is running joins it: two pages loading together cost one round of
+    reads, not two.
+    """
+    global _vw_detect_run, _vw_detect_thread
+    if _vw_detect_run is not None:
+        return _vw_detect_run
+    run = {"done": threading.Event(), "payload": None, "error": None, "generation": _vw_detect_generation}
+    _vw_detect_run = run
+
+    def work():
+        global _vw_detect_run
+        payload, error = None, None
+        try:
+            payload = _vw_run_detect()
+        except Exception as exc:                      # the waiting callers report it; the thread never dies silently
+            error = exc
+            logging.warning("[video_wall] detection failed: %s", type(exc).__name__)
+        with _vw_detect_cache_lock:
+            run["payload"], run["error"] = payload, error
+            if payload is not None and run["generation"] == _vw_detect_generation:
+                now = time.time()
+                _VW_DETECT_CACHE["ts"], _VW_DETECT_CACHE["payload"] = now, payload
+                _VW_DETECT_LAST["ts"], _VW_DETECT_LAST["payload"] = now, payload
+            _vw_detect_run = None
+        run["done"].set()
+
+    _vw_detect_thread = threading.Thread(target=work, daemon=True, name="vw-detect")
+    _vw_detect_thread.start()
+    return run
+
 def _vw_cached_detect() -> Dict[str, Any]:
+    """The detection, waiting for it. For a page that is showing the walls and needs the answer."""
     now = time.time()
     with _vw_detect_cache_lock:
         if _VW_DETECT_CACHE["payload"] is not None and (now - _VW_DETECT_CACHE["ts"]) < _VW_DETECT_CACHE_TTL:
             return copy.deepcopy(_VW_DETECT_CACHE["payload"])
-    payload = _vw_run_detect()
+        run = _vw_start_detect_locked()
+    run["done"].wait()
+    if run["error"] is not None:
+        raise run["error"]
+    return copy.deepcopy(run["payload"])
+
+def _vw_detect_without_waiting(wait: float) -> Any:
+    """(payload, stale): the detection if it is ready within `wait` seconds, else the last good one.
+
+    For the Device Manager badge, which must never hold the page: when nothing has been detected yet the
+    payload is None. The detection carries on in the background and the next call finds it.
+    """
+    now = time.time()
     with _vw_detect_cache_lock:
-        _VW_DETECT_CACHE["ts"] = time.time()
-        _VW_DETECT_CACHE["payload"] = payload
-    return copy.deepcopy(payload)
+        if _VW_DETECT_CACHE["payload"] is not None and (now - _VW_DETECT_CACHE["ts"]) < _VW_DETECT_CACHE_TTL:
+            return copy.deepcopy(_VW_DETECT_CACHE["payload"]), False
+        run = _vw_start_detect_locked()
+    if run["done"].wait(max(0.0, wait)) and run["payload"] is not None:
+        return copy.deepcopy(run["payload"]), False
+    with _vw_detect_cache_lock:
+        last = _VW_DETECT_LAST["payload"]
+        return (copy.deepcopy(last) if last is not None else None), True
 
 
 def _vw_wall_status(wall: Dict[str, Any], reports: Dict[str, Any]) -> str:
@@ -1848,12 +2101,18 @@ def api_video_wall_candidates_summary():
     /api/video_wall/detect (never a second scanner), but returns only
     counts so a page that isn't showing the Video Wall canvas doesn't need
     the full candidate/member payload."""
-    payload = _vw_cached_detect()
+    payload, stale = _vw_detect_without_waiting(VW_BADGE_WAIT_SECONDS)
     by_status: Dict[str, int] = {}
-    for c in payload.get("candidates", []):
+    for c in (payload or {}).get("candidates", []):
         if c["needs_review"]:
             by_status[c["candidate_status"]] = by_status.get(c["candidate_status"], 0) + 1
-    return jsonify({"ok": True, "review_count": payload.get("review_count", 0), "by_status": by_status})
+    body = {"ok": True, "review_count": (payload or {}).get("review_count", 0), "by_status": by_status}
+    if stale:
+        # Additive: the detection is still running. `pending` says nothing has been detected yet, so the
+        # count above is not an answer; otherwise it is the last good one and may be out of date.
+        body["stale"] = True
+        body["pending"] = payload is None
+    return jsonify(body)
 
 @APP.post("/api/video_wall/candidates/ignore")
 def api_video_wall_candidates_ignore():
@@ -2244,6 +2503,10 @@ UI_DIR = os.path.join(BASE_DIR, "ui")
 FIRMWARE_DIR = os.path.join(BASE_DIR, "firmware")
 CACHE_FILE = os.path.join(DATA_DIR, "units_cache.json")
 VIDEO_WALL_STATE_FILE = os.path.join(DATA_DIR, "video_walls.json")
+# Whether the operator has dismissed the multi-switch advisory. It belongs to the discovered
+# inventory: only clearing the inventory resets it (see luma_topology.AckStore).
+TOPOLOGY_ACK_FILE = os.path.join(DATA_DIR, "topology_ack.json")
+TOPOLOGY_ACK = luma_topology.AckStore(TOPOLOGY_ACK_FILE)
 CONFIG_FILE = os.path.join(DATA_DIR, "producer_config.json")
 PRODUCER_STATE_FILE = os.path.join(DATA_DIR, "producer_state.json")
 PRODUCER2_STATE_FILE = os.path.join(DATA_DIR, "producer2_state.json")
@@ -2384,8 +2647,12 @@ SCAN_WORKERS = int(os.environ.get("LUMA_SCAN_WORKERS", "64"))
 SCAN_TIMEOUT = float(os.environ.get("LUMA_SCAN_TIMEOUT", "1.2"))
 TCP_TIMEOUT_MS = int(os.environ.get("LUMA_TCP_TIMEOUT_MS", "400"))
 
-# Set to DEBUG to see detailed WebSocket connection attempts
-logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s] %(levelname)s - %(message)s", force=True)
+# INFO by default, to a bounded rotating file and to stderr when there is one. LUMA_LOG_LEVEL=DEBUG shows
+# the detailed WebSocket attempts (luma_logging).
+luma_logging.configure(DATA_DIR)
+# A Direct Access link is a bearer credential in a URL path; the request log must never hold one.
+# After basicConfig, which replaces the handlers the filter has to sit on.
+luma_request.install_token_redaction()
 # Force unbuffered logging
 import sys
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
@@ -2654,7 +2921,7 @@ def _ws_call(ip: str, payload: Dict[str, Any], timeout: float) -> Optional[Dict[
                     if request_id and response_id:
                         # Both have IDs - they must match
                         if response_id == request_id:
-                            logging.info(f"[ws_call] ✓ Got matching response (id={response_id})")
+                            logging.debug(f"[ws_call] ✓ Got matching response (id={response_id})")
                             ws.close()
                             return data
                         else:
@@ -2663,7 +2930,7 @@ def _ws_call(ip: str, payload: Dict[str, Any], timeout: float) -> Optional[Dict[
                             continue  # Try reading again
                     else:
                         # No ID validation possible - accept response
-                        logging.info(f"[ws_call] ✓ Got response without ID validation")
+                        logging.debug(f"[ws_call] ✓ Got response without ID validation")
                         ws.close()
                         return data
                         
@@ -2697,7 +2964,10 @@ def _ws_call(ip: str, payload: Dict[str, Any], timeout: float) -> Optional[Dict[
                 except Exception:
                     pass
     
-    logging.warning(f"[ws_call] Failed on all paths for {ip}: {CONFIG['ws_paths']}")
+    # A read that went unanswered is the unit's state, recorded where it changes; a write that did not
+    # land is worth a warning every time.
+    _failed_level = logging.DEBUG if str(payload.get("method") or "").endswith(".Get") else logging.WARNING
+    logging.log(_failed_level, "[ws_call] Failed on all paths for %s: %s", ip, CONFIG['ws_paths'])
     return None
 # -------- PRIMARY / FALLBACK DEVICE PASSWORDS (family spec Part 4) --------
 #
@@ -2749,10 +3019,15 @@ def _redact_for_audit(value):
     return value
 
 def _audit_device_request(ip, method, params, outcome):
+    # A read is steady-state traffic (the matrix sweep makes thousands); the record worth keeping at
+    # INFO is a mutation, or a read that answered with a refusal. An unanswered read is a fact about
+    # the unit, reported once when its state changes, not once per attempt.
+    quiet = str(method).endswith(".Get") and (outcome == "no_response" or str(outcome).startswith("ok"))
+    level = logging.DEBUG if quiet else logging.INFO
     try:
-        logging.info("[audit] device=%s method=%s params=%s outcome=%s", ip, method, json.dumps(_redact_for_audit(params), default=str), outcome)
+        logging.log(level, "[audit] device=%s method=%s params=%s outcome=%s", ip, method, json.dumps(_redact_for_audit(params), default=str), outcome)
     except Exception:
-        logging.info("[audit] device=%s method=%s outcome=%s (params unlogged: serialization error)", ip, method, outcome)
+        logging.log(level, "[audit] device=%s method=%s outcome=%s (params unlogged: serialization error)", ip, method, outcome)
 
 def _is_credential_rejection(response) -> bool:
     """True only when the device returned a well-formed JSON-RPC error
@@ -2767,13 +3042,50 @@ def _is_credential_rejection(response) -> bool:
     code = error.get("code")
     return ("auth" in message) or ("password" in message) or (code in (-32001, -32002))
 
+_CRED_MAC_RE = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
+
+def _credential_key(ip: str) -> str:
+    """What the working credential belongs to: the unit's MAC when the inventory knows it,
+    and the address only when it does not. An address says where a unit answered today; a
+    different unit that takes a reused address must not inherit the previous unit's
+    credential, and a unit that moved must not lose its own. Never takes the credential lock
+    (the cache lock is a different lock and is never held together with it)."""
+    mac = ""
+    try:
+        with cache_lock:
+            unit = cache_units.get(ip)
+            if isinstance(unit, dict):
+                mac = _normalize_mac(str(unit.get("mac") or ""))
+    except Exception:
+        mac = ""
+    return ("mac:" + mac) if _CRED_MAC_RE.fullmatch(mac or "") else ("ip:" + str(ip))
+
+def _persisted_credential_source(ip: str) -> Optional[str]:
+    """The slot recorded on the unit's own inventory record by an earlier run, so a restart
+    does not forget which credential a unit accepts. A slot name only, never a value."""
+    try:
+        with cache_lock:
+            unit = cache_units.get(ip)
+            source = unit.get("password_source") if isinstance(unit, dict) else None
+    except Exception:
+        return None
+    return source if source in ("primary", "fallback") else None
+
 def _known_credential_source(ip: str) -> Optional[str]:
+    key = _credential_key(ip)
     with _device_credential_lock:
-        return _device_credential_cache.get(ip)
+        known = _device_credential_cache.get(key)
+    if known is None:
+        known = _persisted_credential_source(ip)
+        if known is not None:
+            with _device_credential_lock:
+                _device_credential_cache.setdefault(key, known)
+    return known
 
 def _remember_credential_source(ip: str, source: str) -> None:
+    key = _credential_key(ip)
     with _device_credential_lock:
-        _device_credential_cache[ip] = source
+        _device_credential_cache[key] = source
     # Best-effort: surface it on the cached unit record too, so /api/cache
     # and /api/scan responses carry it for the UI (Part 4.6) without a
     # separate endpoint. Never fails the caller if the unit isn't cached.
@@ -2793,8 +3105,9 @@ def _forget_credential_source_as_failed(ip: str) -> None:
     # after a device's credentials/settings change back. This is never a
     # permanent lockout: nothing anywhere checks "failed" to skip an
     # attempt, it is a display value only.
+    key = _credential_key(ip)
     with _device_credential_lock:
-        _device_credential_cache.pop(ip, None)
+        _device_credential_cache.pop(key, None)
     try:
         with cache_lock:
             if ip in cache_units:
@@ -2834,6 +3147,38 @@ def _fallback_usable() -> bool:
     if not fallback_val.strip():
         return False
     return fallback_val != str(CONFIG.get("password", "password"))
+
+def _http_credential_candidates(ip: str) -> List[Tuple[str, str]]:
+    """Ordered (slot, value) credentials to present over HTTP to this unit: the one that last
+    worked first, then the other configured one. The WebSocket paths already resolve this way;
+    the HTTP paths (slate and logo uploads, the firmware login) minted their bearer from the
+    primary alone, so a unit that only accepts the fallback could be discovered and controlled
+    but never given a logo. Values are returned to the caller and never logged."""
+    known = _known_credential_source(ip)
+    first = known if known in ("primary", "fallback") else "primary"
+    if first == "fallback" and not _fallback_usable():
+        first = "primary"
+    order = [first]
+    other = "fallback" if first == "primary" else "primary"
+    if other == "primary" or _fallback_usable():
+        order.append(other)
+    seen, out = set(), []
+    for slot in order:
+        value = _credential_value(slot)
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append((slot, value))
+    return out
+
+def _note_http_credential(ip: str, slot: str) -> None:
+    """An HTTP call proved this slot for this unit (an HTTP success is as good as a WebSocket one)."""
+    if slot in ("primary", "fallback"):
+        _remember_credential_source(ip, slot)
+
+# The producer routes live in their own module and cannot import this one; they find the
+# resolver here, so there is one definition of which credential a unit is given.
+APP.config['LUMA_HTTP_CREDENTIALS'] = (_http_credential_candidates, _note_http_credential)
 
 def _resolve_ws_auth_response(ip: str, method: str, params: Optional[Any], timeout: float,
                                forced_id: Optional[str] = None,
@@ -2876,7 +3221,14 @@ def _resolve_ws_auth_response(ip: str, method: str, params: Optional[Any], timeo
         _audit_device_request(ip, method, params, "no_credential_shape")
         return result
 
-    if honor_caller_password_override and "password" in base_params:
+    if (honor_caller_password_override and "password" in base_params
+            and base_params["password"] in (_credential_value("primary"), _credential_value("fallback"))):
+        # The page's own idea of "the current password" is one of the two configured
+        # credentials, which overrides nothing: it is the page not knowing which one THIS unit
+        # accepts. Sent verbatim it was refused by every unit that answers to the other one
+        # (the Reboot button on a fallback unit). Resolve it like any other call.
+        base_params.pop("password")
+    elif honor_caller_password_override and "password" in base_params:
         override_value = base_params.pop("password")
         response = attempt(override_value)
         if response is not None and not _is_credential_rejection(response):
@@ -3352,7 +3704,10 @@ def _ws_get_minimal(ip: str) -> Optional[Dict[str, Any]]:
     sysr = _ws_call_auth(ip, "System.Get", {}, SCAN_TIMEOUT)
     
     # Log the raw response for debugging
-    logging.info(f"[WS_GET_MINIMAL] {ip} response type: {'SUCCESS' if sysr and 'result' in sysr else 'ERROR'}")
+    # Every scanned unit is read this way; the failure is reported below, so only the success is per-read noise.
+    _minimal_ok = bool(sysr and "result" in sysr)
+    (logging.debug if _minimal_ok else logging.info)(
+        f"[WS_GET_MINIMAL] {ip} response type: {'SUCCESS' if _minimal_ok else 'ERROR'}")
     logging.debug(f"[ws_get_minimal] {ip} raw response: {sysr}")
     
     if not sysr or "result" not in sysr:
@@ -4787,6 +5142,108 @@ CACHE_VERIFY_MIN_INTERVAL = float(os.environ.get("LUMA_CACHE_VERIFY_INTERVAL", "
 _cache_verify_lock = threading.Lock()
 _cache_verify_state = {"running": False, "finished": -1e9}
 
+def _topology_payload(units=None) -> Dict[str, Any]:
+    """The switch grouping of the inventory and whether its advisory was dismissed.
+
+    Derived, never fetched: `units` are the rows already read from the inventory, or the inventory
+    is read here. Only the few fields the grouping reads are copied (the stored `net` record is
+    replaced whole by a scan, never edited in place), so a background scan cannot change a unit
+    halfway through and the whole inventory is not deep-copied on every page load.
+    """
+    if units is None:
+        with cache_lock:
+            units = list(cache_units.values())
+    try:
+        slim = [{"ip": u.get("ip"), "mac": u.get("mac"), "role": u.get("role"), "type": u.get("type"),
+                 "net": copy.deepcopy(u.get("net"))} for u in units if isinstance(u, dict)]
+        topology = luma_topology.topology(slim)
+    except Exception as exc:  # a malformed record must never take the inventory down with it
+        logging.warning("[topology] could not be derived: %s", type(exc).__name__)
+        topology = luma_topology.topology([])
+    return {"lldp_topology": topology, "topology_warning_acknowledged": TOPOLOGY_ACK.acknowledged()}
+
+
+def _end_inventory_life_if_empty() -> bool:
+    """Removing the last unit is clearing the inventory, so the dismissed advisory goes with it.
+
+    Remove Selected can empty the inventory as surely as Clear Units can. Left alone, the
+    acknowledgement of an inventory that no longer exists would silence the advisory for whatever
+    is discovered next. A partial removal leaves the inventory, and its acknowledgement, alone.
+    """
+    with cache_lock:
+        empty = not cache_units
+    if empty:
+        TOPOLOGY_ACK.reset()
+    return empty
+
+
+@APP.get("/api/lldp_topology")
+def api_lldp_topology():
+    """Switch grouping for the current inventory. Read-only and derived: nothing is sent to a unit."""
+    payload = _topology_payload()
+    return jsonify({"ok": True, "topology": payload["lldp_topology"],
+                    "acknowledged": payload["topology_warning_acknowledged"]})
+
+
+@APP.post("/api/lldp_topology/acknowledge")
+def api_lldp_topology_acknowledge():
+    """Record that the operator has seen the multi-switch advisory.
+
+    Functional state with its own store, never inferred from whether the banner is visible. Only
+    clearing the discovered units resets it: not a scan, not another switch appearing, not a reload.
+    """
+    data = luma_request.json_object()
+    if not isinstance(data.get("acknowledged"), bool):
+        return jsonify({"ok": False, "reason": "bad_request_body",
+                        "error": "Say whether this is acknowledged (acknowledged: true or false). "
+                                 "Nothing was changed."}), 400
+    covered = []
+    if data["acknowledged"]:
+        # What this dismissal covered, recorded beside it: the switches the operator was told about.
+        covered = [grp["chassis_id"] for grp in _topology_payload()["lldp_topology"]["groups"]]
+    if not TOPOLOGY_ACK.set(data["acknowledged"], time.time(), covered):
+        return jsonify({"ok": False, "reason": "not_stored",
+                        "error": "The acknowledgement could not be saved."}), 500
+    return jsonify({"ok": True, "acknowledged": data["acknowledged"]})
+
+
+#: A unit whose AV LAN status was never read is retried no more often than this.
+NET_LEARN_RETRY_SECONDS = float(os.environ.get("LUMA_NET_LEARN_RETRY", "300"))
+_net_learn_attempts: Dict[str, float] = {}
+
+
+def _learn_net_status_if_never_read(ip: str, unit: Dict[str, Any]) -> bool:
+    """Learn the LLDP neighbour of a unit that was discovered before it was ever read.
+
+    The neighbour is recorded by the scan, so an inventory carried over from before switch
+    awareness (or a unit whose scan-time read failed) would show no topology until the operator
+    happened to scan again. This runs inside the sweep that already talks to every unit, reads
+    only what has never been read, and is paced per unit. A value already held is never touched:
+    a refresh belongs to a scan, and a failed read never erases anything.
+    """
+    if isinstance(unit.get("net"), dict):
+        return False
+    now = time.monotonic()
+    with _cache_verify_lock:
+        if now - _net_learn_attempts.get(ip, -1e9) < NET_LEARN_RETRY_SECONDS:
+            return False
+        _net_learn_attempts[ip] = now
+    role = str(unit.get("role") or unit.get("type") or "")
+    try:
+        net = luma_netstatus.read(_ws_call_auth, ip, role, min(2.0, CONFIG["TIMEOUT"]))
+    except Exception as exc:
+        logging.debug("[cache-verify] %s net status unavailable: %s", ip, type(exc).__name__)
+        return False
+    if not net:
+        return False
+    with cache_lock:
+        held = cache_units.get(ip)
+        if held is None or isinstance(held.get("net"), dict):
+            return False
+        held["net"] = net
+    return True
+
+
 @APP.get("/api/cache")
 def api_cache():
     _merge_disk_into_memory()
@@ -4796,8 +5253,9 @@ def api_cache():
         # Whether each unit is answering, derived once here so every page agrees.
         served = [dict(u, online=not luma_projection.is_offline(u)) for u in rows]
 
-    # Return cache immediately for fast page load
-    resp = jsonify({"units": served})
+    # Return cache immediately for fast page load. The switch topology is derived from these very
+    # units and rides along: no request of its own and no device traffic.
+    resp = jsonify({"units": served, "inventory_epoch": _inventory_epoch(), **_topology_payload(rows)})
     try:
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
@@ -4805,11 +5263,23 @@ def api_cache():
         pass
     
     # Verify hostnames asynchronously in background (don't block response)
+    with cache_lock:
+        verify_generation = cache_generation
+
     def verify_hostnames_async():
         try:
             for unit in rows:
+                # The sweep reads one unit at a time, so one that outlives a Clear Units would go on
+                # asking every cleared unit, for minutes, about devices the application no longer holds.
+                if cache_generation != verify_generation:
+                    logging.info("[cache-verify] stopped: the inventory was cleared while this ran")
+                    return
                 ip = unit.get("ip")
                 if not ip:
+                    continue
+                # A unit that has stopped answering is looked at on the liveness schedule, not on
+                # every page load: this sweep reads each unit one at a time, four reads deep.
+                if not luma_liveness.is_due(unit):
                     continue
                 try:
                     hostname = _ws_get_hostname(ip, min(1.0, CONFIG["TIMEOUT"]))
@@ -4818,6 +5288,7 @@ def api_cache():
                         with cache_lock:
                             if ip in cache_units:
                                 cache_units[ip]["hostname"] = hostname
+                    _learn_net_status_if_never_read(ip, unit)
                     role = (unit.get("role") or unit.get("type") or "").lower()
                     model = (unit.get("model") or "").lower()
                     is_encoder = role == "encoder" or model.startswith("hw-luma-e") or model.startswith("at-luma-e")
@@ -4883,6 +5354,27 @@ def _unit_label(unit) -> str:
     identity = luma_projection.unit_identity(unit)
     base = unit.get("hostname") or unit.get("model") or "Unnamed device"
     return REMOTE.aliases.display_name(identity, base) if identity else base
+
+
+def _drop_inventory_derived_state():
+    """Everything the application remembers about the units it just cleared, apart from the inventory.
+
+    Keyed by address or derived from the inventory: the "tried to learn its neighbours" times, the
+    shared matrix observation and the Video Wall detection result. Left alone they describe units that
+    are gone, so the next discovery would find a result for an inventory that no longer exists.
+    """
+    with _cache_verify_lock:
+        _net_learn_attempts.clear()
+    _observe_cache.invalidate("matrix")
+    _vw_forget_detect()
+    # Remembered by address, so they would describe whatever answers there next: the working-
+    # credential slot of a unit with no hardware identity, the pictures taken of cleared units.
+    with _device_credential_lock:
+        for key in [k for k in _device_credential_cache if k.startswith("ip:")]:
+            del _device_credential_cache[key]
+    with _preview_fresh_lock:
+        _preview_fresh_at.clear()
+    _preview_cache.invalidate()
 
 
 def _forget_devices(identities):
@@ -4965,6 +5457,10 @@ def _clear_full():
             logging.warning("[clear_units] failed to reset file; assignments restored")
             return jsonify({"ok": False, "error": "failed to persist"}), 500
         logging.info("[clear_units] cleared %d", len(before_units))
+    _drop_inventory_derived_state()
+    # The one operation that ends the inventory's life, so the one that resets the dismissed
+    # multi-switch advisory. Only reached once the inventory really is empty.
+    TOPOLOGY_ACK.reset()
     try:
         REMOTE.store.audit("units.cleared", actor=getattr(g, "principal", None),
                            detail={"cleared": len(before_units),
@@ -5021,6 +5517,12 @@ def _clear_unassigned():
                     return jsonify({"ok": False, "error": "failed to persist"}), 500
             logging.info("[clear_units] cleared %d unassigned, kept %d assigned",
                          len(doomed), len(kept))
+            inventory_emptied = bool(doomed) and not cache_units
+    if inventory_emptied:
+        # Everything that was there is gone, so the inventory's life has ended: same as a full clear.
+        TOPOLOGY_ACK.reset()
+    if doomed:
+        _drop_inventory_derived_state()
     try:
         REMOTE.store.audit("units.cleared_unassigned", actor=getattr(g, "principal", None),
                            detail={"cleared": len(doomed), "kept": len(kept),
@@ -5141,6 +5643,8 @@ def _remove_selected_unassigned(ips_to_remove):
                                     "nothing removed")
                     return jsonify({"ok": False, "error": "failed to persist"}), 500
                 removed_names = names["removed"]
+    if doomed:
+        _end_inventory_life_if_empty()
     if doomed or protected:
         try:
             REMOTE.store.audit("units.removed_unassigned", actor=getattr(g, "principal", None),
@@ -5195,6 +5699,8 @@ def api_remove_units():
                 cache_units.pop(ip, None)
         # Persist updated cache
         _persist_units_cache()
+        if doomed:
+            _end_inventory_life_if_empty()
         try:
             REMOTE.store.audit("units.cleared", actor=getattr(g, "principal", None),
                                detail={"cleared": len(doomed),
@@ -5671,6 +6177,10 @@ def api_scan():
     start = time.time()
     counts = {"scanned":0,"added":0,"updated":0}
     errors = []  # Track authentication and other errors
+    # Addresses that gave any reply at all (a unit that refused our password still answered). The
+    # page leaves the others alone for a while; without this a unit that accepts a connection and
+    # then says nothing costs a worker for its whole read timeout on every round.
+    answered = []
     with cache_lock:
         scan_generation = cache_generation
 
@@ -5693,6 +6203,7 @@ def api_scan():
             if not info:
                 logging.debug(f"[api_scan] No info returned for {ip}")
                 continue
+            answered.append(ip)
             
             # Check if this is an error response
             if "_error" in info:
@@ -5749,7 +6260,10 @@ def api_scan():
     logging.info(f"[scan-fast] done {counts} errors={len(errors)} duration={dur}s total_mem={len(all_units)}")
     
     # Return errors along with units
-    return jsonify({"ok": True, "duration": dur, "scanned": counts["scanned"], "units": all_units, "errors": errors, "stale": stale})
+    extra = {} if stale else _topology_payload()
+    answered.sort(key=ipaddress.ip_address)     # numerically, never the order the workers finished in
+    return jsonify({"ok": True, "duration": dur, "scanned": counts["scanned"], "units": all_units, "errors": errors, "stale": stale,
+                    "answered": answered, **extra})
 
 # -------- misc endpoints --------
 @APP.post("/api/tcp_probe")
@@ -6003,13 +6517,19 @@ def _discover_switcher_upload_forms(ip: str, session: requests.Session, attempts
 def _login_and_session(ip: str, session: requests.Session) -> bool:
     url = _http_base(ip) + CONFIG["login_path"]
     headers = {"Accept":"application/json"}; headers.update(CONFIG.get("extra_headers",{}))
-    payload = {"username": CONFIG["username"], "password": CONFIG["password"]}
     try:
-        r = session.post(url, json=payload, timeout=CONFIG["TIMEOUT"], verify=CONFIG["http_verify_tls"], headers=headers)
-        logging.info(f"[login] {ip} -> {r.status_code}")
-        return r.status_code in (200,204)
+        for slot, value in _http_credential_candidates(ip):
+            payload = {"username": CONFIG["username"], "password": value}
+            r = session.post(url, json=payload, timeout=CONFIG["TIMEOUT"], verify=CONFIG["http_verify_tls"], headers=headers)
+            logging.info(f"[login] {ip} -> {r.status_code}")
+            if r.status_code in (200, 204):
+                _note_http_credential(ip, slot)
+                return True
+            if r.status_code not in (401, 403):
+                return False        # not a credential refusal: another password would not help
+        return False
     except requests.RequestException as e:
-        logging.warning(f"[login] {ip} exc {e}")
+        logging.warning(f"[login] {ip} exc {e.__class__.__name__}")
         return False
 
 def _upload_fw(ip: str, firmware_path: str, session: requests.Session) -> Tuple[bool,str]:
@@ -6526,7 +7046,7 @@ def _parse_version_tuple(text):
     """Best-effort 'vX.Y.Z' -> (X, Y, Z). Returns None if not parseable."""
     if not text:
         return None
-    m = re.match(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?", str(text).strip())
+    m = re.match(r"^[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?", str(text).strip())
     if not m:
         return None
     return tuple(int(g) if g else 0 for g in m.groups())
@@ -6556,14 +7076,22 @@ def _is_official_release_url(url):
         return parsed.path.startswith("/%s/" % _UPDATE_CHECK_REPO)
     return False
 
+UPDATE_NO_PACKAGE_UNSUPPORTED = (
+    "There is no supported update package for this computer. LumaSuite releases are built "
+    "for Windows (x86-64) and macOS on Apple Silicon only.")
+UPDATE_NO_PACKAGE_IN_RELEASE = (
+    "This release has no download for this computer yet. Open the release page.")
+
+
 def _platform_asset_suffixes(platform_name=None, machine=None):
     """The tails of the release assets built for this computer, or () when that cannot be said.
 
-    The release workflow names its archives LumaSuite-<tag>-windows-x86_64.zip,
-    LumaSuite-<tag>-macos-x86_64.zip, -macos-arm64.zip and LumaSuite-<tag>-linux-x86_64.tar.gz: the
-    operating system and the architecture, both stated. A bare executable named for Windows x86-64
-    (-windows-x86_64.exe, how a release candidate is handed out) is the same artifact. A computer that
-    matches none of them is not offered a download at all: the wrong build is worse than the releases page.
+    From v1.1.1 two platforms are distributed and nothing else: Windows x86-64
+    (LumaSuite-<tag>-windows-x86_64.zip) and macOS on Apple Silicon (LumaSuite-<tag>-macos-arm64.zip),
+    the operating system and the architecture both stated. A bare executable named for Windows x86-64
+    (-windows-x86_64.exe, how a release candidate is handed out) is the same artifact. macOS on an Intel
+    processor, Linux and anything unidentified match nothing and are not offered a download: the wrong
+    build is worse than the releases page, and the check says so in words (UPDATE_NO_PACKAGE_UNSUPPORTED).
     """
     platform_name = platform_name or sys.platform
     machine = (machine or platform.machine() or "").lower()
@@ -6571,11 +7099,7 @@ def _platform_asset_suffixes(platform_name=None, machine=None):
     if platform_name.startswith("win"):
         return ("-windows-x86_64.zip", "-windows-x86_64.exe") if x86 else ()
     if platform_name == "darwin":
-        if machine in ("arm64", "aarch64"):
-            return ("-macos-arm64.zip",)
-        return ("-macos-x86_64.zip",) if x86 else ()
-    if platform_name.startswith("linux"):
-        return ("-linux-x86_64.tar.gz",) if x86 else ()
+        return ("-macos-arm64.zip",) if machine in ("arm64", "aarch64") else ()
     return ()
 
 # A production release is exactly v<major>.<minor>.<patch>. v1.1.0-rc4, V1.1.0, v1.1.0\n and
@@ -6601,9 +7125,13 @@ def _pick_platform_asset(assets, platform_name=None, machine=None, tag=None):
     suffixes = _platform_asset_suffixes(platform_name, machine)
     if not suffixes:
         return None
+    if not isinstance(assets, (list, tuple)):
+        return None                   # a feed that is not a list of assets offers nothing, and never raises
     for suffix in suffixes:           # in order of preference: the archive before a bare executable
         for asset in assets:
-            name = str((asset or {}).get("name") or "").lower()
+            if not isinstance(asset, dict):
+                continue
+            name = str(asset.get("name") or "").lower()
             if tag is not None:
                 if name != ("lumasuite-%s%s" % (tag, suffix)).lower():
                     continue
@@ -6655,12 +7183,18 @@ def _run_update_check():
         asset_url = None
 
     state = "update_available" if cmp_result > 0 else "current"
+    package_message = None
+    if state == "update_available" and not asset_url:
+        # Say which of the two reasons applies. Never "up to date", never a build that would not run.
+        package_message = (UPDATE_NO_PACKAGE_IN_RELEASE if _platform_asset_suffixes()
+                           else UPDATE_NO_PACKAGE_UNSUPPORTED)
     return {
         "state": state,
         "latest_version": latest_tag.lstrip("vV") or latest_tag,
         "installed_version": __version__,
         "html_url": html_url,
         "asset_url": asset_url,
+        "package_message": package_message,
     }
 
 @APP.get("/api/update_check", endpoint="luma_api_update_check")
@@ -6692,9 +7226,10 @@ def api_update_check():
 def license_text():
     """The licence information the running build carries, as plain text.
 
-    LumaSuite's own licence is a decision that has not been made, so no LICENSE file ships and this
-    never invents one. When one is added it is served first. Otherwise the answer says plainly that
-    there is none and carries the third-party notices, which are always bundled.
+    LumaSuite's own licence is the Hall Research source-available licence in LICENSE (with section 11A for
+    LGPL components); it is bundled with every build and served first. Only if it is somehow missing does the
+    answer say plainly that there is none, and it never invents one; it then carries the third-party notices,
+    which are always bundled.
     """
     for candidate in (os.path.join(BASE_DIR, "LICENSE"), os.path.join(os.getcwd(), "LICENSE")):
         try:
@@ -6837,15 +7372,20 @@ def _slate_ips_from_request(raw_ips) -> List[str]:
 
 def _slate_upload_one(ip: str, filename: str, blob: bytes, mimetype: str, timeout: float = 15.0) -> Dict[str, Any]:
     username = CONFIG.get("username", "admin") or "admin"
-    password = CONFIG.get("password", "password") or "password"
     url = f"http://{ip}/upload/priv"
-    headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=0)}"}
     files = {"preImage": (filename, blob, mimetype)}
     try:
-        resp = requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
-        if resp.status_code in (401, 403):
-            headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=2)}"}
+        resp = None
+        for slot, password in _http_credential_candidates(ip):
+            headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=0)}"}
             resp = requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
+            if resp.status_code in (401, 403):
+                headers = {"Authorization": f"Bearer {_producer_mint_http_bearer(username, password, role=2)}"}
+                resp = requests.post(url, files=files, headers=headers, timeout=timeout, allow_redirects=False)
+            if resp.status_code not in (401, 403):
+                if 200 <= resp.status_code < 300:
+                    _note_http_credential(ip, slot)
+                break               # answered for a reason other than the credential
         ok = 200 <= resp.status_code < 300
         detail = (resp.text or "")[:240]
         return {"ok": ok, "status": resp.status_code, "detail": detail}
@@ -8102,6 +8642,105 @@ def _route_av_for_users(decoder_ip, encoder_ip):
         _observe_cache.invalidate("matrix")
 
 
+def _unroute_for_users(decoder_ip):
+    """A restricted User's Unroute: one display, video and audio subscribed to nothing, verified.
+
+    The engine is `luma_breakaway.unroute`, built on the device calls measured on hardware. A
+    switcher has no audio path and no cleared-stream call has been observed on one, so it is
+    refused and never written to. The cache follows what the decoder reported afterwards.
+    """
+    try:
+        with cache_lock:
+            is_switcher = (cache_units.get(decoder_ip, {}).get("type") or "").lower() == "switcher"
+        if is_switcher:
+            return {"ok": False, "status": "refused", "reason": "not_supported"}
+        timeout = float(CONFIG.get("TIMEOUT", 3.0))
+        outcome = luma_breakaway.unroute(
+            lambda method, params: _ws_call_auth(decoder_ip, method, params, timeout),
+            password=CONFIG.get("password", "password"))
+        after = outcome.get("after")
+        if isinstance(after, dict):
+            with cache_lock:
+                unit = cache_units.get(decoder_ip)
+                if isinstance(unit, dict):
+                    dec = unit["dec"] if isinstance(unit.get("dec"), dict) else {}
+                    unit["dec"] = dec
+                    dec.setdefault("video", {})["streamname"] = after.get("video", "")
+                    audio = dec.setdefault("audio", {})
+                    audio["streamname"] = after.get("audio", "")
+                    if isinstance(after.get("follow"), bool):
+                        audio["followvideoenable"] = after["follow"]
+                    audio["ip"] = after.get("audio_address", "")
+                    if outcome.get("ok"):
+                        unit.pop("routed_encoder_ip", None)
+                        unit.pop("routed_streamname", None)
+            _persist_units_cache()
+        if outcome.get("ok"):
+            logging.info("[unroute] %s verified (%d write(s))", decoder_ip, len(outcome.get("writes") or []))
+        else:
+            logging.warning("[unroute] %s: %s (%s, rollback %s)", decoder_ip, outcome.get("reason"),
+                            outcome.get("status"), outcome.get("rollback"))
+        return outcome
+    finally:
+        _observe_cache.invalidate("matrix")
+
+
+def _verify_route_for_users(decoder_ip, encoder_ip):
+    """Ask a display, read-only, whether it now holds this source's video stream.
+
+    A route that was written but whose read-back did not agree in time is `not_verified`:
+    some displays take longer than the read-back window to report a stream they have already
+    taken. This is the later look. It writes nothing and reads exactly what the route's own
+    read-back read -- the encoder's stream name and the decoder's selected stream -- so a
+    display that really did not take the route is still reported as one that did not.
+
+    Returns {"status": "verified" | "not_verified" | "unreachable"}. The cache follows the
+    device, as it does after a route, but only when the display agrees.
+    """
+    timeout = float(CONFIG.get("TIMEOUT", 3.0))
+    try:
+        enc = _ws_call_auth(encoder_ip, "VideoMultiIpStream.Get", {}, timeout)
+        wanted = ((enc or {}).get("result") or {}).get("streamname") if isinstance(enc, dict) else None
+    except Exception as e:
+        logging.info(f"[route_check] encoder read failed: {type(e).__name__}")
+        wanted = None
+    wanted = str(wanted or "").strip()
+    if not wanted:
+        return {"status": "unreachable"}
+    with cache_lock:
+        is_switcher = (cache_units.get(decoder_ip, {}).get("type") or "").lower() == "switcher"
+    try:
+        if is_switcher:
+            held = _ws_get_selected_stream_switcher(decoder_ip, timeout)
+        else:
+            resp = _ws_call_auth(decoder_ip, "SelectVideoStream.Get",
+                                 {"password": CONFIG.get("password", "password")}, timeout)
+            held = ((resp or {}).get("result") or {}).get("streamname") if isinstance(resp, dict) else None
+    except Exception as e:
+        logging.info(f"[route_check] display read failed: {type(e).__name__}")
+        held = None
+    if not isinstance(held, str):
+        return {"status": "unreachable"}            # it did not answer; an empty name is an answer
+    held = held.strip()
+    with cache_lock:
+        unit = cache_units.get(decoder_ip)
+        if isinstance(unit, dict):
+            dec = unit["dec"] if isinstance(unit.get("dec"), dict) else {}
+            unit["dec"] = dec
+            video = dec["video"] if isinstance(dec.get("video"), dict) else {}
+            dec["video"] = video
+            if held:
+                video["streamname"] = held
+            if held == wanted:
+                unit["routed_encoder_ip"] = encoder_ip
+                unit["routed_streamname"] = wanted
+    if held == wanted:
+        _persist_units_cache()
+        _observe_cache.invalidate("matrix")
+        return {"status": "verified"}
+    return {"status": "not_verified"}
+
+
 def _route_mode_for_users(decoder_ip, mode, encoder_ip):
     """Video-only or audio-only for a matrix User, through the administrator's engine.
 
@@ -8163,7 +8802,8 @@ REMOTE = luma_wiring.RemoteSystem(
     destination_check=_remote_destination_check,
     walls=luma_walls.WallDirectory(_wall_directory, _vw_device_id),
     route_wall=_route_wall_for_users, route_mode=_route_mode_for_users,
-    identify=_identify_for_route)
+    identify=_identify_for_route, verify_route=_verify_route_for_users,
+    unroute=_unroute_for_users)
 
 
 def start_remote_access():

@@ -5,8 +5,8 @@
 # Python 3.12.16 (python-build-standalone 20261026, OpenSSL 3.5.9) from the direct pins in
 # requirements-build.txt, then frozen. Windows-only packages carry an environment marker so
 # the macOS and Linux jobs still resolve. Platform extras that exist only on macOS or Linux
-# (macholib, python-xlib, pyobjc-framework-Quartz) are not in this file and resolve at build
-# time. No --require-hashes yet: hash management across platforms is deferred.
+# (macholib, python-xlib) are not in this file and resolve at build
+# time; the three pyobjc packages pystray needs on macOS are pinned below. No --require-hashes yet: hash management across platforms is deferred.
 # To change anything: edit requirements-build.txt, rebuild a fresh venv, freeze, and
 # rewrite this file from that freeze.
 
@@ -18,11 +18,12 @@ Werkzeug==3.1.9
 PyInstaller==6.19.0
 Pillow==13.0.0
 pystray==0.19.5
+# macOS only (pystray's backend). Exact versions resolved by the first macOS arm64 CI build.
+pyobjc-core==13.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa==13.0; sys_platform == "darwin"
+pyobjc-framework-Quartz==13.0; sys_platform == "darwin"
 psutil==5.9.8
-# cryptography 49 and later publish no prebuilt wheel for Intel macOS; 48.0.1 is the last
-# that does (the same split OmniSuite carries). Every other platform takes 50.0.2.
-cryptography==50.0.2 ; sys_platform != "darwin" or platform_machine != "x86_64"
-cryptography==48.0.1 ; sys_platform == "darwin" and platform_machine == "x86_64"
+cryptography==50.0.2
 
 # Transitive pins
 altgraph==0.17.5

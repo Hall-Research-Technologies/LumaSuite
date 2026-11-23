@@ -159,6 +159,10 @@
               "<label>Colour preset</label>" +
               '<div style="flex:1 1 auto;"><div id="cfg_preset_choice" class="preset-choice"></div></div>' +
             "</div>" +
+            '<div class="modal-row" style="align-items:flex-start;">' +
+              "<label>Light background</label>" +
+              '<div style="flex:1 1 auto;"><div id="cfg_light_background" class="light-bg-choice"></div></div>' +
+            "</div>" +
           "</div>" +
           '<div id="cfg_extension_point"></div>' +
           '<div class="settings-section">' +
@@ -249,6 +253,9 @@
     if (typeof window.__lumaApplyPresetColors === "function") {
       window.__lumaApplyPresetColors(appearance.preset);
     }
+    if (typeof window.__lumaApplyLightBackground === "function") {
+      window.__lumaApplyLightBackground(appearance.lightBackground);
+    }
   }
 
   function reflectAppearanceControls() {
@@ -267,6 +274,68 @@
     }
     var themeSelect = el("cfg_theme");
     if (themeSelect) themeSelect.value = a.theme === "light" ? "light" : "dark";
+    reflectLightBackground();
+  }
+
+  // ---- Light background ------------------------------------------------
+  // One picker and its hex value, saved with the rest of the appearance. It sets the light-mode page
+  // background; the surfaces around it are derived in CSS. A value that is not a colour is refused with
+  // a sentence and never reaches a custom property.
+  function lightBackgroundNote(a) {
+    return a.theme === "light" ? "Applies to Light theme." : "Saved for Light theme. Dark is unaffected.";
+  }
+
+  function renderLightBackground() {
+    var host = el("cfg_light_background");
+    if (!host) return;
+    var a = currentAppearance();
+    var value = a.lightBackground || "#f7f8fb";
+    host.innerHTML =
+      '<input type="color" id="cfg_light_bg_picker" aria-label="Light mode background">' +
+      '<input type="text" id="cfg_light_bg_hex" class="color-hex" spellcheck="false" aria-label="Light mode background hex value">' +
+      '<span class="light-bg-note" id="cfg_light_bg_note"></span>';
+    el("cfg_light_bg_picker").value = value;
+    el("cfg_light_bg_hex").value = value;
+    el("cfg_light_bg_note").textContent = lightBackgroundNote(a);
+  }
+
+  function reflectLightBackground() {
+    var a = currentAppearance();
+    var picker = el("cfg_light_bg_picker"), hex = el("cfg_light_bg_hex"), note = el("cfg_light_bg_note");
+    if (picker) picker.value = a.lightBackground || "#f7f8fb";
+    if (hex) hex.value = a.lightBackground || "#f7f8fb";
+    if (note) note.textContent = lightBackgroundNote(a);
+  }
+
+  function commitLightBackground(raw) {
+    var normalize = window.__lumaNormalizeLightBackground;
+    var colour = typeof normalize === "function" ? normalize(raw) : null;
+    var note = el("cfg_light_bg_note");
+    if (!colour) {
+      if (note) note.textContent = "Not a colour. Use a hex value such as #eef2f5.";
+      if (typeof window.__lumaApplyLightBackground === "function") {
+        window.__lumaApplyLightBackground(currentAppearance().lightBackground);
+      }
+      return;
+    }
+    persistAppearance(Object.assign({}, currentAppearance(), { lightBackground: colour }));
+    reflectAppearanceControls();
+  }
+
+  function wireLightBackground() {
+    var host = el("cfg_light_background");
+    if (!host) return;
+    host.addEventListener("input", function (e) {
+      // Previewing as the picker moves costs nothing; nothing is saved until the choice is made.
+      if (e.target && e.target.id === "cfg_light_bg_picker" && typeof window.__lumaApplyLightBackground === "function") {
+        window.__lumaApplyLightBackground(e.target.value);
+      }
+    });
+    host.addEventListener("change", function (e) {
+      if (e.target && (e.target.id === "cfg_light_bg_picker" || e.target.id === "cfg_light_bg_hex")) {
+        commitLightBackground(e.target.value.trim());
+      }
+    });
   }
 
   function renderDensityChoice() {
@@ -305,7 +374,7 @@
         var btn = e.target.closest("button[data-density]");
         if (!btn) return;
         var a = currentAppearance();
-        persistAppearance({ theme: a.theme, density: btn.getAttribute("data-density"), preset: a.preset });
+        persistAppearance(Object.assign({}, a, { density: btn.getAttribute("data-density") }));
         reflectAppearanceControls();
       });
     }
@@ -315,7 +384,7 @@
         var btn = e.target.closest("button[data-preset]");
         if (!btn) return;
         var a = currentAppearance();
-        persistAppearance({ theme: a.theme, density: a.density, preset: btn.getAttribute("data-preset") });
+        persistAppearance(Object.assign({}, a, { preset: btn.getAttribute("data-preset") }));
         reflectAppearanceControls();
       });
       // Previewing on hover costs nothing and is the quickest way to see a
@@ -335,7 +404,7 @@
     if (themeSelect) {
       themeSelect.addEventListener("change", function () {
         var a = currentAppearance();
-        persistAppearance({ theme: themeSelect.value === "light" ? "light" : "dark", density: a.density, preset: a.preset });
+        persistAppearance(Object.assign({}, a, { theme: themeSelect.value === "light" ? "light" : "dark" }));
         reflectAppearanceControls();
       });
     }
@@ -343,7 +412,7 @@
     if (resetBtn) {
       resetBtn.addEventListener("click", function () {
         try { localStorage.removeItem("lumasuite.appearance"); } catch (e) {}
-        persistAppearance({ theme: "dark", density: "classic", preset: "default" });
+        persistAppearance({ theme: "dark", density: "classic", preset: "default", lightBackground: "#f7f8fb" });
         reflectAppearanceControls();
         window.toast && window.toast("Appearance reset to defaults", "ok");
       });
@@ -378,6 +447,11 @@
       if (assetLink) {
         if (data.asset_url) { assetLink.href = data.asset_url; assetLink.hidden = false; }
         else assetLink.hidden = true;
+      }
+      if (!data.asset_url && data.package_message) {
+        // The release is real but there is nothing to download for this computer. Say so, and leave
+        // the release page link, rather than offering a build that would not run.
+        statusEl.textContent += ". " + data.package_message;
       }
       try {
         var ack = localStorage.getItem("lumasuite.update_ack_version");
@@ -636,8 +710,10 @@
     injectMarkup();
     renderDensityChoice();
     renderPresetChoice();
+    renderLightBackground();
     wireGear();
     wireAppearanceControls();
+    wireLightBackground();
     reflectAppearanceControls();
 
     wirePasswordToggle("cfg_pw_toggle", "cfg_password", function (inp) {

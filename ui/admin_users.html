@@ -202,6 +202,11 @@
               <button type="button" id="direct_copy">Copy link</button>
               <button type="button" id="direct_regen" class="secondary">Regenerate</button></div>
             <p class="muted" id="direct_note"></p>
+            <!-- The address remote access serves has changed since this link was last handed out.
+                 Advisory, not an error: the link is still valid and the one shown is already the new one. -->
+            <p class="warnline" id="direct_address" role="status" hidden><strong>The address changed.</strong>
+              <span id="direct_address_text"></span>
+              <button type="button" id="direct_address_ack" class="secondary">I have shared the new link</button></p>
           </div>
         </div>
       </div>

@@ -46,6 +46,8 @@ class SimDecoder:
         self.silent_audio = False          # lists the audio name and reads back no subscription
         self.wall = {"vmenable": False, "vwmatrix": "1_1_1_1"}
         self.wall_ignore = False
+        self.settle = 0.0                  # seconds after a video Set before a Get reports it (a slow display)
+        self._settling = None              # (previous stream, monotonic time it starts reporting the new one)
 
 
 class DeviceSim:
@@ -72,6 +74,7 @@ class DeviceSim:
         self._writing = {}
         self.max_concurrent_writes = {}
         self.write_log = []                 # (ip, method, t_start, t_end): when each write began and ended
+        self.call_log = []                  # (ip, method, t_start, t_end) for every call, reads included
 
     # ---- building the lab -------------------------------------------------
     def add_encoder(self, ip, video, audio):
@@ -162,8 +165,9 @@ class DeviceSim:
         try:
             return self._serve(ip, method, params, write)
         finally:
-            if write:
-                with self.lock:
+            with self.lock:
+                self.call_log.append((ip, method, began, time.monotonic()))
+                if write:
                     self.write_log.append((ip, method, began, time.monotonic()))
 
     def _serve(self, ip, method, params, write):
@@ -195,10 +199,15 @@ class DeviceSim:
             return {"result": {}}
         d = self.decoders[ip]
         if method == "SelectVideoStream.Get":
-            return {"result": {"streamname": d.video, "selecttype": 0,
+            shown = d.video
+            if d._settling and time.monotonic() < d._settling[1]:
+                shown = d._settling[0]           # still reporting what it held before the switch
+            return {"result": {"streamname": shown, "selecttype": 0,
                                "multiaddr": {"ipaddr": VIDEO_ADDRESS, "portnumber": 1000}}}
         if method == "SelectVideoStream.Set":
             if not d.ignore_video:
+                if d.settle:
+                    d._settling = (d.video, time.monotonic() + d.settle)
                 d.video = params.get("streamname", d.video)
                 if d.follow:
                     d.audio = self.audio_of_video(d.video) or d.audio
